@@ -23,7 +23,15 @@ is host-testable.
 ### `IDotMatrixWLEDAdapter`
 
 Is the only current WLED boundary. It maps typed events to power, master
-brightness, static effect, and colour.
+brightness, static colour, and display-content ownership. It registers the
+`iDotMatrix Framebuffer` effect and renders the logical canvas only from that
+effect's WLED segment-service callback.
+
+### `IDotMatrixRenderer`
+
+Owns the logical RGB canvas and no WLED or BLE APIs. It allocates three bytes per
+pixel at runtime: 768 bytes for 16x16, 3072 bytes for 32x32, or 12288 bytes for
+64x64. It validates logical coordinates and is independently host-testable.
 
 ### `usermod_idotmatrix.cpp`
 
@@ -39,6 +47,12 @@ delayed BLE startup, and `/json/info` diagnostics.
 5. The protocol validates and decodes it.
 6. The adapter applies a typed event to WLED.
 7. A bounded reply is notified through FA03.
+
+For graffiti, the adapter updates the canvas during step 6 and selects the
+registered `iDotMatrix Framebuffer` effect. WLED calls that effect during its
+normal segment service, after establishing the current segment and its virtual
+XY dimensions. The effect copies the logical canvas through
+`SEGMENT.setPixelColorXY()`, so WLED retains physical mapping ownership.
 
 BLE callbacks do not call WLED state/rendering APIs and contain no `delay()`.
 
@@ -60,6 +74,8 @@ The retry handles app subscription/UI timing observed in WLED.
 | Solid colour/effect | WLED selected-segment state |
 | App brightness UI | App-local and unreadable by the device |
 | Emulated profile | Usermod configuration |
+| Graffiti pixels | `IDotMatrixRenderer` logical framebuffer |
+| Physical XY/serpentine mapping | WLED matrix configuration |
 
 Brightness persistence is intentionally not duplicated.
 
@@ -67,17 +83,22 @@ Brightness persistence is intentionally not duplicated.
 
 - The protocol decoder uses fixed response storage.
 - The callback queue is four 64-byte entries plus metadata.
+- The canvas is allocated once during Usermod setup and never from a BLE
+  callback.
 - Large transfers must use a separate streaming path.
 - Future media must stream to LittleFS using separate RX and PLAY files.
 - AnimatedGIF must be recreated for each promoted GIF.
 - PSRAM may optimize large profiles but cannot be required for 16x16.
 
-## Future renderer
+## Renderer extension
 
-Graffiti/media will add `IDotMatrixRenderer`, owning a resolution-independent
-16x16/32x32/64x64 logical framebuffer. The WLED adapter must translate logical
-coordinates through WLED's configured 2D mapping rather than duplicate physical
-wiring logic.
+Graffiti now uses `IDotMatrixRenderer` with a resolution-independent
+16x16/32x32/64x64 logical framebuffer. Future clock, text, and decoded media
+should draw into the same canvas and explicitly take display-content ownership.
+
+The optional 32/64-to-16 preview is not enabled. Native logical dimensions are
+sent directly to WLED, so the selected profile and configured WLED matrix should
+match.
 
 Bulk reassembly/streaming must be separate from the small-command queue before
 text or GIF support is enabled.

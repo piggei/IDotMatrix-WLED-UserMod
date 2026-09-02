@@ -66,6 +66,22 @@ bool IDotMatrixProtocol::processFA02(
     return true;
   }
 
+  // Confirmed DIY mode command: 05 00 04 01 STATE.
+  if (length == 5 && command == 0x04 && subcommand == 0x01) {
+    events_.onGraffitiMode(data[4] != 0x00);
+    makeCommandAck(command, subcommand, reply);
+    return true;
+  }
+
+  // Confirmed graffiti update:
+  // LENlo LENhi 05 01 UNKNOWN R G B X0 Y0 X1 Y1 ...
+  // The reference accepts complete coordinate pairs and ignores an unmatched
+  // trailing byte. Pixel updates intentionally have no FA03 acknowledgement.
+  if (length >= 10 && command == 0x05 && subcommand == 0x01) {
+    events_.onGraffitiPixels(data[5], data[6], data[7], data + 8, length - 8);
+    return true;
+  }
+
   return false;
 }
 

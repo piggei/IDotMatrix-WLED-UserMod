@@ -9,17 +9,41 @@ commands from the official app, and maps supported commands to WLED state.
 
 ## Stable release
 
-Version **0.6.0** is the first stable command-capable foundation. It has been
-compiled, uploaded, and tested with WLED 0.16.0.1 on a classic ESP32. The
+Version **0.6.1** is the current stable release. It has been compiled, uploaded,
+and tested with WLED 0.16.0.1 on a classic ESP32. The
 official app successfully:
 
 - discovers and connects to the emulated device;
 - initializes its displayed power switch correctly;
 - switches the WLED output on and off;
 - changes WLED master brightness;
-- selects full-screen RGB colours.
+- selects full-screen RGB colours;
+- enters DIY/Graffiti and selects the custom `iDotMatrix Framebuffer` effect;
+- draws received pixels on the physical 16x16 WLED matrix;
+- returns to WLED `Solid` when a full-screen RGB command is sent.
 
-The previous **0.5.0** snapshot remains the frozen BLE-transport-only baseline.
+Version **0.6.0** remains the frozen basic-command baseline, while **0.5.0**
+remains the BLE-transport-only baseline.
+
+### Graffiti framebuffer
+
+Version 0.6.1 adds:
+
+- a dynamically allocated RGB framebuffer for 16x16, 32x32, and 64x64;
+- confirmed DIY enter/exit command handling;
+- confirmed native-resolution graffiti pixel updates;
+- a first-class WLED 2D effect named `iDotMatrix Framebuffer`;
+- automatic effect selection when DIY starts or a valid pixel packet arrives;
+- rendering through the current WLED effect segment, preserving WLED's physical
+  matrix mapping;
+- canvas, effect-state, frame-count and accepted-pixel diagnostics under
+  `/json/info`.
+
+`0.6.1-dev.1` correctly received and decoded graffiti, but hardware testing
+showed that its `handleOverlayDraw()` path left WLED in `Solid` and did not make
+the canvas visible. `0.6.1-dev.2` moved rendering into a registered WLED effect
+and was validated on hardware before being promoted unchanged to 0.6.1. Both
+development steps are retained in `HISTORY.md`.
 
 ## Supported functionality
 
@@ -32,6 +56,8 @@ The previous **0.5.0** snapshot remains the frozen BLE-transport-only baseline.
 | Screen power | `05 00 07 01 STATE` | WLED power | Verified |
 | Brightness | `05 00 04 80 PERCENT` | WLED master brightness | Verified |
 | Full-screen RGB | `07 00 02 02 R G B` | Static effect and primary colour | Verified |
+| DIY mode | `05 00 04 01 STATE` | Graffiti session state | Verified on 16x16 |
+| Graffiti pixels | `LEN 00 05 01 ? R G B X Y...` | `iDotMatrix Framebuffer` 2D effect | Verified on 16x16 |
 
 See [`PROTOCOL.md`](PROTOCOL.md) for exact packets and ACKs.
 
@@ -55,7 +81,7 @@ Consequently:
 
 The standalone emulator turns its display on when the app connects and sends an
 unsolicited device-info notification after 1.2 seconds. One notification proved
-timing-sensitive inside WLED, so 0.6.0 sends the same confirmed packet at about
+timing-sensitive inside WLED, so the Usermod sends the same confirmed packet at about
 1.2 and 2.5 seconds. This reliably initializes the app's displayed switch in the
 tested setup. Both sends are scheduled outside the BLE callback.
 
@@ -66,16 +92,31 @@ and primary colour on active, selected segments. With the standard single matrix
 segment this fills the whole display. Custom multi-segment installations must
 select every segment that should follow the app.
 
-### Rendering and media are not implemented yet
+### Graffiti owns the selected segment through a WLED effect
 
-Version 0.6.0 does not implement graffiti/pixels, a logical framebuffer, text,
-clock rendering, GIF/media, countdown, stopwatch, alarms, or schedules. Profiles
-32x32 and 64x64 are advertised correctly, but resolution-dependent rendering
-will be added with the framebuffer milestone.
+Entering DIY selects the custom `iDotMatrix Framebuffer` effect on the first
+selected WLED segment. A valid pixel packet also reselects it if necessary.
+Selecting another WLED effect manually temporarily replaces the app canvas; the
+next graffiti packet returns ownership to iDotMatrix. A full-screen RGB command
+intentionally switches back to `Solid`.
+
+The current stable release targets the first selected segment. The normal one-segment
+matrix configuration is the supported layout for this milestone.
+
+### Rendering beyond graffiti and media are not implemented yet
+
+Version 0.6.1 implements graffiti and a logical framebuffer,
+but not text, clock rendering, GIF/media, countdown, stopwatch, alarms, or
+schedules.
+
+Logical and WLED matrix dimensions should match. This snapshot deliberately
+does not downscale a 32x32/64x64 logical profile onto a 16x16 physical matrix;
+the optional diagnostic preview from the standalone reference remains disabled.
 
 The FA02 queue currently stores writes up to 64 bytes and does not reassemble a
-logical command split across multiple BLE writes. This is sufficient for 0.6.0
-commands, but not for text or bulk/media.
+logical command split across multiple BLE writes. This is sufficient for the
+currently observed control and normal graffiti packets, but not for text or
+bulk/media.
 
 ## Protocol authority
 
@@ -177,7 +218,7 @@ The dependency graph must contain:
 
 ```text
 NimBLE-Arduino @ 1.4.3
-wled-usermod-idotmatrix @ 0.6.0
+wled-usermod-idotmatrix @ 0.6.1
 ```
 
 ## Configuration
@@ -199,7 +240,13 @@ The state appears under `/json/info` in `u.iDotMatrix`:
   "profile=0x1",
   "rx=4",
   "dropped=0",
-  "infoPushAttempts=2"
+  "infoPushAttempts=2",
+  "canvas=16x16",
+  "content=graffiti",
+  "pixelUpdates=21",
+  "framebufferFx=187 active",
+  "effectFrames=42",
+  "target=16x16"
 ]
 ```
 
@@ -207,13 +254,19 @@ The state appears under `/json/info` in `u.iDotMatrix`:
 - `dropped`: writes discarded because the four-entry queue was full;
 - `infoPushAttempts`: cumulative delayed device-info attempts, normally two per
   completed connection.
+- `framebufferFx`: dynamically assigned WLED effect ID and whether it owns the
+  selected segment;
+- `effectFrames`: number of framebuffer-effect calls since boot;
+- `target`: virtual WLED segment dimensions observed inside the effect callback.
 
 ## Architecture and documentation
 
 - `usermod_idotmatrix.cpp`: lifecycle, settings, guards, and diagnostics;
 - `IDotMatrixBLEServer.*`: BLE transport and bounded queue;
 - `IDotMatrixProtocol.*`: WLED-independent validation and decoding;
-- `IDotMatrixWLEDAdapter.*`: the only protocol-to-WLED boundary;
+- `IDotMatrixRenderer.*`: resolution-independent RGB framebuffer;
+- `IDotMatrixWLEDAdapter.*`: protocol-to-WLED boundary and custom framebuffer
+  effect;
 - `tests/`: host-side protocol and adapter tests.
 
 Further documents:

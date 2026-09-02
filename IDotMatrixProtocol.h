@@ -9,6 +9,14 @@ public:
   virtual void onScreenPower(bool on) = 0;
   virtual void onBrightnessPercent(uint8_t percent) = 0;
   virtual void onSolidColor(uint8_t red, uint8_t green, uint8_t blue) = 0;
+  virtual void onGraffitiMode(bool enter) = 0;
+  virtual void onGraffitiPixels(
+    uint8_t red,
+    uint8_t green,
+    uint8_t blue,
+    const uint8_t* coordinates,
+    size_t coordinateBytes
+  ) = 0;
 };
 
 struct IDotMatrixReply {

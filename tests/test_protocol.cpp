@@ -22,6 +22,27 @@ public:
     colorBlue = blue;
   }
 
+  void onGraffitiMode(bool enter) override {
+    graffitiModeEventReceived = true;
+    graffitiModeEntered = enter;
+  }
+
+  void onGraffitiPixels(
+    uint8_t red,
+    uint8_t green,
+    uint8_t blue,
+    const uint8_t* coordinates,
+    size_t coordinateBytes
+  ) override {
+    graffitiPixelsEventReceived = true;
+    graffitiRed = red;
+    graffitiGreen = green;
+    graffitiBlue = blue;
+    graffitiCoordinateBytes = coordinateBytes;
+    assert(coordinateBytes <= sizeof(graffitiCoordinates));
+    memcpy(graffitiCoordinates, coordinates, coordinateBytes);
+  }
+
   bool screenEventReceived = false;
   bool screenOn = false;
   bool brightnessEventReceived = false;
@@ -30,6 +51,14 @@ public:
   uint8_t colorRed = 0;
   uint8_t colorGreen = 0;
   uint8_t colorBlue = 0;
+  bool graffitiModeEventReceived = false;
+  bool graffitiModeEntered = false;
+  bool graffitiPixelsEventReceived = false;
+  uint8_t graffitiRed = 0;
+  uint8_t graffitiGreen = 0;
+  uint8_t graffitiBlue = 0;
+  uint8_t graffitiCoordinates[16]{};
+  size_t graffitiCoordinateBytes = 0;
 };
 
 static void expectReply(
@@ -100,4 +129,31 @@ int main() {
   assert(events.colorEventReceived);
   assert(events.colorRed == 0x12 && events.colorGreen == 0x34 && events.colorBlue == 0x56);
   expectReply(reply, solidColorAck, sizeof(solidColorAck));
+
+  const uint8_t enterDiy[] = {0x05, 0x00, 0x04, 0x01, 0x01};
+  const uint8_t diyAck[] = {0x05, 0x00, 0x04, 0x01, 0x01};
+  assert(protocol.processFA02(enterDiy, sizeof(enterDiy), reply));
+  assert(events.graffitiModeEventReceived && events.graffitiModeEntered);
+  expectReply(reply, diyAck, sizeof(diyAck));
+
+  events.graffitiModeEventReceived = false;
+  const uint8_t leaveDiy[] = {0x05, 0x00, 0x04, 0x01, 0x00};
+  assert(protocol.processFA02(leaveDiy, sizeof(leaveDiy), reply));
+  assert(events.graffitiModeEventReceived && !events.graffitiModeEntered);
+  expectReply(reply, diyAck, sizeof(diyAck));
+
+  // Byte 4 is intentionally opaque. Complete coordinate pairs start at byte 8;
+  // an unmatched trailing byte is retained in the event but ignored by the adapter.
+  const uint8_t graffiti[] = {
+    0x0D, 0x00, 0x05, 0x01, 0xA5, 0x12, 0x34, 0x56,
+    0x01, 0x02, 0x0F, 0x0E, 0xEE
+  };
+  assert(protocol.processFA02(graffiti, sizeof(graffiti), reply));
+  assert(!reply.available());
+  assert(events.graffitiPixelsEventReceived);
+  assert(events.graffitiRed == 0x12);
+  assert(events.graffitiGreen == 0x34);
+  assert(events.graffitiBlue == 0x56);
+  assert(events.graffitiCoordinateBytes == 5);
+  assert(memcmp(events.graffitiCoordinates, graffiti + 8, 5) == 0);
 }

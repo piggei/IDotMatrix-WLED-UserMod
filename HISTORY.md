@@ -4,6 +4,68 @@ This file records stable snapshots and significant experimental builds. Failures
 are retained because they define compatibility constraints that should not be
 rediscovered later.
 
+## 0.6.1 - 2026-09-02 - Stable graffiti framebuffer
+
+- Promoted the exact `0.6.1-dev.2` implementation to stable without runtime
+  changes after validation with the official app on a physical 16x16 WLED
+  matrix.
+- Confirmed that DIY/Graffiti selects `iDotMatrix Framebuffer`, clears the
+  display, and makes received pixel updates visible.
+- Confirmed that full-screen RGB releases the framebuffer and returns WLED to
+  `Solid`, while a later graffiti command reclaims the custom effect.
+- Confirmed that the previous power, brightness, and full-screen RGB functions
+  continue to work.
+- Recorded the validation diagnostics: `rx=41`, `dropped=0`,
+  `pixelUpdates=34`, `effectFrames=3186`, and `target=16x16` on a selected 16x16
+  segment with grouping 1 and spacing 0.
+- Retained the unsuccessful `0.6.1-dev.1` overlay approach and the successful
+  `0.6.1-dev.2` candidate below so the architectural decision remains explicit.
+
+## 0.6.1-dev.2 - 2026-09-02 - First-class WLED framebuffer effect
+
+- Replaced the unsuccessful `handleOverlayDraw()` output path with a registered
+  WLED 2D effect named `iDotMatrix Framebuffer`.
+- Hardware diagnostics from `0.6.1-dev.1` proved that BLE transport and graffiti
+  parsing were correct (`dropped=0`, increasing `pixelUpdates`), while WLED
+  remained in `Solid` and did not display the external overlay.
+- The effect now renders the logical RGB canvas from inside WLED's normal effect
+  service, where the current segment's virtual XY dimensions and physical matrix
+  mapping are valid.
+- Entering DIY automatically selects the framebuffer effect. A valid graffiti
+  pixel packet also selects it, making the implementation tolerant of app packet
+  ordering.
+- Full-screen RGB releases framebuffer ownership and returns the selected segment
+  to WLED's `Solid` effect.
+- Added effect registration, active-state, frame-count and target-dimension
+  diagnostics to `/json/info`.
+- Confirmed from the test device's JSON state that WLED exposes one selected
+  16x16 2D segment with grouping 1 and spacing 0.
+- Updated adapter tests for effect registration, activation, rendering, release,
+  and pixel-driven reclamation.
+- Hardware validation succeeded; this exact implementation was promoted to
+  stable 0.6.1.
+
+## 0.6.1-dev.1 - 2026-09-02 - Multisize framebuffer and graffiti candidate
+
+- Added the WLED-independent `IDotMatrixRenderer` with dynamically allocated
+  RGB canvases for 16x16, 32x32, and 64x64 profiles.
+- Added confirmed DIY enter/exit parsing for `05 00 04 01 STATE` and its standard
+  ACK.
+- Added confirmed graffiti parsing for `LEN 00 05 01 ? R G B X Y...`, preserving
+  the unknown byte and no-ACK behavior documented by the reference.
+- Initially routed logical pixels through WLED's `handleOverlayDraw()` and the
+  selected 2D segment. Hardware testing showed that packets reached the canvas,
+  but WLED remained in `Solid` and the drawing was not displayed; this path was
+  replaced in `0.6.1-dev.2`.
+- Matched reference behavior: a new DIY session clears the canvas, leaving the
+  editor preserves it, and full-screen RGB replaces it.
+- Added canvas, content-owner, and accepted-pixel diagnostics.
+- Added host tests for all canvas sizes, bounds, protocol extraction, lifecycle,
+  and exact RGB-to-XY transfer.
+- Kept the stable BLE queue and callback behavior unchanged. Fragmented logical
+  commands and writes above 64 bytes remain unsupported.
+- This is a hardware-test candidate; 0.6.0 remains the stable release.
+
 ## 0.6.0 - 2026-09-02 - Stable basic-command foundation
 
 - Promoted the exact `0.6.0-dev.7` code validated on physical hardware to the

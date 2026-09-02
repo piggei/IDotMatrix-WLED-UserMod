@@ -11,14 +11,21 @@ g++ -std=c++11 -Wall -Wextra -Werror -pedantic \
 /tmp/idotmatrix_protocol_test
 
 g++ -std=c++11 -Wall -Wextra -Werror -pedantic \
+  IDotMatrixRenderer.cpp tests/test_renderer.cpp \
+  -o /tmp/idotmatrix_renderer_test
+/tmp/idotmatrix_renderer_test
+
+g++ -std=c++11 -Wall -Wextra -Werror -pedantic \
   -Itests/wled_stub \
-  IDotMatrixWLEDAdapter.cpp tests/test_wled_adapter.cpp \
+  IDotMatrixRenderer.cpp IDotMatrixWLEDAdapter.cpp tests/test_wled_adapter.cpp \
   -o /tmp/idotmatrix_adapter_test
 /tmp/idotmatrix_adapter_test
 ```
 
 Coverage includes device info, connection ON, power ACKs, malformed/unknown
-packets, brightness/clamping/conversion/OFF behavior, and RGB/static-mode mapping.
+packets, brightness/clamping/conversion/OFF behavior, RGB/static-mode mapping,
+DIY commands, graffiti packet extraction, framebuffer sizes/bounds, persistent
+canvas semantics, and WLED custom-effect registration/activation/XY output.
 
 ## WLED build validation
 
@@ -28,7 +35,7 @@ pio run -e esp32dev_idotmatrix
 ```
 
 The dependency graph must include `NimBLE-Arduino @ 1.4.3` and
-`wled-usermod-idotmatrix @ 0.6.0`. It must not include `esp-nimble-cpp` or the
+`wled-usermod-idotmatrix @ 0.6.1`. It must not include `esp-nimble-cpp` or the
 registry package `ESP32 BLE Arduino`.
 
 ## Hardware smoke test
@@ -45,6 +52,25 @@ registry package `ESP32 BLE Arduino`.
 10. Confirm WLED shows static effect and the corresponding colour.
 11. Disconnect and confirm advertising restarts.
 
+### Additional 0.6.1 graffiti checks
+
+1. Confirm the WLED effect list contains `iDotMatrix Framebuffer`.
+2. Open DIY/Graffiti in the official app; WLED should select that effect and the
+   physical matrix should clear.
+3. Draw isolated pixels in every corner and confirm orientation.
+4. Draw red, green, blue, white, and black strokes.
+5. Draw quickly and verify `/json/info` keeps `dropped=0`.
+6. Leave DIY and confirm the last drawing remains visible.
+7. Send a full-screen RGB command and confirm WLED returns to `Solid`.
+8. Re-enter DIY and confirm the previous canvas is cleared.
+9. Confirm `canvas=16x16`, `framebufferFx=... active`, increasing
+   `pixelUpdates`/`effectFrames`, and `target=16x16`.
+
+The 0.6.1 promotion was validated on hardware through the complete effect
+transition `Solid` -> `iDotMatrix Framebuffer` -> `Solid`. The captured status
+reported `rx=41`, `dropped=0`, `pixelUpdates=34`, `effectFrames=3186`, and
+`target=16x16` after returning to full-screen colour.
+
 ## Expected limitations
 
 - WLED brightness changes do not move the app slider.
@@ -55,9 +81,9 @@ registry package `ESP32 BLE Arduino`.
 
 ## Stable-release regression checks
 
-- both host tests pass with warnings as errors;
+- all three host tests pass with warnings as errors;
 - a clean pinned WLED build succeeds;
-- app discovery, connection, power, brightness, and RGB pass;
+- app discovery, connection, power, brightness, RGB, and graffiti pass;
 - repeated connections do not increase `dropped`;
 - Wi-Fi remains reachable during BLE use;
 - README, protocol, history, and TODO report the same version/features.

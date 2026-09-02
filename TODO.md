@@ -1,8 +1,8 @@
 # Roadmap and TODO
 
-Version 0.6.0 is the frozen stable foundation: official-app discovery and
-connection, initial screen-state initialization, screen on/off, brightness, and
-full-screen RGB are working on the physical ESP32/WLED target. New features
+Version 0.6.1 is the stable foundation: official-app discovery and connection,
+initial screen-state initialization, screen on/off, brightness, full-screen
+RGB, and graffiti are working on the physical ESP32/WLED target. New features
 must be added in small, compilable, testable increments without regressing this
 baseline.
 
@@ -44,10 +44,20 @@ baseline.
 
 ## Next milestone: graffiti and framebuffer
 
-- [ ] Add a resolution-independent framebuffer for 16x16, 32x32, and 64x64.
-- [ ] Decode graffiti/pixel commands into the framebuffer.
-- [ ] Map logical `(x,y)` through WLED's 2D segment/matrix mapping.
-- [ ] Define ownership between iDotMatrix realtime content and WLED effects.
+- [x] Add a resolution-independent framebuffer for 16x16, 32x32, and 64x64.
+- [x] Decode graffiti/pixel commands into the framebuffer.
+- [x] Map logical `(x,y)` through WLED's 2D segment/matrix mapping.
+- [x] Validate `0.6.1-dev.1` transport/parser diagnostics on hardware; packets
+  reached the framebuffer but its overlay output was not displayed.
+- [x] Validate `0.6.1-dev.2` and the first-class `iDotMatrix Framebuffer` effect
+  against official-app graffiti on physical hardware; promoted unchanged to
+  stable 0.6.1.
+- [ ] Confirm corner orientation and RGB/black drawing on a 16x16 WLED matrix.
+- [ ] Capture actual graffiti packet sizes and confirm the 64-byte queue does not
+  truncate normal app strokes.
+- [x] Define ownership between iDotMatrix realtime content and WLED effects:
+  graffiti selects `iDotMatrix Framebuffer`, full-screen RGB selects `Solid`,
+  and a later valid pixel packet reclaims the framebuffer effect.
 - [ ] Add tests using captured packets where practical.
 
 ## Target architecture
@@ -55,7 +65,7 @@ baseline.
 - [x] Keep `IDotMatrixBLEServer` limited to transport, connections,
   notifications, and bulk byte delivery.
 - [x] Add `IDotMatrixProtocol` with typed commands/events and no WLED dependency.
-- [ ] Add `IDotMatrixRenderer` for framebuffer drawing and local display modes.
+- [x] Add `IDotMatrixRenderer` for framebuffer drawing and graffiti mode.
 - [x] Add `IDotMatrixWLEDAdapter` for the implemented power, brightness, colour,
   and WLED notification paths; extend it only as later milestones require.
 - [x] Use bounded queues between callbacks and protocol processing.
@@ -107,8 +117,8 @@ baseline.
 ## Documentation discipline
 
 - [x] Publish consolidated `README.md`, `PROTOCOL.md`, `ARCHITECTURE.md`, and
-  `TESTING.md` with the 0.6.0 stable snapshot.
-- [ ] Update `HISTORY.md` for every released snapshot.
+  `TESTING.md`, updated through the 0.6.1 stable snapshot.
+- [x] Update `HISTORY.md` through every released snapshot up to 0.6.1.
 - [ ] Change protocol documentation only with captures or controlled experiments.
 - [ ] Distinguish confirmed protocol facts, WLED behavior, and architecture choices.
 - [ ] Never remove confirmed findings without recording the reason and evidence.

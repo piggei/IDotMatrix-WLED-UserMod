@@ -1,6 +1,7 @@
 #include "wled.h"
 #include "IDotMatrixBLEServer.h"
 #include "IDotMatrixProtocol.h"
+#include "IDotMatrixRenderer.h"
 #include "IDotMatrixWLEDAdapter.h"
 
 namespace {
@@ -15,7 +16,8 @@ private:
   bool enabled_ = true;
   uint8_t screenType_ = 0x01;
   String deviceName_ = "IDM-858931";
-  IDotMatrixWLEDAdapter adapter_;
+  IDotMatrixRenderer renderer_;
+  IDotMatrixWLEDAdapter adapter_{renderer_};
   IDotMatrixProtocol protocol_{adapter_};
   IDotMatrixBLEServer ble_{protocol_};
   bool blockedByRmt_ = false;
@@ -49,6 +51,19 @@ public:
     // WLED defaults noWifiSleep to true on ESP32, which makes the Wi-Fi task
     // intentionally abort after Bluetooth has been enabled.
     noWifiSleep = false;
+
+    if (!renderer_.begin(screenType_)) {
+      DEBUG_PRINTLN(F("[iDotMatrix] logical framebuffer allocation failed"));
+    }
+
+    if (adapter_.registerFramebufferEffect()) {
+      DEBUG_PRINTF_P(
+        PSTR("[iDotMatrix] framebuffer effect registered as id %u\n"),
+        adapter_.framebufferEffectId()
+      );
+    } else {
+      DEBUG_PRINTLN(F("[iDotMatrix] framebuffer effect registration failed"));
+    }
 
     // Let WLED complete its first Wi-Fi initialization pass before starting
     // the lower-memory NimBLE host.
@@ -94,6 +109,20 @@ public:
     info.add(String(F("rx=")) + String(ble_.receivedPackets()));
     info.add(String(F("dropped=")) + String(ble_.droppedPackets()));
     info.add(String(F("infoPushAttempts=")) + String(ble_.deviceInfoPushAttempts()));
+    info.add(renderer_.isReady()
+      ? String(F("canvas=")) + String(renderer_.width()) + 'x' + String(renderer_.height())
+      : String(F("canvas=allocation failed")));
+    info.add(renderer_.isVisible() ? F("content=graffiti") : F("content=WLED"));
+    info.add(String(F("pixelUpdates=")) + String(renderer_.acceptedPixelUpdates()));
+    info.add(adapter_.isFramebufferEffectRegistered()
+      ? String(F("framebufferFx=")) + String(adapter_.framebufferEffectId()) +
+        (adapter_.isFramebufferEffectActive() ? F(" active") : F(" inactive"))
+      : String(F("framebufferFx=registration failed")));
+    info.add(String(F("effectFrames=")) + String(adapter_.renderedFrames()));
+    if (adapter_.renderedFrames() > 0) {
+      info.add(String(F("target=")) + String(adapter_.targetWidth()) + 'x' +
+        String(adapter_.targetHeight()));
+    }
   }
 
   void addToConfig(JsonObject& root) override {

@@ -1,6 +1,7 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes only WLED iDotMatrix Usermod 0.6.0. The standalone
+This document describes the implemented subset in stable WLED iDotMatrix
+Usermod 0.6.1. The standalone
 `IDotMatrix-ESP32-Emulator` repository remains the primary, complete protocol
 reference.
 
@@ -29,7 +30,7 @@ Manufacturer data: `54 52 00 70 SCREEN_TYPE`.
 
 ## Framing and ACK
 
-FA02 commands start with a 16-bit little-endian total length. Version 0.6.0
+FA02 commands start with a 16-bit little-endian total length. Version 0.6.1
 requires one complete command per queued BLE write and validates declared length
 against received length.
 
@@ -65,7 +66,7 @@ Command:
 
 Response: `05 00 01 80 01`
 
-Version 0.6.0 acknowledges but does not apply the time fields.
+Version 0.6.1 acknowledges but does not apply the time fields.
 
 ## Screen power
 
@@ -108,11 +109,48 @@ ACK: `05 00 02 02 01`
 **WLED mapping:** select static effect, set primary RGB, clear the white channel,
 and use WLED's global colour path. Active, selected segments are affected.
 
-## Unsupported in 0.6.0
+## Graffiti / DIY mode
+
+**Confirmed protocol:** `05 00 04 01 STATE`
+
+- `00`: leave the DIY editing session;
+- non-zero: enter the DIY editing session.
+
+ACK: `05 00 04 01 01`
+
+Entering a new session clears the logical canvas. Matching the reference
+implementation, leaving the editing session does not erase or hide the last
+image; another display-content command must replace it.
+
+## Graffiti pixel updates
+
+**Confirmed protocol:**
+
+```text
+LENlo LENhi 05 01 UNKNOWN R G B X0 Y0 X1 Y1 ...
+```
+
+- byte 4 remains semantically unknown and is ignored;
+- RGB is at offsets 5..7;
+- coordinate pairs begin at offset 8;
+- coordinates are native to the selected 16x16, 32x32, or 64x64 profile;
+- invalid coordinates are ignored;
+- an unmatched trailing coordinate byte is ignored, matching the reference;
+- the reference sends no FA03 acknowledgement for these pixel packets.
+
+**WLED mapping:** accepted pixels update a three-byte-per-pixel logical RGB
+framebuffer. The Usermod selects its registered `iDotMatrix Framebuffer` 2D
+effect, which copies the canvas while WLED services the current segment and has
+valid virtual XY state. A valid pixel packet also selects the effect. No
+physical serpentine mapping is duplicated in this module.
+
+**Limitation:** one complete logical packet must still fit a queued BLE write of
+at most 64 bytes. Fragment reassembly is a separate pending milestone.
+
+## Unsupported in 0.6.1
 
 - fragmented commands or writes longer than 64 bytes;
 - AE bulk/media processing;
-- graffiti/pixels and framebuffer;
 - text and 8x16/16x32 bitmap glyphs;
 - clock/date rendering;
 - GIF/cloud media;
