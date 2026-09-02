@@ -1,5 +1,7 @@
 #include "wled.h"
 #include "IDotMatrixBLEServer.h"
+#include "IDotMatrixProtocol.h"
+#include "IDotMatrixWLEDAdapter.h"
 
 namespace {
 const char USERMOD_NAME[] PROGMEM = "iDotMatrix";
@@ -13,7 +15,9 @@ private:
   bool enabled_ = true;
   uint8_t screenType_ = 0x01;
   String deviceName_ = "IDM-858931";
-  IDotMatrixBLEServer ble_;
+  IDotMatrixWLEDAdapter adapter_;
+  IDotMatrixProtocol protocol_{adapter_};
+  IDotMatrixBLEServer ble_{protocol_};
   bool blockedByRmt_ = false;
   bool startPending_ = false;
   uint32_t startAt_ = 0;
@@ -89,6 +93,7 @@ public:
     info.add(String(F("profile=0x")) + String(ble_.screenType(), HEX));
     info.add(String(F("rx=")) + String(ble_.receivedPackets()));
     info.add(String(F("dropped=")) + String(ble_.droppedPackets()));
+    info.add(String(F("infoPushAttempts=")) + String(ble_.deviceInfoPushAttempts()));
   }
 
   void addToConfig(JsonObject& root) override {

@@ -4,6 +4,121 @@ This file records stable snapshots and significant experimental builds. Failures
 are retained because they define compatibility constraints that should not be
 rediscovered later.
 
+## 0.6.0 - 2026-09-02 - Stable basic-command foundation
+
+- Promoted the exact `0.6.0-dev.7` code validated on physical hardware to the
+  first stable command-capable release; no runtime behavior was changed during
+  consolidation.
+- Confirmed discovery and connection by the official iDotMatrix app alongside
+  working WLED Wi-Fi control.
+- Confirmed initial app power-state initialization through screen-ON-on-connect
+  plus two delayed device-information notifications.
+- Confirmed screen on/off, brightness, and full-screen RGB control from the app
+  to WLED.
+- Kept the protocol parser, BLE transport, and WLED adapter as separate layers
+  and retained bounded, non-blocking callback-to-loop processing.
+- Added consolidated protocol, architecture, testing, installation, limitation,
+  and roadmap documentation.
+- Documented the current brightness limitation explicitly: the app controls
+  WLED, but changes made directly in WLED cannot update the app slider because
+  no verified device-to-app brightness-state message is known.
+- Documented the current transport limit: fragmented logical FA02 commands are
+  not reassembled yet and the command queue uses fixed 64-byte slots.
+- Graffiti/framebuffer, clock, text, GIF/media, timers, alarms, and schedules
+  remain outside this release.
+
+## 0.6.0-dev.7 - 2026-09-02 - Full-screen RGB
+
+- Added confirmed `07 00 02 02 R G B` decoding and standard ACK.
+- Mapped full-screen colour to WLED's static effect and primary RGB colour using
+  its normal global-colour update path.
+- Preserved WLED's active/selected segment semantics; the standard one-segment
+  matrix is filled completely.
+- Added protocol and adapter tests for exact RGB channel transfer and static-mode
+  selection.
+- Documented brightness directionality explicitly: app slider changes update
+  WLED, but WLED changes cannot update the app without a confirmed reverse-state
+  message.
+- Confirmed the two-push connection initialization from `.6` works correctly in
+  the official app.
+
+## 0.6.0-dev.6 - 2026-09-02 - Robust app-state initialization
+
+- Found that the single 1.2-second device-info push was timing-sensitive: it
+  initialized the app switch in `.4`, but not reliably in the later build.
+- Added a second identical, non-blocking device-info push at about 2.5 seconds
+  after connection.
+- Added cumulative `infoPushAttempts` diagnostics to WLED JSON info.
+- Added host-side adapter tests for ON/OFF, remembered brightness, zero, and
+  percentage conversion behavior.
+- Kept WLED as the only brightness persistence authority; no Usermod brightness
+  preference was introduced.
+- Did not invent an unconfirmed device-to-app brightness-state packet.
+
+## 0.6.0-dev.5 - 2026-09-02 - WLED master brightness
+
+- Added the confirmed `05 00 04 80 PERCENT` brightness command.
+- Clamped protocol input to `0..100` exactly like the standalone reference.
+- Added rounded linear conversion from iDotMatrix percent to WLED `0..255`
+  master brightness.
+- Kept logical screen power separate so brightness changes while OFF do not
+  inadvertently power the output on.
+- Preserved the last non-zero WLED brightness across zero-brightness and power
+  cycles.
+- Added standard ACK generation and host tests for normal and over-range values.
+
+## 0.6.0-dev.4 - 2026-09-02 - Delayed device-info push
+
+- Added the second connection action present in the standalone reference:
+  schedule an unsolicited device-information notification 1.2 seconds after
+  connection.
+- Kept scheduling, response construction, and notification delivery outside the
+  NimBLE callback.
+- Cancelled a pending push when the app disconnects.
+- Exposed device-information response construction through the protocol boundary
+  so both app requests and connection-time pushes use identical bytes.
+- Added host coverage for direct device-information response construction.
+- Confirmed in the initial experiment that the delayed push can initialize the
+  official app's displayed power switch; later testing showed the timing was not
+  yet reliable.
+
+## 0.6.0-dev.3 - 2026-09-02 - Screen ON at connection
+
+- Matched the standalone reference behavior by treating every new app
+  connection as a screen-ON event.
+- Deferred the actual WLED power change from the NimBLE callback to the normal
+  Usermod loop.
+- Reverted the `.2` device-information state-byte hypothesis after the official
+  app test showed that it did not initialize the switch.
+- Restored the confirmed device-information response's final byte to fixed
+  `00`.
+- Added a host-side test for the connection-to-screen-ON event.
+
+## 0.6.0-dev.2 - 2026-09-02 - Initial power-state experiment
+
+- Experimented with making the device-information response read the current power state through the
+  WLED adapter instead of always ending in `00`.
+- Experimentally encoded the state in the response's final byte (`00` off,
+  `01` on) to test whether the official app uses it to initialize its switch.
+- The official-app test showed no effect; the experiment was reverted in `.3`.
+- Temporarily extended the host test to cover a live ON state in the
+  device-information response.
+
+## 0.6.0-dev.1 - 2026-09-02 - Protocol boundary and screen power
+
+- Added `IDotMatrixProtocol`, independent from BLE and WLED APIs.
+- Moved device-information and time-sync response construction out of the BLE
+  transport.
+- Added strict little-endian packet-length validation for FA02 commands.
+- Added host-side protocol tests for device information, power events, standard
+  acknowledgements, invalid lengths, and unknown commands.
+- Added `IDotMatrixWLEDAdapter` as the only protocol-to-WLED state boundary.
+- Implemented the confirmed `05 00 07 01 STATE` screen command and standard
+  `05 00 07 01 01` acknowledgement.
+- Mapped screen state idempotently to WLED power using WLED's own
+  `toggleOnOff()` and `stateUpdated()` paths, preserving the previous brightness.
+- No brightness, colour, framebuffer, or graffiti commands are claimed yet.
+
 ## 0.5.0 - 2026-09-02 - First stable BLE foundation
 
 - Froze the first experimentally verified baseline.

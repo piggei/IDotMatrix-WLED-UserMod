@@ -23,6 +23,7 @@ bool IDotMatrixBLEServer::begin(const char* deviceName, uint8_t screenType) {
     screenType = 0x01;
   }
   screenType_ = screenType;
+  protocol_.setScreenType(screenType_);
 
   NimBLEDevice::init(deviceName_);
   server_ = NimBLEDevice::createServer();
@@ -67,6 +68,29 @@ bool IDotMatrixBLEServer::begin(const char* deviceName, uint8_t screenType) {
 void IDotMatrixBLEServer::loop() {
   if (!initialized_) return;
 
+  // Apply WLED state changes from its main loop, never from the NimBLE task.
+  if (connectionEventPending_) {
+    connectionEventPending_ = false;
+    if (connected_) {
+      protocol_.onConnected();
+      deviceInfoPushesRemaining_ = 2;
+      deviceInfoPushAt_ = millis() + 1200;
+    }
+  }
+
+  if (deviceInfoPushesRemaining_ > 0 && int32_t(millis() - deviceInfoPushAt_) >= 0) {
+    if (connected_) {
+      IDotMatrixReply reply;
+      protocol_.makeDeviceInfoReply(reply);
+      sendFA03(reply.data, reply.length);
+      ++deviceInfoPushAttempts_;
+      --deviceInfoPushesRemaining_;
+      if (deviceInfoPushesRemaining_ > 0) deviceInfoPushAt_ = millis() + 1300;
+    } else {
+      deviceInfoPushesRemaining_ = 0;
+    }
+  }
+
   if (restartAdvertising_ && int32_t(millis() - restartAdvertisingAt_) >= 0) {
     restartAdvertising_ = false;
     startAdvertising();
@@ -95,6 +119,7 @@ void IDotMatrixBLEServer::WriteCallbacks::onWrite(NimBLECharacteristic* characte
 void IDotMatrixBLEServer::onConnect() {
   connected_ = true;
   advertising_ = false;
+  connectionEventPending_ = true;
 }
 
 void IDotMatrixBLEServer::onDisconnect() {
@@ -145,27 +170,11 @@ bool IDotMatrixBLEServer::dequeue(RxPacket& packet) {
 
 void IDotMatrixBLEServer::processPacket(const RxPacket& packet) {
   if (packet.channel == RxChannel::FA02) {
-    processFA02(packet.data, packet.length);
+    IDotMatrixReply reply;
+    protocol_.processFA02(packet.data, packet.length, reply);
+    if (reply.available()) sendFA03(reply.data, reply.length);
   } else {
     processAE01(packet.data, packet.length);
-  }
-}
-
-void IDotMatrixBLEServer::processFA02(const uint8_t* data, size_t length) {
-  if (length < 4) return;
-
-  const uint8_t command = data[2];
-  const uint8_t subcommand = data[3];
-
-  // Device information request.
-  if (length == 4 && command == 0x01 && subcommand == 0x80) {
-    sendDeviceInfo();
-    return;
-  }
-
-  // App time synchronization. Time storage/rendering will be added later.
-  if (length == 11 && command == 0x01 && subcommand == 0x80) {
-    sendCommandStatus(command, subcommand, 0x01);
   }
 }
 
@@ -179,22 +188,6 @@ void IDotMatrixBLEServer::sendFA03(const uint8_t* data, size_t length) {
   if (!connected_ || fa03_ == nullptr || data == nullptr || length == 0) return;
   fa03_->setValue(data, length);
   fa03_->notify();
-}
-
-void IDotMatrixBLEServer::sendCommandStatus(
-  uint8_t command,
-  uint8_t subcommand,
-  uint8_t status
-) {
-  const uint8_t response[] = {0x05, 0x00, command, subcommand, status};
-  sendFA03(response, sizeof(response));
-}
-
-void IDotMatrixBLEServer::sendDeviceInfo() {
-  const uint8_t response[] = {
-    0x09, 0x00, 0x01, 0x80, 0x04, 0x0E, 0x01, screenType_, 0x00
-  };
-  sendFA03(response, sizeof(response));
 }
 
 void IDotMatrixBLEServer::startAdvertising() {

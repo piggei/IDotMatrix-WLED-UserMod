@@ -3,8 +3,12 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
+#include "IDotMatrixProtocol.h"
+
 class IDotMatrixBLEServer {
 public:
+  explicit IDotMatrixBLEServer(IDotMatrixProtocol& protocol) : protocol_(protocol) {}
+
   bool begin(const char* deviceName, uint8_t screenType);
   void loop();
 
@@ -14,6 +18,7 @@ public:
   uint8_t screenType() const { return screenType_; }
   uint32_t receivedPackets() const { return receivedPackets_; }
   uint32_t droppedPackets() const { return droppedPackets_; }
+  uint32_t deviceInfoPushAttempts() const { return deviceInfoPushAttempts_; }
 
 private:
   static constexpr size_t RX_PACKET_MAX = 64;
@@ -54,15 +59,18 @@ private:
   void enqueueFromCallback(NimBLECharacteristic* characteristic);
   bool dequeue(RxPacket& packet);
   void processPacket(const RxPacket& packet);
-  void processFA02(const uint8_t* data, size_t length);
   void processAE01(const uint8_t* data, size_t length);
   void sendFA03(const uint8_t* data, size_t length);
-  void sendCommandStatus(uint8_t command, uint8_t subcommand, uint8_t status);
-  void sendDeviceInfo();
   void startAdvertising();
+
+  IDotMatrixProtocol& protocol_;
   bool initialized_ = false;
   bool advertising_ = false;
   volatile bool connected_ = false;
+  volatile bool connectionEventPending_ = false;
+  uint8_t deviceInfoPushesRemaining_ = 0;
+  uint32_t deviceInfoPushAt_ = 0;
+  uint32_t deviceInfoPushAttempts_ = 0;
   volatile bool restartAdvertising_ = false;
   uint32_t restartAdvertisingAt_ = 0;
   uint8_t screenType_ = 0x01;

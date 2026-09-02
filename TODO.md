@@ -1,7 +1,10 @@
 # Roadmap and TODO
 
-The 0.5.0 BLE foundation is frozen. New features should be added in small,
-compilable, testable increments without regressing Wi-Fi/BLE stability.
+Version 0.6.0 is the frozen stable foundation: official-app discovery and
+connection, initial screen-state initialization, screen on/off, brightness, and
+full-screen RGB are working on the physical ESP32/WLED target. New features
+must be added in small, compilable, testable increments without regressing this
+baseline.
 
 ## Baseline validation
 
@@ -16,14 +19,31 @@ compilable, testable increments without regressing Wi-Fi/BLE stability.
 
 ## MVP: basic iDotMatrix control
 
-- [ ] Introduce `IDotMatrixProtocol` for framing, validation, command decoding,
+- [x] Introduce `IDotMatrixProtocol` for framing, validation, command decoding,
   and responses, independent from BLE and WLED.
 - [ ] Reassemble logical FA02 packets split across multiple BLE writes; do not
   assume every command fits the current 64-byte queue slot.
-- [ ] Introduce `IDotMatrixWLEDAdapter` for state changes and rendering ownership.
-- [ ] Map screen on/off to WLED power without losing previous brightness.
-- [ ] Map iDotMatrix brightness to WLED master brightness.
-- [ ] Map RGB/full-screen commands to WLED solid colour.
+- [x] Introduce `IDotMatrixWLEDAdapter` for state changes and rendering ownership.
+- [x] Map screen on/off to WLED power without losing previous brightness.
+- [x] Test whether the final device-info byte synchronizes the app's initial
+  screen switch: it does not, so the experiment was reverted.
+- [x] Confirm that matching the reference's screen-ON-on-connect behavior keeps
+  the app and WLED interaction consistent.
+- [x] Confirm that the two delayed device-info pushes initialize the official
+  app's displayed power switch reliably across repeated connections.
+- [x] Map iDotMatrix brightness to WLED master brightness.
+- [x] Validate normal brightness control from the official app on the physical
+  WLED matrix and in the WLED web UI.
+- [ ] Complete edge-case validation for brightness values `0`, `1`, `100`, and
+  over-range clamping.
+- [x] Map RGB/full-screen commands to WLED solid colour.
+- [x] Validate full-screen RGB control from the official app on the physical
+  matrix.
+- [ ] Complete the explicit red, green, blue, white, and black regression set
+  and verify every result in the WLED UI.
+
+## Next milestone: graffiti and framebuffer
+
 - [ ] Add a resolution-independent framebuffer for 16x16, 32x32, and 64x64.
 - [ ] Decode graffiti/pixel commands into the framebuffer.
 - [ ] Map logical `(x,y)` through WLED's 2D segment/matrix mapping.
@@ -32,13 +52,13 @@ compilable, testable increments without regressing Wi-Fi/BLE stability.
 
 ## Target architecture
 
-- [ ] Keep `IDotMatrixBLEServer` limited to transport, connections,
+- [x] Keep `IDotMatrixBLEServer` limited to transport, connections,
   notifications, and bulk byte delivery.
-- [ ] Add `IDotMatrixProtocol` with typed commands/events and no WLED dependency.
+- [x] Add `IDotMatrixProtocol` with typed commands/events and no WLED dependency.
 - [ ] Add `IDotMatrixRenderer` for framebuffer drawing and local display modes.
-- [ ] Add `IDotMatrixWLEDAdapter` for power, brightness, segments, time,
-  filesystem, and WLED notifications.
-- [ ] Use bounded queues between callbacks and protocol processing.
+- [x] Add `IDotMatrixWLEDAdapter` for the implemented power, brightness, colour,
+  and WLED notification paths; extend it only as later milestones require.
+- [x] Use bounded queues between callbacks and protocol processing.
 - [ ] Define memory budgets for classic ESP32, PSRAM targets, and each resolution.
 
 ## Clock and text
@@ -86,6 +106,8 @@ compilable, testable increments without regressing Wi-Fi/BLE stability.
 
 ## Documentation discipline
 
+- [x] Publish consolidated `README.md`, `PROTOCOL.md`, `ARCHITECTURE.md`, and
+  `TESTING.md` with the 0.6.0 stable snapshot.
 - [ ] Update `HISTORY.md` for every released snapshot.
 - [ ] Change protocol documentation only with captures or controlled experiments.
 - [ ] Distinguish confirmed protocol facts, WLED behavior, and architecture choices.
