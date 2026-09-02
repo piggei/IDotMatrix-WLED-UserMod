@@ -1,0 +1,24 @@
+{
+  "name": "wled-usermod-idotmatrix",
+  "version": "0.5.0",
+  "description": "iDotMatrix BLE server/emulator usermod for WLED",
+  "keywords": [
+    "wled",
+    "idotmatrix",
+    "ble",
+    "esp32"
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "h2zero/NimBLE-Arduino": "1.4.3"
+  },
+  "build": {
+    "libArchive": false,
+    "srcDir": ".",
+    "srcFilter": [
+      "+<*.cpp>"
+    ]
+  }
+}

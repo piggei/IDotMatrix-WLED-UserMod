@@ -1,0 +1,25 @@
+[env:esp32dev_idotmatrix]
+extends = env:esp32dev
+
+; WLED's Tasmota framework omits the complete BLE GATT server.
+; Use the official Espressif Arduino 2.0.17 / IDF 4.4.7 platform.
+platform = espressif32@~6.13.0
+platform_packages =
+
+; A complete BLE server does not fit in either OTA slot on a 4 MB ESP32.
+; This module-owned layout provides one 3.08 MB app slot and 960 KB LittleFS.
+; Uploads must be performed over USB/serial; WLED OTA is intentionally disabled.
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32dev.build_flags}
+  -D WLED_DISABLE_OTA
+
+; Required explicitly: dependencies declared by a symlinked custom Usermod are
+; not reliably propagated by WLED's build script.
+lib_deps =
+  ${env:esp32dev.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+
+custom_usermods =
+  symlink://../wled-usermod-idotmatrix
