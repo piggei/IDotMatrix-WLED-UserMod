@@ -9,7 +9,7 @@ commands from the official app, and maps supported commands to WLED state.
 
 ## Stable release
 
-Version **0.6.1** is the current stable release. It has been compiled, uploaded,
+Version **0.6.2** is the current stable release. It has been compiled, uploaded,
 and tested with WLED 0.16.0.1 on a classic ESP32. The
 official app successfully:
 
@@ -18,12 +18,45 @@ official app successfully:
 - switches the WLED output on and off;
 - changes WLED master brightness;
 - selects full-screen RGB colours;
-- enters DIY/Graffiti and selects the custom `iDotMatrix Framebuffer` effect;
+- enters DIY/Graffiti and selects the custom iDotMatrix display effect;
 - draws received pixels on the physical 16x16 WLED matrix;
+- renders the app-selected clock through the same `iDotMatrix Display` effect;
 - returns to WLED `Solid` when a full-screen RGB command is sent.
 
-Version **0.6.0** remains the frozen basic-command baseline, while **0.5.0**
-remains the BLE-transport-only baseline.
+Version **0.6.1** remains the frozen graffiti baseline, **0.6.0** the basic-
+command baseline, and **0.5.0** the BLE-transport-only baseline.
+
+### Development snapshot 0.6.3-dev.3
+
+This repository currently contains the first TEXT rendering candidate. Stable
+0.6.2 remains the hardware-verified display fallback, while the corrected FA02
+bulk transport in 0.6.3-dev.2 has also been verified with the official app.
+
+The candidate adds:
+
+- FA02 reassembly for an observed 4096-byte payload chunk plus the 16-byte bulk
+  header, matching the BUILD 80 source;
+- bounded assembly for type `0x03` TEXT payloads up to 4096 bytes;
+- CRC32 validation and confirmed continue/complete ACKs;
+- confirmed marker `0x02` 8x16 and marker `0x05` 16x32 bitmap parsing;
+- fixed and dynamic colours, background, movement, and visual text effects;
+- TEXT ownership inside the existing `iDotMatrix Display` effect;
+- fragment, parsing, glyph, and transfer diagnostics.
+
+The validated 0.6.2 foundation already includes:
+
+- confirmed clock-command decoding and ACK;
+- one WLED effect named `iDotMatrix Display`, shared by graffiti and clock and
+  ready to host future text, media, and timer rendering;
+- all eight 16x16 clock styles reconstructed in the standalone reference;
+- app-selected colour, 12/24-hour mode, and the optional 30-second `HH:MM` /
+  5-second `DD/MM` cycle;
+- WLED `localTime`/NTP as the sole runtime clock source;
+- a dropdown for the advertised 16x16, 32x32, or 64x64 logical profile;
+- strict dimension checking by default and optional nearest-neighbour rescale
+  from the logical canvas to the active WLED 2D segment;
+- automatic `IDM-` device-name normalization and a restart diagnostic derived
+  from the name/profile actually active in the BLE stack.
 
 ### Graffiti framebuffer
 
@@ -57,7 +90,9 @@ development steps are retained in `HISTORY.md`.
 | Brightness | `05 00 04 80 PERCENT` | WLED master brightness | Verified |
 | Full-screen RGB | `07 00 02 02 R G B` | Static effect and primary colour | Verified |
 | DIY mode | `05 00 04 01 STATE` | Graffiti session state | Verified on 16x16 |
-| Graffiti pixels | `LEN 00 05 01 ? R G B X Y...` | `iDotMatrix Framebuffer` 2D effect | Verified on 16x16 |
+| Graffiti pixels | `LEN 00 05 01 ? R G B X Y...` | `iDotMatrix Display` 2D effect | Verified on 16x16 |
+| Clock | `08 00 06 01 FLAGS R G B` | `iDotMatrix Display` 2D effect using WLED time | Verified on 16x16 |
+| Text | FA02 bulk type `0x03`, markers `0x02`/`0x05` | App bitmaps rendered by `iDotMatrix Display` | Rendering candidate |
 
 See [`PROTOCOL.md`](PROTOCOL.md) for exact packets and ACKs.
 
@@ -94,7 +129,7 @@ select every segment that should follow the app.
 
 ### Graffiti owns the selected segment through a WLED effect
 
-Entering DIY selects the custom `iDotMatrix Framebuffer` effect on the first
+Entering DIY selects the custom `iDotMatrix Display` effect on the first
 selected WLED segment. A valid pixel packet also reselects it if necessary.
 Selecting another WLED effect manually temporarily replaces the app canvas; the
 next graffiti packet returns ownership to iDotMatrix. A full-screen RGB command
@@ -103,20 +138,42 @@ intentionally switches back to `Solid`.
 The current stable release targets the first selected segment. The normal one-segment
 matrix configuration is the supported layout for this milestone.
 
-### Rendering beyond graffiti and media are not implemented yet
+### Clock time comes from WLED
 
-Version 0.6.1 implements graffiti and a logical framebuffer,
-but not text, clock rendering, GIF/media, countdown, stopwatch, alarms, or
-schedules.
+The app time-synchronization packet is acknowledged for compatibility, but its
+fields are not installed into a second Usermod clock. The clock effect reads
+WLED's local time, so WLED NTP, timezone, and daylight-saving configuration
+remain authoritative. Until WLED has valid time, the displayed value may be the
+epoch/default time.
 
-Logical and WLED matrix dimensions should match. This snapshot deliberately
-does not downscale a 32x32/64x64 logical profile onto a 16x16 physical matrix;
-the optional diagnostic preview from the standalone reference remains disabled.
+### Logical profile, physical matrix, and rescale
 
-The FA02 queue currently stores writes up to 64 bytes and does not reassemble a
-logical command split across multiple BLE writes. This is sufficient for the
-currently observed control and normal graffiti packets, but not for text or
-bulk/media.
+`screenType` controls what WLED advertises to the app and therefore the logical
+canvas size. The physical target is the first selected WLED 2D segment and its
+dimensions are detected inside the effect callback.
+
+By default `rescale` is disabled. A logical/physical size mismatch is then
+blocked and rendered black instead of silently clipping data. Enabling
+`rescale` applies nearest-neighbour sampling, allowing for example a logical
+64x64 app profile to preview on a physical 16x16 matrix. This is necessarily
+lossy and does not change the BLE profile seen by the app.
+
+### Text rendering candidate and unsupported media
+
+The development snapshot receives, validates, parses, and renders bounded TEXT
+bulk transfers. GIF/media, countdown, stopwatch, alarms, and schedules are not
+implemented yet.
+
+The first hardware check should confirm glyph orientation and each visual mode.
+The wave-based dynamic colour modes use a lightweight integer wave in this
+candidate; their timing and appearance may differ slightly from BUILD 80's
+FastLED `sin8()` implementation while preserving the same protocol fields.
+
+Complete short FA02 commands retain their four-entry 64-byte queue. Fragmented
+or large FA02 traffic has a separate 4112-byte assembler and TEXT has a
+4096-byte payload limit; GIF/RAW bulk handling will use its own storage policy
+in later milestones. AE01 remains present for GATT compatibility but BUILD 80
+does not dispatch bulk content from it.
 
 ## Protocol authority
 
@@ -218,17 +275,27 @@ The dependency graph must contain:
 
 ```text
 NimBLE-Arduino @ 1.4.3
-wled-usermod-idotmatrix @ 0.6.1
+wled-usermod-idotmatrix @ 0.6.3-dev.3
 ```
 
 ## Configuration
 
 - `enabled`: enable the BLE emulator;
-- `screenType`: `1` = 16x16, `3` = 32x32, `4` = 64x64;
-- `deviceName`: BLE name, default `IDM-858931`.
+- `screenType`: dropdown selecting `1` = 16x16, `3` = 32x32, or `4` = 64x64;
+- `rescale`: optionally scale the logical canvas to the WLED 2D segment;
+- `deviceName`: BLE name or suffix, normalized to `IDM-...`, default
+  `IDM-858931`.
 
-Changing name or profile requires a reboot. The Usermod forces
+Changing name or profile requires a reboot and is reported in `/json/info`;
+`rescale` applies immediately. The Usermod forces
 `noWifiSleep = false` for Bluetooth/Wi-Fi coexistence.
+
+The configured advertising name can be verified with `name` and `nameActive`.
+If both contain the new value but the official app still shows an older name,
+the old label is cached by the app or operating system for the same BLE device
+identity. This was observed with both diagnostics reporting `IDM-666` while the
+app retained an earlier label. It is not a failed Usermod save; clear the app's
+Bluetooth/cache state or test discovery with a generic BLE scanner.
 
 ## Runtime diagnostics
 
@@ -238,35 +305,63 @@ The state appears under `/json/info` in `u.iDotMatrix`:
 "iDotMatrix": [
   "BLE connected",
   "profile=0x1",
+  "name=IDM-PAPERO",
+  "nameActive=IDM-PAPERO",
   "rx=4",
   "dropped=0",
+  "bulkChunks=1",
+  "bulkComplete=1",
+  "bulkCrcErrors=0",
+  "bulkRejected=0",
+  "fragments=4",
+  "reassemblyErrors=0",
+  "unknown=0",
+  "textBytes=34",
+  "textParsed=1",
+  "textParseErrors=0",
   "infoPushAttempts=2",
   "canvas=16x16",
-  "content=graffiti",
+  "content=text",
   "pixelUpdates=21",
-  "framebufferFx=187 active",
+  "displayFx=187 active",
+  "textGlyphs=1 8x16",
   "effectFrames=42",
-  "target=16x16"
+  "target=16x16",
+  "mapping=native"
 ]
 ```
 
 - `rx`: BLE writes received;
-- `dropped`: writes discarded because the four-entry queue was full;
+- `dropped`: writes discarded because the FA02 queue or assembler was busy;
+- `bulkChunks`: accepted type-`0x03` TEXT chunks;
+- `bulkComplete`: completed TEXT transfers with valid CRC32;
+- `bulkCrcErrors` and `bulkRejected`: transfer failure diagnostics;
+- `fragments`, `reassembly`, and `reassemblyErrors`: FA02 logical-packet
+  reconstruction status;
+- `unknown` and `lastUnknown`: count and first bytes of unhandled FA02 packets;
+- `textBytes`: size retained after the latest valid TEXT transfer;
+- `textParsed` and `textParseErrors`: payloads accepted or rejected by the
+  glyph-record parser;
 - `infoPushAttempts`: cumulative delayed device-info attempts, normally two per
   completed connection.
-- `framebufferFx`: dynamically assigned WLED effect ID and whether it owns the
-  selected segment;
-- `effectFrames`: number of framebuffer-effect calls since boot;
+- `displayFx`: the single dynamically assigned WLED effect ID shared by
+  graffiti, clock, and future app-rendered content, plus its active state;
+- `textGlyphs`: count and dimensions of the active app-rasterized glyphs;
+- `effectFrames`: combined number of iDotMatrix effect calls since boot;
 - `target`: virtual WLED segment dimensions observed inside the effect callback.
+- `mapping`: `native`, `rescale`, or `mismatch blocked`.
 
 ## Architecture and documentation
 
 - `usermod_idotmatrix.cpp`: lifecycle, settings, guards, and diagnostics;
 - `IDotMatrixBLEServer.*`: BLE transport and bounded queue;
+- `IDotMatrixBulkTransfer.*`: bounded TEXT bulk assembly and CRC32;
+- `IDotMatrixFA02Assembler.*`: bounded logical-packet reconstruction;
 - `IDotMatrixProtocol.*`: WLED-independent validation and decoding;
-- `IDotMatrixRenderer.*`: resolution-independent RGB framebuffer;
-- `IDotMatrixWLEDAdapter.*`: protocol-to-WLED boundary and custom framebuffer
-  effect;
+- `IDotMatrixRenderer.*`: resolution-independent RGB framebuffer and clock
+  artwork;
+- `IDotMatrixWLEDAdapter.*`: protocol-to-WLED boundary, time source, rescale,
+  and the unified custom display effect;
 - `tests/`: host-side protocol and adapter tests.
 
 Further documents:

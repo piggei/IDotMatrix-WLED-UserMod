@@ -1,8 +1,8 @@
 # Roadmap and TODO
 
-Version 0.6.1 is the stable foundation: official-app discovery and connection,
+Version 0.6.2 is the stable foundation: official-app discovery and connection,
 initial screen-state initialization, screen on/off, brightness, full-screen
-RGB, and graffiti are working on the physical ESP32/WLED target. New features
+RGB, graffiti, and clock are working on the physical ESP32/WLED target. New features
 must be added in small, compilable, testable increments without regressing this
 baseline.
 
@@ -21,7 +21,7 @@ baseline.
 
 - [x] Introduce `IDotMatrixProtocol` for framing, validation, command decoding,
   and responses, independent from BLE and WLED.
-- [ ] Reassemble logical FA02 packets split across multiple BLE writes; do not
+- [x] Reassemble logical FA02 packets split across multiple BLE writes; do not
   assume every command fits the current 64-byte queue slot.
 - [x] Introduce `IDotMatrixWLEDAdapter` for state changes and rendering ownership.
 - [x] Map screen on/off to WLED power without losing previous brightness.
@@ -56,8 +56,9 @@ baseline.
 - [ ] Capture actual graffiti packet sizes and confirm the 64-byte queue does not
   truncate normal app strokes.
 - [x] Define ownership between iDotMatrix realtime content and WLED effects:
-  graffiti selects `iDotMatrix Framebuffer`, full-screen RGB selects `Solid`,
-  and a later valid pixel packet reclaims the framebuffer effect.
+  app-rendered content selects the single `iDotMatrix Display` effect,
+  full-screen RGB selects `Solid`, and a later valid content packet reclaims
+  the display effect.
 - [ ] Add tests using captured packets where practical.
 
 ## Target architecture
@@ -69,24 +70,42 @@ baseline.
 - [x] Add `IDotMatrixWLEDAdapter` for the implemented power, brightness, colour,
   and WLED notification paths; extend it only as later milestones require.
 - [x] Use bounded queues between callbacks and protocol processing.
+- [x] Expose the logical 16x16/32x32/64x64 BLE profile as a dropdown.
+- [x] Detect physical dimensions from the WLED 2D segment and block silent
+  clipping when strict native-size mode is selected.
+- [x] Add opt-in nearest-neighbour rescale for diagnostic previews and unusual
+  WLED matrix dimensions.
+- [x] Consolidate graffiti and clock into one `iDotMatrix Display` effect so
+  future text, media, and timers do not each consume another WLED effect.
+- [ ] Validate profile changes, mismatch blocking, and rescale on hardware.
 - [ ] Define memory budgets for classic ESP32, PSRAM targets, and each resolution.
 
 ## Clock and text
 
-- [ ] Reuse WLED time/NTP instead of creating a second time service.
-- [ ] Implement clock effects and optional 30-second `HH:MM` / 5-second `DD/MM`
+- [x] Reuse WLED time/NTP instead of creating a second time service.
+- [x] Implement clock effects and optional 30-second `HH:MM` / 5-second `DD/MM`
   alternation.
-- [ ] Implement date display and clock colour/effect parameters.
-- [ ] Decode app-rasterized text glyphs without device-side font assumptions.
-- [ ] Support marker `0x02` (8x16 bitmap glyphs).
-- [ ] Support marker `0x05` (16x32 bitmap glyphs).
-- [ ] Preserve SimSun/SimHei behavior: the app supplies ready bitmaps.
+- [x] Implement date display and clock colour/effect parameters.
+- [ ] Validate all eight styles, 12/24-hour mode, colours, and date cycling on
+  physical hardware with the official app.
+- [ ] Decide whether an app time packet should optionally seed WLED when NTP is
+  unavailable; current behavior deliberately ACKs it without creating a second
+  time authority.
+- [x] Decode app-rasterized text glyphs without device-side font assumptions.
+- [x] Support marker `0x02` (8x16 bitmap glyphs).
+- [x] Support marker `0x05` (16x32 bitmap glyphs).
+- [x] Preserve SimSun/SimHei behavior: the app supplies ready bitmaps.
+- [ ] Validate glyph orientation, every app text motion/effect, background mode,
+  dynamic colours, and marker `0x05` on physical hardware.
 
 ## GIF and media
 
-- [ ] Add a separate bulk path; do not pass 4096-byte chunks through the command
+- [x] Add a separate bulk path; do not pass 4096-byte chunks through the command
   queue.
-- [ ] Preserve ACK semantics: `0x01` continue and `0x03` complete.
+- [x] Preserve ACK semantics: `0x01` continue and `0x03` terminated/complete.
+- [x] Validate the corrected FA02 type-`0x03` TEXT bulk path and CRC diagnostics
+  with the official app: three transfers completed with zero CRC/reassembly
+  errors and the observed two-glyph payload contained 54 bytes.
 - [ ] Stream uploads to LittleFS instead of buffering complete media in RAM.
 - [ ] Use separate RX and PLAY files.
 - [ ] Open and play media outside BLE callbacks.
@@ -117,8 +136,8 @@ baseline.
 ## Documentation discipline
 
 - [x] Publish consolidated `README.md`, `PROTOCOL.md`, `ARCHITECTURE.md`, and
-  `TESTING.md`, updated through the 0.6.1 stable snapshot.
-- [x] Update `HISTORY.md` through every released snapshot up to 0.6.1.
+  `TESTING.md`, updated through the 0.6.3-dev.3 candidate.
+- [x] Update `HISTORY.md` through every released snapshot up to 0.6.3-dev.3.
 - [ ] Change protocol documentation only with captures or controlled experiments.
 - [ ] Distinguish confirmed protocol facts, WLED behavior, and architecture choices.
 - [ ] Never remove confirmed findings without recording the reason and evidence.

@@ -75,6 +75,11 @@ void IDotMatrixBLEServer::loop() {
       protocol_.onConnected();
       deviceInfoPushesRemaining_ = 2;
       deviceInfoPushAt_ = millis() + 1200;
+    } else {
+      bulkTransfer_.reset();
+      portENTER_CRITICAL(&queueMux_);
+      faAssembler_.reset();
+      portEXIT_CRITICAL(&queueMux_);
     }
   }
 
@@ -100,6 +105,19 @@ void IDotMatrixBLEServer::loop() {
   while (dequeue(packet)) {
     processPacket(packet);
   }
+
+  // The standalone reference assembles FA02 fragments until the length in the
+  // first two bytes is complete, then dispatches the logical packet. The app
+  // waits for an ACK before starting its next bulk packet, so one hand-off slot
+  // is sufficient and avoids a multi-slot 4 KiB queue.
+  if (faAssembler_.complete()) {
+    IDotMatrixReply reply;
+    processFA02Complete(faAssembler_.data(), faAssembler_.expected(), reply);
+    portENTER_CRITICAL(&queueMux_);
+    faAssembler_.reset();
+    portEXIT_CRITICAL(&queueMux_);
+    if (reply.available()) sendFA03(reply.data, reply.length);
+  }
 }
 
 void IDotMatrixBLEServer::ServerCallbacks::onConnect(NimBLEServer* server) {
@@ -124,6 +142,7 @@ void IDotMatrixBLEServer::onConnect() {
 
 void IDotMatrixBLEServer::onDisconnect() {
   connected_ = false;
+  connectionEventPending_ = true;
   restartAdvertising_ = true;
   restartAdvertisingAt_ = millis() + 300;
 }
@@ -134,11 +153,70 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
   const std::string value = characteristic->getValue();
   if (value.empty()) return;
 
-  const size_t copyLength = value.length() > RX_PACKET_MAX ? RX_PACKET_MAX : value.length();
   const RxChannel channel = characteristic == ae01_ ? RxChannel::AE01 : RxChannel::FA02;
 
   portENTER_CRITICAL(&queueMux_);
   ++receivedPackets_;
+  if (channel == RxChannel::FA02) {
+    if (faAssembler_.complete()) {
+      ++droppedPackets_;
+      portEXIT_CRITICAL(&queueMux_);
+      return;
+    }
+
+    if (faAssembler_.expected() == 0) {
+      if (value.length() < 2) {
+        ++reassemblyErrors_;
+        ++droppedPackets_;
+        portEXIT_CRITICAL(&queueMux_);
+        return;
+      }
+      const uint16_t declaredLength = uint16_t(uint8_t(value[0])) |
+        (uint16_t(uint8_t(value[1])) << 8);
+      if (declaredLength == 0 || declaredLength > BULK_PACKET_MAX) {
+        ++reassemblyErrors_;
+        ++droppedPackets_;
+        portEXIT_CRITICAL(&queueMux_);
+        return;
+      }
+
+      // Preserve the original four-entry queue for complete short commands so
+      // rapid power/brightness/colour writes do not contend for the bulk slot.
+      if (declaredLength <= RX_PACKET_MAX && value.length() >= declaredLength) {
+        if (rxCount_ >= RX_QUEUE_SIZE) {
+          ++droppedPackets_;
+          portEXIT_CRITICAL(&queueMux_);
+          return;
+        }
+        RxPacket& packet = rxQueue_[rxHead_];
+        packet.channel = RxChannel::FA02;
+        packet.length = static_cast<uint8_t>(declaredLength);
+        memcpy(packet.data, value.data(), declaredLength);
+        rxHead_ = (rxHead_ + 1) % RX_QUEUE_SIZE;
+        ++rxCount_;
+        portEXIT_CRITICAL(&queueMux_);
+        return;
+      }
+
+    } else {
+      ++fragmentedWrites_;
+    }
+
+    const IDotMatrixFA02Assembler::Result result = faAssembler_.append(
+      reinterpret_cast<const uint8_t*>(value.data()),
+      value.length()
+    );
+    if (result == IDotMatrixFA02Assembler::Result::Invalid ||
+        result == IDotMatrixFA02Assembler::Result::Busy) {
+      ++reassemblyErrors_;
+      ++droppedPackets_;
+    }
+    portEXIT_CRITICAL(&queueMux_);
+    return;
+  }
+
+  // AE01 is retained because it belongs to the emulated GATT database, but the
+  // BUILD 80 reference only logs it. No implemented content path uses it.
   if (rxCount_ >= RX_QUEUE_SIZE) {
     ++droppedPackets_;
     portEXIT_CRITICAL(&queueMux_);
@@ -147,8 +225,10 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
 
   RxPacket& packet = rxQueue_[rxHead_];
   packet.channel = channel;
-  packet.length = static_cast<uint8_t>(copyLength);
-  memcpy(packet.data, value.data(), copyLength);
+  packet.length = static_cast<uint8_t>(value.length() > RX_PACKET_MAX
+    ? RX_PACKET_MAX
+    : value.length());
+  memcpy(packet.data, value.data(), packet.length);
   rxHead_ = (rxHead_ + 1) % RX_QUEUE_SIZE;
   ++rxCount_;
   portEXIT_CRITICAL(&queueMux_);
@@ -171,17 +251,74 @@ bool IDotMatrixBLEServer::dequeue(RxPacket& packet) {
 void IDotMatrixBLEServer::processPacket(const RxPacket& packet) {
   if (packet.channel == RxChannel::FA02) {
     IDotMatrixReply reply;
-    protocol_.processFA02(packet.data, packet.length, reply);
+    processFA02Complete(packet.data, packet.length, reply);
     if (reply.available()) sendFA03(reply.data, reply.length);
   } else {
-    processAE01(packet.data, packet.length);
+    IDotMatrixReply reply;
+    processAE01(packet.data, packet.length, reply);
+    if (reply.available()) sendFA03(reply.data, reply.length);
   }
 }
 
-void IDotMatrixBLEServer::processAE01(const uint8_t* data, size_t length) {
-  // Reserved for the later streaming/media phase.
+void IDotMatrixBLEServer::processFA02Complete(
+  const uint8_t* data,
+  size_t length,
+  IDotMatrixReply& reply
+) {
+  reply.length = 0;
+  IDotMatrixBulkResult bulkResult;
+  if (bulkTransfer_.processPacket(data, length, bulkResult)) {
+    if (bulkResult.completed && bulkResult.crcValid) {
+      if (protocol_.processTextPayload(
+            bulkTransfer_.textPayload(),
+            bulkTransfer_.textPayloadLength())) {
+        ++textParsed_;
+      } else {
+        ++textParseErrors_;
+      }
+    }
+    if (bulkResult.replyAvailable) {
+      const uint8_t response[] = {
+        0x05, 0x00, bulkResult.type, 0x00, bulkResult.status
+      };
+      memcpy(reply.data, response, sizeof(response));
+      reply.length = sizeof(response);
+    }
+    return;
+  }
+
+  if (!protocol_.processFA02(data, length, reply)) {
+    recordUnknown(data, length);
+    // BUILD 80 acknowledges unknown short commands. Preserve that tolerant
+    // behavior so an app revision can continue, while deliberately not
+    // acknowledging unsupported GIF/RAW bulk packets as if they were handled.
+    if (length >= 4 && length <= RX_PACKET_MAX) {
+      const uint8_t response[] = {0x05, 0x00, data[2], data[3], 0x01};
+      memcpy(reply.data, response, sizeof(response));
+      reply.length = sizeof(response);
+    }
+  }
+}
+
+void IDotMatrixBLEServer::processAE01(
+  const uint8_t* data,
+  size_t length,
+  IDotMatrixReply& reply
+) {
+  reply.length = 0;
   (void)data;
   (void)length;
+}
+
+void IDotMatrixBLEServer::recordUnknown(const uint8_t* data, size_t length) {
+  ++unknownPackets_;
+  lastUnknownLength_ = length > 0xFFFFu ? 0xFFFFu : static_cast<uint16_t>(length);
+  lastUnknownStored_ = static_cast<uint8_t>(
+    length < UNKNOWN_BYTES ? length : UNKNOWN_BYTES
+  );
+  if (data != nullptr && lastUnknownStored_ > 0) {
+    memcpy(lastUnknownData_, data, lastUnknownStored_);
+  }
 }
 
 void IDotMatrixBLEServer::sendFA03(const uint8_t* data, size_t length) {

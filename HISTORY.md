@@ -4,6 +4,120 @@ This file records stable snapshots and significant experimental builds. Failures
 are retained because they define compatibility constraints that should not be
 rediscovered later.
 
+## 0.6.3-dev.3 - 2026-09-03 - App-rasterized text rendering
+
+- Hardware validation of 0.6.3-dev.2 completed three TEXT transfers with valid
+  CRC (`bulkChunks=3`, `bulkComplete=3`, `textBytes=54`, no drops/errors).
+- Confirmed that 54 bytes represent a 14-byte TEXT header plus two 20-byte
+  marker-`0x02` glyph records.
+- Added WLED-independent TEXT payload parsing for confirmed marker `0x02`
+  (8x16, 16 bitmap bytes) and marker `0x05` (16x32, 64 bitmap bytes).
+- Kept the unconfirmed `0x03`/`0x06` aliases rejected rather than presenting
+  them as verified protocol.
+- Added dynamically allocated glyph bitmap storage in `IDotMatrixRenderer`,
+  allocated only from normal loop context and reused when capacity permits.
+- Ported fixed/background colours, horizontal and vertical movement, blink,
+  pulse, sparkle, laser, and dynamic colour modes from the BUILD 80 renderer.
+- Used a lightweight integer wave for the two wave-based dynamic colour modes;
+  their appearance is a candidate for hardware comparison with FastLED
+  `sin8()` before promotion.
+- Preserved LSB-leftmost bitmap orientation and app-side SimSun/SimHei
+  rasterization: no device font dependency was introduced.
+- TEXT now takes internal ownership of the existing `iDotMatrix Display`
+  effect; no additional WLED effect is registered.
+- Added `content=text`, `textParsed`, `textParseErrors`, and glyph-size
+  diagnostics plus protocol, renderer, and adapter regression coverage.
+
+## 0.6.3-dev.2 - 2026-09-03 - Correct FA02 bulk reassembly
+
+- Hardware testing of 0.6.3-dev.1 produced an app error, `rx=5`, and zero bulk
+  chunks. Re-reading BUILD 80 identified the cause: bulk packets are assembled
+  and dispatched from FA02; AE01 is only logged by the reference callback.
+- Replaced the incorrect AE01 bulk hand-off with reference-matching FA02 logical
+  packet reassembly based on the little-endian length in bytes 0..1.
+- Preserved the four-entry queue for already-complete short FA02 commands while
+  routing fragmented or large logical packets through one bounded 4112-byte
+  assembler.
+- Kept dispatch, CRC32 work, and FA03 acknowledgements in WLED loop context.
+  The callback performs only validation and bounded copies.
+- Added unknown-command bytes, fragment counts, current reassembly progress,
+  and reassembly-error diagnostics.
+- Matched BUILD 80's tolerant ACK for unknown short commands, without falsely
+  acknowledging unsupported GIF/RAW bulk content.
+- Added a fifth host test for complete, fragmented, oversized, malformed, and
+  busy FA02 assembler behavior.
+- Corrected all documentation that had assigned the bulk data path to AE01.
+
+## 0.6.3-dev.1 - 2026-09-03 - TEXT bulk transport probe
+
+- Added a dedicated AE01 receive slot sized for an observed 4096-byte payload
+  chunk plus its 16-byte bulk header. The existing four-entry 64-byte FA02
+  command queue remains unchanged.
+- Added a WLED-independent bulk assembler for confirmed type `0x03` TEXT
+  transfers, limited to 4096 payload bytes.
+- Added repeated-header validation, bounded assembly, streaming CRC32, and the
+  confirmed FA03 acknowledgements: `0x01` while incomplete and `0x03` when the
+  transaction terminates.
+- Increased the AE01 characteristic capacity explicitly; bulk writes are copied
+  in the BLE callback but parsed and acknowledged from the normal Usermod loop.
+- Added bulk chunk, completion, CRC-error, rejection, oversized-write, and
+  completed-text-size diagnostics.
+- Added a fourth host test covering a two-chunk transfer, correct payload
+  reconstruction, valid/bad CRC, size rejection, and malformed packet length.
+- This candidate deliberately does not render text yet. Its purpose is to
+  verify actual WLED/NimBLE transfer behavior before glyph parsing is connected
+  to `iDotMatrix Display`.
+- Hardware result: the app stopped before bulk processing (`bulkChunks=0`). The
+  incorrect AE01 routing assumption was fixed in 0.6.3-dev.2.
+
+## 0.6.2 - 2026-09-03 - Stable clock and unified display
+
+- Promoted the 0.6.2 development line after physical-hardware validation of the
+  clock and the shared `iDotMatrix Display` effect.
+- Confirmed native 16x16 clock output and transitions between clock and
+  graffiti without allocating separate WLED effects.
+- Includes the configurable 16x16/32x32/64x64 logical profile, strict size
+  matching, and optional nearest-neighbour rescale introduced in 0.6.2-dev.1.
+- Retains WLED as the clock/timezone authority and retains `Solid` for the
+  full-screen RGB command.
+
+## 0.6.2-dev.2 - 2026-09-03 - Unified display effect
+
+- Replaced the separate `iDotMatrix Framebuffer` and `iDotMatrix Clock` effects
+  with one `iDotMatrix Display` effect. Graffiti and clock now switch the
+  renderer's internal content without consuming another WLED effect entry.
+- Kept full-screen RGB mapped intentionally to WLED `Solid`; the next graffiti
+  or clock command reclaims `iDotMatrix Display`.
+- Confirmed the initial clock implementation on physical hardware with the
+  official app and native 16x16 mapping.
+- Fixed the sticky `BLE restart required` diagnostic. It is now derived from
+  the configured name/profile versus the values active in the BLE stack.
+- Observed `name=IDM-666` and `nameActive=IDM-666` while the app continued to
+  show an older name. This demonstrates app/OS-side discovery caching rather
+  than a Usermod configuration or advertising-name failure.
+- Extended the adapter test to prove that clock and graffiti share exactly one
+  dynamically registered effect. This remains a candidate pending hardware
+  regression of the unified effect.
+
+## 0.6.2-dev.1 - 2026-09-03 - Clock and configurable logical mapping
+
+- Added confirmed `08 00 06 01 FLAGS R G B` clock-command decoding and ACK.
+- Added the dedicated `iDotMatrix Clock` WLED effect and explicit display-mode
+  ownership transitions between clock, graffiti, and `Solid`.
+- Ported the eight reconstructed 16x16 clock styles from the standalone
+  reference into the WLED-independent renderer.
+- Added app-selected colour, 12/24-hour conversion, and the optional 30-second
+  time / 5-second date cycle.
+- Reused WLED `localTime`, NTP, timezone, and DST instead of creating another
+  clock. The app time packet remains acknowledged but is not applied.
+- Added a 16x16/32x32/64x64 profile dropdown, strict dimension matching by
+  default, and optional nearest-neighbour logical-to-segment rescale.
+- Added `IDM-` name normalization, a 15-byte advertising-safe maximum, and
+  diagnostics when a name/profile change requires reboot.
+- Extended protocol, renderer, and adapter host tests. The clock was subsequently
+  validated on hardware and the effect model was simplified in 0.6.2-dev.2;
+  stable 0.6.1 remains the fallback release.
+
 ## 0.6.1 - 2026-09-02 - Stable graffiti framebuffer
 
 - Promoted the exact `0.6.1-dev.2` implementation to stable without runtime

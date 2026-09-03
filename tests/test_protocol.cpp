@@ -43,6 +43,31 @@ public:
     memcpy(graffitiCoordinates, coordinates, coordinateBytes);
   }
 
+  void onClock(const IDotMatrixClockSettings& settings) override {
+    clockEventReceived = true;
+    clockSettings = settings;
+  }
+
+  bool onTextBegin(const IDotMatrixTextSettings& settings) override {
+    textBeginReceived = true;
+    textSettings = settings;
+    return true;
+  }
+
+  void onTextGlyph(
+    uint8_t index,
+    const uint8_t* bitmap,
+    size_t bitmapLength
+  ) override {
+    ++textGlyphsReceived;
+    textLastGlyph = index;
+    textLastBitmapLength = bitmapLength;
+    assert(bitmapLength <= sizeof(textLastBitmap));
+    memcpy(textLastBitmap, bitmap, bitmapLength);
+  }
+
+  void onTextComplete() override { textCompleteReceived = true; }
+
   bool screenEventReceived = false;
   bool screenOn = false;
   bool brightnessEventReceived = false;
@@ -59,6 +84,15 @@ public:
   uint8_t graffitiBlue = 0;
   uint8_t graffitiCoordinates[16]{};
   size_t graffitiCoordinateBytes = 0;
+  bool clockEventReceived = false;
+  IDotMatrixClockSettings clockSettings{};
+  bool textBeginReceived = false;
+  bool textCompleteReceived = false;
+  uint8_t textGlyphsReceived = 0;
+  uint8_t textLastGlyph = 0;
+  size_t textLastBitmapLength = 0;
+  uint8_t textLastBitmap[64]{};
+  IDotMatrixTextSettings textSettings{};
 };
 
 static void expectReply(
@@ -130,6 +164,20 @@ int main() {
   assert(events.colorRed == 0x12 && events.colorGreen == 0x34 && events.colorBlue == 0x56);
   expectReply(reply, solidColorAck, sizeof(solidColorAck));
 
+  const uint8_t clockCommand[] = {
+    0x08, 0x00, 0x06, 0x01, 0xC5, 0x12, 0x34, 0x56
+  };
+  const uint8_t clockAck[] = {0x05, 0x00, 0x06, 0x01, 0x01};
+  assert(protocol.processFA02(clockCommand, sizeof(clockCommand), reply));
+  assert(events.clockEventReceived);
+  assert(events.clockSettings.style == 5);
+  assert(events.clockSettings.use24Hour);
+  assert(events.clockSettings.showDate);
+  assert(events.clockSettings.red == 0x12);
+  assert(events.clockSettings.green == 0x34);
+  assert(events.clockSettings.blue == 0x56);
+  expectReply(reply, clockAck, sizeof(clockAck));
+
   const uint8_t enterDiy[] = {0x05, 0x00, 0x04, 0x01, 0x01};
   const uint8_t diyAck[] = {0x05, 0x00, 0x04, 0x01, 0x01};
   assert(protocol.processFA02(enterDiy, sizeof(enterDiy), reply));
@@ -156,4 +204,52 @@ int main() {
   assert(events.graffitiBlue == 0x56);
   assert(events.graffitiCoordinateBytes == 5);
   assert(memcmp(events.graffitiCoordinates, graffiti + 8, 5) == 0);
+
+  uint8_t textPayload[54]{};
+  textPayload[0] = 2;
+  textPayload[4] = 1;
+  textPayload[5] = 50;
+  textPayload[6] = 1;
+  textPayload[7] = 0x12;
+  textPayload[8] = 0x34;
+  textPayload[9] = 0x56;
+  textPayload[10] = 1;
+  textPayload[11] = 1;
+  textPayload[12] = 2;
+  textPayload[13] = 3;
+  textPayload[14] = 0x02;
+  textPayload[18] = 0x01;
+  textPayload[34] = 0x02;
+  textPayload[38] = 0x80;
+  assert(protocol.processTextPayload(textPayload, sizeof(textPayload)));
+  assert(events.textBeginReceived && events.textCompleteReceived);
+  assert(events.textSettings.glyphCount == 2);
+  assert(events.textSettings.glyphWidth == 8);
+  assert(events.textSettings.glyphHeight == 16);
+  assert(events.textSettings.glyphBytes == 16);
+  assert(events.textSettings.motionEffect == 1);
+  assert(events.textSettings.speed == 50);
+  assert(events.textSettings.red == 0x12);
+  assert(events.textSettings.backgroundEnabled);
+  assert(events.textGlyphsReceived == 2 && events.textLastGlyph == 1);
+  assert(events.textLastBitmapLength == 16 && events.textLastBitmap[0] == 0x80);
+
+  textPayload[14] = 0x03;
+  assert(!protocol.processTextPayload(textPayload, sizeof(textPayload)));
+
+  uint8_t largeGlyphPayload[82]{};
+  largeGlyphPayload[0] = 1;
+  largeGlyphPayload[6] = 1;
+  largeGlyphPayload[7] = 0xAA;
+  largeGlyphPayload[14] = 0x05;
+  largeGlyphPayload[18] = 0x01;
+  largeGlyphPayload[81] = 0x80;
+  assert(protocol.processTextPayload(largeGlyphPayload, sizeof(largeGlyphPayload)));
+  assert(events.textSettings.glyphCount == 1);
+  assert(events.textSettings.glyphWidth == 16);
+  assert(events.textSettings.glyphHeight == 32);
+  assert(events.textSettings.glyphBytes == 64);
+  assert(events.textLastBitmapLength == 64);
+  assert(events.textLastBitmap[0] == 0x01);
+  assert(events.textLastBitmap[63] == 0x80);
 }

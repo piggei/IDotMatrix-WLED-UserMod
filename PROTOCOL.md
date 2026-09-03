@@ -1,7 +1,7 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the implemented subset in stable WLED iDotMatrix
-Usermod 0.6.1. The standalone
+This document describes stable WLED iDotMatrix Usermod 0.6.2 plus the
+0.6.3-dev.3 TEXT-rendering candidate. The standalone
 `IDotMatrix-ESP32-Emulator` repository remains the primary, complete protocol
 reference.
 
@@ -66,7 +66,9 @@ Command:
 
 Response: `05 00 01 80 01`
 
-Version 0.6.1 acknowledges but does not apply the time fields.
+Version 0.6.3-dev.3 acknowledges but does not apply the time fields. This is an
+intentional WLED integration decision: WLED `localTime`, NTP, timezone, and DST
+configuration remain the sole clock authority.
 
 ## Screen power
 
@@ -139,7 +141,7 @@ LENlo LENhi 05 01 UNKNOWN R G B X0 Y0 X1 Y1 ...
 - the reference sends no FA03 acknowledgement for these pixel packets.
 
 **WLED mapping:** accepted pixels update a three-byte-per-pixel logical RGB
-framebuffer. The Usermod selects its registered `iDotMatrix Framebuffer` 2D
+framebuffer. The Usermod selects its registered `iDotMatrix Display` 2D
 effect, which copies the canvas while WLED services the current segment and has
 valid virtual XY state. A valid pixel packet also selects the effect. No
 physical serpentine mapping is duplicated in this module.
@@ -147,15 +149,129 @@ physical serpentine mapping is duplicated in this module.
 **Limitation:** one complete logical packet must still fit a queued BLE write of
 at most 64 bytes. Fragment reassembly is a separate pending milestone.
 
-## Unsupported in 0.6.1
+## Clock
 
-- fragmented commands or writes longer than 64 bytes;
-- AE bulk/media processing;
-- text and 8x16/16x32 bitmap glyphs;
-- clock/date rendering;
+**Confirmed protocol:**
+
+```text
+08 00 06 01 FLAGS RED GREEN BLUE
+```
+
+- `FLAGS & 0x3F`: clock-style value;
+- `FLAGS & 0x40`: use 24-hour time;
+- `FLAGS & 0x80`: enable date display;
+- bytes 5..7: selected RGB colour.
+
+ACK: `05 00 06 01 01`
+
+**WLED mapping:** the command stores the display options and selects the custom
+`iDotMatrix Display` effect. The shared effect reads WLED local time and draws into the
+same logical RGB canvas used by other iDotMatrix content. The eight currently
+known styles use the hand-tuned 16x16 artwork from the standalone reference and
+are scaled to a 32x32 or 64x64 logical profile.
+
+When date display is enabled, the integration preserves the experimentally
+verified emulator presentation: 30 seconds of `HH:MM`, followed by 5 seconds of
+`DD/MM`. This timing is emulator behavior and is not claimed as a universal
+original-device protocol requirement.
+
+## Logical-to-physical mapping
+
+**WLED integration decision:** `screenType` selects the advertised logical
+profile and canvas. The physical output size comes from the selected WLED 2D
+segment. With `rescale=false`, unequal sizes are blocked and produce black. With
+`rescale=true`, nearest-neighbour sampling maps the complete logical canvas to
+the segment. WLED remains responsible for panel layout, rotation, mirroring,
+grouping, and serpentine wiring.
+
+## FA02 bulk transport
+
+**Confirmed protocol:** every bulk packet has a 16-byte header:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 2 | packet length, little-endian |
+| 2 | 1 | content type |
+| 3 | 1 | fixed `00` in confirmed packets |
+| 4 | 1 | unknown |
+| 5 | 4 | complete payload size, little-endian |
+| 9 | 4 | complete-payload CRC32, little-endian |
+| 13 | 3 | unknown header fields |
+| 16 | remaining | payload chunk |
+
+Type `0x03` identifies TEXT. While more payload is required, FA03 returns:
+
+```text
+05 00 03 00 01
+```
+
+When the transaction terminates, FA03 returns:
+
+```text
+05 00 03 00 03
+```
+
+`0x01` is the confirmed continue status. `0x03` means that the transaction has
+terminated; it must not be interpreted as universal success because the
+reference also uses it after CRC or storage failure.
+
+**Channel correction from hardware testing:** BUILD 80 calls
+`processBulkPacket()` after reassembling FA02 writes. Its AE01 callback only
+logs received bytes. Version 0.6.3-dev.1 incorrectly assigned bulk to AE01 and
+therefore observed no chunks; 0.6.3-dev.2 follows the source implementation.
+
+One dedicated FA02 assembler accepts an observed 4096-byte payload chunk plus
+the 16-byte header. The callback only performs bounded copies; logical-packet
+dispatch, CRC32, and notification happen in the normal Usermod loop. TEXT is
+bounded to 4096 payload bytes.
+
+Matching BUILD 80, an otherwise unknown complete short FA02 command is logged
+and receives `05 00 COMMAND SUBCOMMAND 01`. Unsupported GIF/RAW bulk packets
+are not covered by that compatibility ACK.
+
+## TEXT payload and glyph records
+
+**Confirmed payload header:**
+
+| Offset | Field |
+|---:|---|
+| 0 | glyph count |
+| 1..3 | not yet documented |
+| 4 | movement/effect |
+| 5 | speed |
+| 6 | colour mode |
+| 7..9 | text RGB |
+| 10 | background enabled/mode |
+| 11..13 | background RGB |
+
+Each glyph begins with a four-byte metadata prefix followed by its bitmap:
+
+| Marker | Status | Glyph | Bitmap | Complete record |
+|---:|---|---:|---:|---:|
+| `0x02` | confirmed | 8x16 | 16 bytes | 20 bytes |
+| `0x05` | confirmed | 16x32 | 64 bytes | 68 bytes |
+| `0x03` | reference compatibility alias, unconfirmed | 8x16 | 16 bytes | 20 bytes |
+| `0x06` | reference compatibility alias, unconfirmed | 16x32 | 64 bytes | 68 bytes |
+
+Version 0.6.3-dev.3 accepts only the experimentally confirmed `0x02` and
+`0x05` markers. Bitmap rows are consecutive, and the least-significant bit is
+the leftmost pixel within each byte. Mixed glyph sizes in one payload have not
+been observed and are not supported.
+
+**WLED mapping:** the app-supplied bitmap is stored by the independent renderer
+and selects the existing `iDotMatrix Display` effect. The global colour,
+background, speed, movement, and effects are rendered locally. SimSun and
+SimHei require no WLED font library because the official app rasterizes them
+before transmission.
+
+## Unsupported in 0.6.3-dev.3
+
+- generic fragmented FA02 commands outside the bounded bulk reassembly path;
+- GIF/RAW FA02 bulk processing;
+- unconfirmed TEXT marker aliases `0x03` and `0x06`;
 - GIF/cloud media;
 - countdown, stopwatch, scoreboard, alarms, schedules;
-- energy saving, rotation, effects, and reset.
+- energy saving, rotation, standalone light effects, and reset.
 
 These remain documented in the standalone reference and will be added without
 placing blocking or bulk work in BLE callbacks.

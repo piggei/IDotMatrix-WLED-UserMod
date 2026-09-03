@@ -7,7 +7,8 @@ class IDotMatrixWLEDAdapter final : public IDotMatrixProtocolEvents {
 public:
   explicit IDotMatrixWLEDAdapter(IDotMatrixRenderer& renderer) : renderer_(renderer) {}
 
-  bool registerFramebufferEffect();
+  bool registerDisplayEffect();
+  void setRescaleEnabled(bool enabled) { rescaleEnabled_ = enabled; }
 
   void onScreenPower(bool on) override;
   void onBrightnessPercent(uint8_t percent) override;
@@ -20,23 +21,49 @@ public:
     const uint8_t* coordinates,
     size_t coordinateBytes
   ) override;
+  void onClock(const IDotMatrixClockSettings& settings) override;
+  bool onTextBegin(const IDotMatrixTextSettings& settings) override;
+  void onTextGlyph(
+    uint8_t index,
+    const uint8_t* bitmap,
+    size_t bitmapLength
+  ) override;
+  void onTextComplete() override;
 
-  void renderEffectFrame();
+  void renderDisplayEffectFrame();
   bool isDiySessionActive() const { return diySessionActive_; }
-  bool isFramebufferEffectRegistered() const { return framebufferEffectId_ != 0xFF; }
-  bool isFramebufferEffectActive() const;
-  uint8_t framebufferEffectId() const { return framebufferEffectId_; }
+  bool isDisplayEffectRegistered() const { return displayEffectId_ != 0xFF; }
+  bool isDisplayEffectActive() const;
+  uint8_t displayEffectId() const { return displayEffectId_; }
+  bool isClockActive() const { return clockActive_; }
+  bool isTextActive() const { return textActive_; }
+  uint8_t clockStyle() const { return clockSettings_.style; }
+  bool clockUses24Hour() const { return clockSettings_.use24Hour; }
+  bool clockShowsDate() const { return clockSettings_.showDate; }
+  uint8_t textGlyphCount() const { return renderer_.textGlyphCount(); }
+  uint8_t textGlyphWidth() const { return renderer_.textGlyphWidth(); }
+  uint8_t textGlyphHeight() const { return renderer_.textGlyphHeight(); }
+  bool rescaleEnabled() const { return rescaleEnabled_; }
+  bool dimensionsMatch() const { return dimensionsMatch_; }
   uint32_t renderedFrames() const { return renderedFrames_; }
   uint16_t targetWidth() const { return targetWidth_; }
   uint16_t targetHeight() const { return targetHeight_; }
 
 private:
-  void activateFramebufferEffect();
+  void activateDisplayEffect();
+  void renderCanvasToSegment();
 
   IDotMatrixRenderer& renderer_;
   bool screenOn_ = false;
   bool diySessionActive_ = false;
-  uint8_t framebufferEffectId_ = 0xFF;
+  bool clockActive_ = false;
+  bool textActive_ = false;
+  bool textLoadReady_ = false;
+  bool rescaleEnabled_ = false;
+  bool dimensionsMatch_ = false;
+  uint8_t displayEffectId_ = 0xFF;
+  IDotMatrixClockSettings clockSettings_{};
+  uint32_t clockCycleStartedAt_ = 0;
   uint32_t renderedFrames_ = 0;
   uint16_t targetWidth_ = 0;
   uint16_t targetHeight_ = 0;
