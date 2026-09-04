@@ -1,6 +1,6 @@
 {
   "name": "wled-usermod-idotmatrix",
-  "version": "0.6.3-dev.3",
+  "version": "0.7.0",
   "description": "iDotMatrix BLE server/emulator usermod for WLED",
   "keywords": [
     "wled",
@@ -12,13 +12,15 @@
   "frameworks": "arduino",
   "platforms": "espressif32",
   "dependencies": {
-    "h2zero/NimBLE-Arduino": "1.4.3"
+    "h2zero/NimBLE-Arduino": "1.4.3",
+    "bitbank2/AnimatedGIF": "1.4.7"
   },
   "build": {
     "libArchive": false,
     "srcDir": ".",
     "srcFilter": [
       "+<*.cpp>"
-    ]
+    ],
+    "extraScript": "patch_animatedgif_16x16.py"
   }
 }

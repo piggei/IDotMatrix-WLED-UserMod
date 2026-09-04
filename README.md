@@ -1,380 +1,272 @@
 # WLED iDotMatrix Usermod
 
-An ESP32 WLED Usermod that emulates an iDotMatrix BLE peripheral and is
-recognized by the official iDotMatrix application.
+WLED Usermod for classic ESP32 that emulates an iDotMatrix BLE peripheral and
+lets the official iDotMatrix app drive a WLED 2D matrix.
 
-Unlike projects that control real iDotMatrix hardware, this project implements
-the server/emulator side: WLED advertises the expected BLE services, receives
-commands from the official app, and maps supported commands to WLED state.
+The project implements the peripheral/server side of the protocol: WLED
+advertises the expected BLE services, accepts commands from the app, validates
+bulk transfers, and renders supported content through one WLED effect named
+`iDotMatrix Display`.
 
-## Stable release
+## Stable release 0.7.0
 
-Version **0.6.2** is the current stable release. It has been compiled, uploaded,
-and tested with WLED 0.16.0.1 on a classic ESP32. The
-official app successfully:
+Version **0.7.0** is the first stable media release. It was validated on a
+classic ESP32 with WLED 16.0.1 and a physical 16x16 RGB matrix.
 
-- discovers and connects to the emulated device;
-- initializes its displayed power switch correctly;
-- switches the WLED output on and off;
-- changes WLED master brightness;
-- selects full-screen RGB colours;
-- enters DIY/Graffiti and selects the custom iDotMatrix display effect;
-- draws received pixels on the physical 16x16 WLED matrix;
-- renders the app-selected clock through the same `iDotMatrix Display` effect;
-- returns to WLED `Solid` when a full-screen RGB command is sent.
+The validated 16x16 path supports:
 
-Version **0.6.1** remains the frozen graffiti baseline, **0.6.0** the basic-
-command baseline, and **0.5.0** the BLE-transport-only baseline.
+- discovery and connection from the official iDotMatrix app;
+- screen power and master brightness;
+- full-screen RGB colours;
+- DIY/Graffiti pixels and saved Graffiti images;
+- all app clock commands already implemented by the project;
+- app-rasterized scrolling/effect text, including the full speed-slider range;
+- cloud/static RAW RGB images;
+- compact PNG images used by the app;
+- animated GIF transfers and playback;
+- repeated GIF replacement followed by a return to clock/WLED content without
+  reconnecting or rebooting.
 
-### Development snapshot 0.6.3-dev.3
-
-This repository currently contains the first TEXT rendering candidate. Stable
-0.6.2 remains the hardware-verified display fallback, while the corrected FA02
-bulk transport in 0.6.3-dev.2 has also been verified with the official app.
-
-The candidate adds:
-
-- FA02 reassembly for an observed 4096-byte payload chunk plus the 16-byte bulk
-  header, matching the BUILD 80 source;
-- bounded assembly for type `0x03` TEXT payloads up to 4096 bytes;
-- CRC32 validation and confirmed continue/complete ACKs;
-- confirmed marker `0x02` 8x16 and marker `0x05` 16x32 bitmap parsing;
-- fixed and dynamic colours, background, movement, and visual text effects;
-- TEXT ownership inside the existing `iDotMatrix Display` effect;
-- fragment, parsing, glyph, and transfer diagnostics.
-
-The validated 0.6.2 foundation already includes:
-
-- confirmed clock-command decoding and ACK;
-- one WLED effect named `iDotMatrix Display`, shared by graffiti and clock and
-  ready to host future text, media, and timer rendering;
-- all eight 16x16 clock styles reconstructed in the standalone reference;
-- app-selected colour, 12/24-hour mode, and the optional 30-second `HH:MM` /
-  5-second `DD/MM` cycle;
-- WLED `localTime`/NTP as the sole runtime clock source;
-- a dropdown for the advertised 16x16, 32x32, or 64x64 logical profile;
-- strict dimension checking by default and optional nearest-neighbour rescale
-  from the logical canvas to the active WLED 2D segment;
-- automatic `IDM-` device-name normalization and a restart diagnostic derived
-  from the name/profile actually active in the BLE stack.
-
-### Graffiti framebuffer
-
-Version 0.6.1 adds:
-
-- a dynamically allocated RGB framebuffer for 16x16, 32x32, and 64x64;
-- confirmed DIY enter/exit command handling;
-- confirmed native-resolution graffiti pixel updates;
-- a first-class WLED 2D effect named `iDotMatrix Framebuffer`;
-- automatic effect selection when DIY starts or a valid pixel packet arrives;
-- rendering through the current WLED effect segment, preserving WLED's physical
-  matrix mapping;
-- canvas, effect-state, frame-count and accepted-pixel diagnostics under
-  `/json/info`.
-
-`0.6.1-dev.1` correctly received and decoded graffiti, but hardware testing
-showed that its `handleOverlayDraw()` path left WLED in `Solid` and did not make
-the canvas visible. `0.6.1-dev.2` moved rendering into a registered WLED effect
-and was validated on hardware before being promoted unchanged to 0.6.1. Both
-development steps are retained in `HISTORY.md`.
+The media fixes promoted in 0.7.0 include a 517-byte BLE MTU request, correct
+FA02 fragment reassembly without fragment-level ACKs, recovery from abandoned
+fragmented transfers, and a low-RAM 16x16 build of AnimatedGIF. The reduced GIF
+decoder occupies about 8 KiB instead of the roughly 22 KiB required by the stock
+configuration, which is necessary for stable coexistence with WLED, Wi-Fi, and
+NimBLE on a classic ESP32.
 
 ## Supported functionality
 
-| Function | Protocol | WLED mapping | Status |
+| Function | Protocol / source | WLED mapping | 0.7.0 status |
 |---|---|---|---|
-| Discovery | FA/AE GATT and manufacturer data | BLE Usermod | Verified |
-| Profile | `0x01`, `0x03`, `0x04` | 16x16, 32x32, 64x64 identity | Verified at discovery level |
-| Device information | `04 00 01 80` | Profile response on FA03 | Verified |
-| Time synchronization | `0B 00 01 80 ...` | ACK only | Partial |
-| Screen power | `05 00 07 01 STATE` | WLED power | Verified |
-| Brightness | `05 00 04 80 PERCENT` | WLED master brightness | Verified |
-| Full-screen RGB | `07 00 02 02 R G B` | Static effect and primary colour | Verified |
-| DIY mode | `05 00 04 01 STATE` | Graffiti session state | Verified on 16x16 |
-| Graffiti pixels | `LEN 00 05 01 ? R G B X Y...` | `iDotMatrix Display` 2D effect | Verified on 16x16 |
-| Clock | `08 00 06 01 FLAGS R G B` | `iDotMatrix Display` 2D effect using WLED time | Verified on 16x16 |
-| Text | FA02 bulk type `0x03`, markers `0x02`/`0x05` | App bitmaps rendered by `iDotMatrix Display` | Rendering candidate |
+| Discovery | FA/AE GATT + manufacturer data | BLE Usermod | Verified |
+| Screen power | FA02 | WLED power | Verified |
+| Brightness | FA02 | WLED master brightness | Verified |
+| Full-screen RGB | FA02 | `Solid` + primary colour | Verified |
+| DIY/Graffiti | FA02 | `iDotMatrix Display` | Verified on 16x16 |
+| Clock | FA02 | `iDotMatrix Display`, WLED local time | Verified on 16x16 |
+| Text | bulk type `0x03` | app bitmaps rendered by `iDotMatrix Display` | Verified on 16x16 |
+| RAW/cloud image | bulk type `0x02` | atomic RGB framebuffer | Verified on 16x16 |
+| Compact PNG | inline type `0x00` | decoded RGB/RGBA framebuffer | Verified on 16x16 |
+| GIF animation | bulk type `0x01` | LittleFS + low-RAM AnimatedGIF | Verified on 16x16 |
+| 32x32 / 64x64 profiles | profile `0x03` / `0x04` | dynamic logical framebuffer | Experimental |
 
-See [`PROTOCOL.md`](PROTOCOL.md) for exact packets and ACKs.
+Countdown, stopwatch, scoreboard, alarms, schedules, buzzer behavior, rotation,
+and original-device standalone effects are not implemented.
 
-## Important limitations
+## Hardware requirements
 
-### Brightness is synchronized only from the app to WLED
+### Validated target
 
-Moving the iDotMatrix app slider sends a brightness command and updates WLED.
-The official app does not request current brightness from the emulated device,
-and no confirmed device-to-app brightness-state message is known.
+For the stable 0.7.0 experience use:
 
-Consequently:
+- **classic ESP32** compatible with PlatformIO `esp32dev`;
+- at least **4 MB flash**;
+- a **16x16 RGB matrix** configured as a WLED 2D matrix;
+- a digital LED output supported by WLED's **I2S** backend;
+- USB/serial access for flashing;
+- Wi-Fi for normal WLED operation;
+- Bluetooth/BLE enabled by the ESP32 hardware.
 
-- WLED is the only runtime and persistence authority for brightness;
-- the Usermod does not store a second brightness preference;
-- changing brightness in WLED does not move the slider in the iDotMatrix app;
-- the displayed values may differ until the app slider is moved;
-- connecting the app does not overwrite WLED with a guessed default value.
+PSRAM is **not required** for the validated 16x16 configuration.
 
-### Power-switch initialization uses a compatibility sequence
+### Important ESP32/WLED constraints
 
-The standalone emulator turns its display on when the app connects and sends an
-unsolicited device-info notification after 1.2 seconds. One notification proved
-timing-sensitive inside WLED, so the Usermod sends the same confirmed packet at about
-1.2 and 2.5 seconds. This reliably initializes the app's displayed switch in the
-tested setup. Both sends are scheduled outside the BLE callback.
+The verified build uses WLED's I2S LED backend. **Do not use RMT** for a digital
+LED bus in this BLE build: on the tested classic ESP32/framework combination,
+RMT-HI conflicts with the Bluetooth controller and can cause a reboot loop. The
+Usermod detects this condition and refuses to start BLE.
 
-### RGB follows WLED segment selection
+The BLE-enabled firmware also exceeds the normal OTA application slot used by
+the tested 4 MB layout. The supplied partition table therefore uses a single
+large application partition and disables WLED OTA. Flash this environment over
+USB/serial.
 
-Full-screen RGB uses WLED's normal global-colour path. It sets the static effect
-and primary colour on active, selected segments. With the standard single matrix
-segment this fills the whole display. Custom multi-segment installations must
-select every segment that should follow the app.
+The Usermod forces Wi-Fi modem sleep on (`noWifiSleep = false`) because it is
+required for Wi-Fi/Bluetooth coexistence with the pinned ESP-IDF generation.
 
-### Graffiti owns the selected segment through a WLED effect
+## Software requirements
 
-Entering DIY selects the custom `iDotMatrix Display` effect on the first
-selected WLED segment. A valid pixel packet also reselects it if necessary.
-Selecting another WLED effect manually temporarily replaces the app canvas; the
-next graffiti packet returns ownership to iDotMatrix. A full-screen RGB command
-intentionally switches back to `Solid`.
+The stable build is pinned to:
 
-The current stable release targets the first selected segment. The normal one-segment
-matrix configuration is the supported layout for this milestone.
-
-### Clock time comes from WLED
-
-The app time-synchronization packet is acknowledged for compatibility, but its
-fields are not installed into a second Usermod clock. The clock effect reads
-WLED's local time, so WLED NTP, timezone, and daylight-saving configuration
-remain authoritative. Until WLED has valid time, the displayed value may be the
-epoch/default time.
-
-### Logical profile, physical matrix, and rescale
-
-`screenType` controls what WLED advertises to the app and therefore the logical
-canvas size. The physical target is the first selected WLED 2D segment and its
-dimensions are detected inside the effect callback.
-
-By default `rescale` is disabled. A logical/physical size mismatch is then
-blocked and rendered black instead of silently clipping data. Enabling
-`rescale` applies nearest-neighbour sampling, allowing for example a logical
-64x64 app profile to preview on a physical 16x16 matrix. This is necessarily
-lossy and does not change the BLE profile seen by the app.
-
-### Text rendering candidate and unsupported media
-
-The development snapshot receives, validates, parses, and renders bounded TEXT
-bulk transfers. GIF/media, countdown, stopwatch, alarms, and schedules are not
-implemented yet.
-
-The first hardware check should confirm glyph orientation and each visual mode.
-The wave-based dynamic colour modes use a lightweight integer wave in this
-candidate; their timing and appearance may differ slightly from BUILD 80's
-FastLED `sin8()` implementation while preserving the same protocol fields.
-
-Complete short FA02 commands retain their four-entry 64-byte queue. Fragmented
-or large FA02 traffic has a separate 4112-byte assembler and TEXT has a
-4096-byte payload limit; GIF/RAW bulk handling will use its own storage policy
-in later milestones. AE01 remains present for GATT compatibility but BUILD 80
-does not dispatch bulk content from it.
-
-## Protocol authority
-
-The companion `IDotMatrix-ESP32-Emulator` repository and its `PROTOCOL.md` are
-the primary source for the reverse-engineered protocol. This Usermod reuses
-those experimentally verified findings and must not silently redefine or remove
-them.
-
-Confirmed discovery data:
-
-- FA service: `000000fa-0000-1000-8000-00805f9b34fb`;
-- FA02: app to device, write/write without response;
-- FA03: device to app, read/notify;
-- AE service: `0000ae00-0000-1000-8000-00805f9b34fb`;
-- AE01: app to device;
-- AE02: device to app;
-- manufacturer data: `54 52 00 70 <screen-type>`.
-
-Advertising uses the equivalent 16-bit FA UUID to fit the 31-byte legacy packet.
-GATT still uses the full Bluetooth-base UUID.
-
-## Supported build
-
-| Component | Stable value |
+| Component | Version / setting |
 |---|---|
-| WLED | 0.16.0.1 |
-| Target | Classic ESP32 / `esp32dev` |
+| WLED | 16.0.1 |
+| PlatformIO environment | `esp32dev_idotmatrix` |
 | Platform | `espressif32@~6.13.0` |
 | Arduino-ESP32 | 2.0.17 |
 | ESP-IDF | 4.4.7 |
-| BLE host | `h2zero/NimBLE-Arduino@1.4.3` |
-| Digital LED driver | I2S |
-| Flash layout | 4 MB, single application, no OTA |
+| BLE stack | `h2zero/NimBLE-Arduino@1.4.3` |
+| GIF library | `bitbank2/AnimatedGIF@1.4.7` |
+| LED driver | I2S |
 
-Other targets and framework versions are not part of this stable release.
-
-## Build constraints
-
-The verified combination is the official Espressif platform, NimBLE-Arduino
-1.4.3, Wi-Fi modem sleep, and WLED's I2S LED backend.
-
-Development established these incompatibilities:
-
-- WLED's compact Tasmota framework lacked the required compatible GATT-server
-  environment;
-- adding another NimBLE stack produced duplicate/incompatible symbols;
-- classic Bluedroid was unstable with WLED's Wi-Fi lifecycle and memory use;
-- disabled Wi-Fi modem sleep caused an ESP-IDF coexistence abort;
-- RMT-HI conflicted with the Bluetooth controller and caused a reboot loop;
-- the BLE-enabled image did not fit the tested board's normal OTA slot.
-
-The Usermod detects a digital RMT bus and refuses to start BLE. Every digital LED
-output must use **I2S**.
+Other WLED/framework/ESP32 variants may work, but they are not part of the
+0.7.0 stable target.
 
 ## Installation
 
-Place this repository beside the WLED source tree:
+### 1. Place the Usermod beside WLED
+
+Clone or extract this repository beside the WLED source directory. For example:
 
 ```text
 D:\WLED source\WLED-16.0.1
 D:\WLED source\wled-usermod-idotmatrix
 ```
 
-Copy `platformio_override.ini.example` into WLED's override or add its environment.
-The essential configuration is:
+The directory name `wled-usermod-idotmatrix` is assumed by the supplied example
+override. If you use another directory name, update its paths accordingly.
 
-```ini
-[env:esp32dev_idotmatrix]
-extends = env:esp32dev
-platform = espressif32@~6.13.0
-platform_packages =
-board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
+### 2. Add the PlatformIO environment
 
-build_flags =
-  ${env:esp32dev.build_flags}
-  -D WLED_DISABLE_OTA
+Copy the contents of `platformio_override.ini.example` into WLED's
+`platformio_override.ini`, or include the equivalent environment yourself.
 
-lib_deps =
-  ${env:esp32dev.lib_deps}
-  h2zero/NimBLE-Arduino@1.4.3
+The supplied configuration:
 
-custom_usermods =
-  symlink://../wled-usermod-idotmatrix
-```
+- extends WLED's `esp32dev` environment;
+- selects the official Espressif PlatformIO platform;
+- enables NimBLE-Arduino 1.4.3;
+- installs AnimatedGIF 1.4.7;
+- disables WLED OTA;
+- selects the supplied single-app partition layout;
+- loads this repository as an external Usermod.
 
-The explicit NimBLE entry is required for a symlinked external Usermod. Do not
-install `h2zero/esp-nimble-cpp` or the registry package `ESP32 BLE Arduino`.
+Do **not** add `esp-nimble-cpp` or the registry package `ESP32 BLE Arduino`.
 
-Build and upload over USB/serial:
+### 3. Clean and build
+
+From the WLED source directory:
 
 ```powershell
 pio run -e esp32dev_idotmatrix -t clean
 pio run -e esp32dev_idotmatrix
+```
+
+During dependency preparation you should see:
+
+```text
+[iDotMatrix] AnimatedGIF 1.4.7 patched for 16x16 low-RAM decoder
+```
+
+The Usermod's PlatformIO extra script modifies only the per-environment copy of
+AnimatedGIF under `.pio/libdeps`. It does not modify your global PlatformIO
+package cache or other build environments.
+
+### 4. Flash over USB/serial
+
+Replace `COM3` with the actual serial port:
+
+```powershell
 pio run -e esp32dev_idotmatrix -t upload --upload-port COM3
+```
+
+Optional serial monitor:
+
+```powershell
 pio device monitor -e esp32dev_idotmatrix
 ```
 
-The dependency graph must contain:
+### 5. Configure WLED
 
-```text
-NimBLE-Arduino @ 1.4.3
-wled-usermod-idotmatrix @ 0.6.3-dev.3
-```
+In WLED:
 
-## Configuration
+1. configure the physical panel as a **16x16 2D matrix**;
+2. set every digital LED output used by this build to **I2S**, not RMT;
+3. configure Wi-Fi, timezone, and NTP if you want the clock to be correct;
+4. open Usermods settings and leave `screenType` at **16 x 16** for the stable
+   0.7.0 configuration;
+5. optionally change `deviceName`; `IDM-` is added automatically;
+6. reboot after changing the BLE device name or logical profile.
 
-- `enabled`: enable the BLE emulator;
-- `screenType`: dropdown selecting `1` = 16x16, `3` = 32x32, or `4` = 64x64;
-- `rescale`: optionally scale the logical canvas to the WLED 2D segment;
-- `deviceName`: BLE name or suffix, normalized to `IDM-...`, default
-  `IDM-858931`.
+### 6. Pair from the iDotMatrix app
 
-Changing name or profile requires a reboot and is reported in `/json/info`;
-`rescale` applies immediately. The Usermod forces
-`noWifiSleep = false` for Bluetooth/Wi-Fi coexistence.
+Open the official iDotMatrix app and scan for the configured `IDM-...` device.
+A successful connection should let the app control the WLED matrix directly.
 
-The configured advertising name can be verified with `name` and `nameActive`.
-If both contain the new value but the official app still shows an older name,
-the old label is cached by the app or operating system for the same BLE device
-identity. This was observed with both diagnostics reporting `IDM-666` while the
-app retained an earlier label. It is not a failed Usermod save; clear the app's
-Bluetooth/cache state or test discovery with a generic BLE scanner.
+## Configuration options
 
-## Runtime diagnostics
+- `enabled`: enables the BLE emulator;
+- `screenType`: logical profile (`16x16`, `32x32`, `64x64`);
+- `deviceName`: advertised BLE name/suffix, normalized to `IDM-...`;
+- `rescale`: nearest-neighbour scaling from the logical profile to the selected
+  WLED 2D segment.
 
-The state appears under `/json/info` in `u.iDotMatrix`:
+For 0.7.0, **16x16 is the only fully validated profile**. The 32x32 and 64x64
+logical framebuffers remain available for continued development, but the
+low-RAM GIF decoder is deliberately limited to images no larger than 16x16.
+
+## Runtime status
+
+`/json/info` intentionally exposes only compact operational status. The debug
+counters used while developing 0.7.0 were removed from the stable release.
+Typical output under `u.iDotMatrix` is:
 
 ```json
 "iDotMatrix": [
   "BLE connected",
-  "profile=0x1",
-  "name=IDM-PAPERO",
-  "nameActive=IDM-PAPERO",
-  "rx=4",
-  "dropped=0",
-  "bulkChunks=1",
-  "bulkComplete=1",
-  "bulkCrcErrors=0",
-  "bulkRejected=0",
-  "fragments=4",
-  "reassemblyErrors=0",
-  "unknown=0",
-  "textBytes=34",
-  "textParsed=1",
-  "textParseErrors=0",
-  "infoPushAttempts=2",
-  "canvas=16x16",
-  "content=text",
-  "pixelUpdates=21",
-  "displayFx=187 active",
-  "textGlyphs=1 8x16",
-  "effectFrames=42",
-  "target=16x16",
-  "mapping=native"
+  "profile=16x16",
+  "name=IDM-666",
+  "content=gif"
 ]
 ```
 
-- `rx`: BLE writes received;
-- `dropped`: writes discarded because the FA02 queue or assembler was busy;
-- `bulkChunks`: accepted type-`0x03` TEXT chunks;
-- `bulkComplete`: completed TEXT transfers with valid CRC32;
-- `bulkCrcErrors` and `bulkRejected`: transfer failure diagnostics;
-- `fragments`, `reassembly`, and `reassemblyErrors`: FA02 logical-packet
-  reconstruction status;
-- `unknown` and `lastUnknown`: count and first bytes of unhandled FA02 packets;
-- `textBytes`: size retained after the latest valid TEXT transfer;
-- `textParsed` and `textParseErrors`: payloads accepted or rejected by the
-  glyph-record parser;
-- `infoPushAttempts`: cumulative delayed device-info attempts, normally two per
-  completed connection.
-- `displayFx`: the single dynamically assigned WLED effect ID shared by
-  graffiti, clock, and future app-rendered content, plus its active state;
-- `textGlyphs`: count and dimensions of the active app-rasterized glyphs;
-- `effectFrames`: combined number of iDotMatrix effect calls since boot;
-- `target`: virtual WLED segment dimensions observed inside the effect callback.
-- `mapping`: `native`, `rescale`, or `mismatch blocked`.
+Possible content owners are `WLED`, `graffiti`, `clock`, `text`, `image`, and
+`gif`.
 
-## Architecture and documentation
+## Behavior and limitations
 
-- `usermod_idotmatrix.cpp`: lifecycle, settings, guards, and diagnostics;
-- `IDotMatrixBLEServer.*`: BLE transport and bounded queue;
-- `IDotMatrixBulkTransfer.*`: bounded TEXT bulk assembly and CRC32;
-- `IDotMatrixFA02Assembler.*`: bounded logical-packet reconstruction;
-- `IDotMatrixProtocol.*`: WLED-independent validation and decoding;
-- `IDotMatrixRenderer.*`: resolution-independent RGB framebuffer and clock
-  artwork;
-- `IDotMatrixWLEDAdapter.*`: protocol-to-WLED boundary, time source, rescale,
-  and the unified custom display effect;
-- `tests/`: host-side protocol and adapter tests.
+### Brightness direction
 
-Further documents:
+Brightness is synchronized from the iDotMatrix app to WLED. The app does not
+query the current WLED brightness from the emulated peripheral, so changing
+brightness elsewhere in WLED does not necessarily move the app slider.
 
-- [`PROTOCOL.md`](PROTOCOL.md): implemented wire-protocol subset;
-- [`ARCHITECTURE.md`](ARCHITECTURE.md): boundaries and extension rules;
-- [`TESTING.md`](TESTING.md): host and hardware validation;
-- [`HISTORY.md`](HISTORY.md): stable and experimental history;
-- [`TODO.md`](TODO.md): next milestones and unresolved work.
+### Clock source
+
+The app time-synchronization packet is acknowledged for compatibility, but WLED
+remains the clock authority. Configure WLED NTP, timezone, and daylight-saving
+settings normally.
+
+### Display ownership
+
+App-rendered content selects the single `iDotMatrix Display` WLED effect. A
+full-screen RGB command intentionally returns to WLED `Solid`. Selecting another
+WLED effect manually replaces app content until the app sends another supported
+content command.
+
+### GIF implementation
+
+GIF data is streamed to LittleFS, validated after the completed CRC-protected
+bulk transfer, and then opened outside BLE callbacks. AnimatedGIF 1.4.7 is
+patched at build time for the 16x16 stable target: maximum width 16, smaller file
+buffers, and a reduced 10-bit LZW dictionary. This is the key RAM optimization
+that makes repeated animations stable on the tested classic ESP32.
+
+## Repository layout
+
+- `usermod_idotmatrix.cpp` — Usermod lifecycle, configuration, startup guards;
+- `IDotMatrixBLEServer.*` — NimBLE GATT server, reassembly, notifications;
+- `IDotMatrixFA02Assembler.*` — bounded fragmented FA02 reconstruction;
+- `IDotMatrixBulkTransfer.*` — bulk framing, CRC32, TEXT/RAW/GIF chunk state;
+- `IDotMatrixProtocol.*` — protocol validation and command decoding;
+- `IDotMatrixRenderer.*` — logical RGB framebuffer, clock and text rendering;
+- `IDotMatrixMedia.*` — PNG decode and LittleFS/GIF playback;
+- `IDotMatrixWLEDAdapter.*` — protocol-to-WLED state and display effect;
+- `patch_animatedgif_16x16.py` — per-build low-RAM AnimatedGIF patch;
+- `WLED_ESP32_4MB_IDOT_NO_OTA.csv` — 4 MB single-app partition table;
+- `tests/` — host regression tests.
+
+Further documentation:
+
+- [`PROTOCOL.md`](PROTOCOL.md) — implemented wire-protocol subset;
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — component boundaries and memory model;
+- [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
+- [`HISTORY.md`](HISTORY.md) — release history;
+- [`TODO.md`](TODO.md) — post-0.7.0 roadmap.
 
 ## Related projects
 
-These complementary projects must remain credited:
+Complementary iDotMatrix projects and protocol clients:
 
 - [dallanwagz/idotmatrix-ha](https://github.com/dallanwagz/idotmatrix-ha)
 - [markusressel/idotmatrix-api-client](https://github.com/markusressel/idotmatrix-api-client)
@@ -383,8 +275,8 @@ These complementary projects must remain credited:
 - [nj-designs/go-idot](https://github.com/nj-designs/go-idot)
 - [whybutter/idotmatrix](https://github.com/whybutter/idotmatrix)
 
-Most are clients/controllers for real hardware. This project makes WLED behave
-as the BLE peripheral expected by the official app.
+Most are clients/controllers for real iDotMatrix hardware. This repository makes
+WLED behave as the BLE peripheral expected by the official app.
 
 ## License
 

@@ -1,17 +1,9 @@
-# Arduino build output
-build/
+.pio/
+.vscode/
+.idea/
+__pycache__/
+*.pyc
 *.bin
 *.elf
 *.map
-*.hex
-
-# IDE / OS
-.vscode/
-.idea/
 .DS_Store
-Thumbs.db
-# Temporary files
-*.tmp
-*.bak
-*~
-*Zone.Identifier

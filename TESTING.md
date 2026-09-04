@@ -1,8 +1,17 @@
 # Testing
 
-## Host tests
+This is the release-validation procedure for 0.7.0.
 
-From the repository root, with a C++11 compiler:
+## Host regression tests
+
+From the repository root with a C++11 compiler and zlib development files,
+the complete suite can be run with:
+
+```sh
+./run_host_tests.sh
+```
+
+Equivalent individual commands are:
 
 ```sh
 g++ -std=c++11 -Wall -Wextra -Werror -pedantic \
@@ -30,114 +39,76 @@ g++ -std=c++11 -Wall -Wextra -Werror -pedantic \
   IDotMatrixFA02Assembler.cpp tests/test_fa02_assembler.cpp \
   -o /tmp/idotmatrix_fa02_test
 /tmp/idotmatrix_fa02_test
+
+g++ -std=c++11 -Wall -Wextra -Werror -pedantic \
+  -Itests/media_stub \
+  IDotMatrixRenderer.cpp IDotMatrixMedia.cpp tests/test_media.cpp \
+  -lz -o /tmp/idotmatrix_media_test
+/tmp/idotmatrix_media_test
 ```
 
-Coverage includes device info, connection ON, power ACKs, malformed/unknown
-packets, brightness/clamping/conversion/OFF behavior, RGB/static-mode mapping,
-DIY commands, graffiti packet extraction, framebuffer sizes/bounds, persistent
-canvas semantics, and WLED custom-effect registration/activation/XY output.
-It also covers clock flags and ACK, 16-to-32 logical clock scaling, shared WLED
-display-effect ownership, registration of exactly one custom effect, strict
-mismatch blocking, and opt-in nearest-neighbour rescaling.
-The bulk test covers multi-chunk reconstruction, continue/complete status,
-valid and invalid CRC32, payload-size rejection, and malformed framing.
-The FA02 assembler test covers complete and fragmented logical packets,
-oversized/malformed starts, and protection of a completed pending packet.
+Coverage includes protocol framing, ACK behavior, power/brightness/RGB, DIY and
+graffiti parsing, clock/text rendering, 2D mapping, bulk CRC32, RAW atomic
+publication, FA02 fragmentation, compact PNG decode, and deferred GIF
+reception/promotion/playback behavior.
 
 ## WLED build validation
+
+From the WLED source directory:
 
 ```powershell
 pio run -e esp32dev_idotmatrix -t clean
 pio run -e esp32dev_idotmatrix
 ```
 
-The dependency graph must include `NimBLE-Arduino @ 1.4.3` and
-`wled-usermod-idotmatrix @ 0.6.3-dev.3`. It must not include `esp-nimble-cpp` or the
-registry package `ESP32 BLE Arduino`.
+Expected dependency/build facts:
 
-## Hardware smoke test
+- `wled-usermod-idotmatrix @ 0.7.0`;
+- `NimBLE-Arduino @ 1.4.3`;
+- `AnimatedGIF @ 1.4.7`;
+- build output contains the low-RAM 16x16 AnimatedGIF patch message;
+- no `.dram0.bss` overflow;
+- no dependency on `esp-nimble-cpp` or `ESP32 BLE Arduino`.
 
-1. Configure every digital LED output for I2S.
-2. Upload over USB/serial and reboot.
-3. Confirm WLED remains reachable over Wi-Fi.
-4. Check `/json/info` for `BLE advertising` and `dropped=0`.
-5. Connect with the official app and confirm its power switch initializes ON.
-6. Confirm `infoPushAttempts` increases by two.
-7. Test OFF/ON and previous-brightness restoration.
-8. Test app brightness at 100%, 50%, minimum, and 0% if exposed.
-9. Test red, green, blue, white, and black full-screen colours.
-10. Confirm WLED shows static effect and the corresponding colour.
-11. Disconnect and confirm advertising restarts.
+## Stable 16x16 hardware regression
 
-### Additional 0.6.1 graffiti checks
+Use a classic ESP32, a WLED 16x16 2D matrix, and I2S LED output.
 
-1. Confirm the WLED effect list contains `iDotMatrix Display`.
-2. Open DIY/Graffiti in the official app; WLED should select that effect and the
-   physical matrix should clear.
-3. Draw isolated pixels in every corner and confirm orientation.
-4. Draw red, green, blue, white, and black strokes.
-5. Draw quickly and verify `/json/info` keeps `dropped=0`.
-6. Leave DIY and confirm the last drawing remains visible.
-7. Send a full-screen RGB command and confirm WLED returns to `Solid`.
-8. Re-enter DIY and confirm the previous canvas is cleared.
-9. Confirm `canvas=16x16`, `displayFx=... active`, increasing
-   `pixelUpdates`/`effectFrames`, and `target=16x16`.
+1. Flash by USB/serial and reboot.
+2. Confirm WLED remains reachable over Wi-Fi for at least 15 seconds.
+3. Confirm `/json/info` reports `BLE advertising` under `u.iDotMatrix`.
+4. Connect with the official iDotMatrix app.
+5. Verify power OFF/ON and brightness changes.
+6. Verify red, green, blue, white, and black full-screen colours.
+7. Enter DIY/Graffiti, draw pixels, and display a saved Graffiti image.
+8. Test a clock style and verify WLED/NTP time is shown.
+9. Send scrolling text with the speed slider at both extremes and verify an
+   obvious slow/fast difference.
+10. Browse/send multiple cloud/static images and verify they appear without app
+    transfer errors.
+11. Send at least ten GIF animations in sequence. Verify every selected GIF can
+    replace the previous animation without a reboot or BLE disconnect.
+12. While a GIF is playing, return to clock and then to a static colour. Verify
+    normal operation without reconnecting.
+13. Disconnect the app and verify BLE advertising resumes.
+14. Reconnect and repeat one image and one GIF transfer.
 
-The 0.6.1 promotion was validated on hardware through the complete effect
-transition `Solid` -> `iDotMatrix Framebuffer` -> `Solid` before the effect was
-renamed and unified as `iDotMatrix Display`. The captured status
-reported `rx=41`, `dropped=0`, `pixelUpdates=34`, `effectFrames=3186`, and
-`target=16x16` after returning to full-screen colour.
+The debug counters used during development are intentionally absent from 0.7.0;
+release testing is behavior-based plus the compact runtime status.
 
-### Additional 0.6.2-dev.2 clock and mapping checks
+## Recovery tests
 
-1. Confirm Usermod settings show a 16x16/32x32/64x64 `screenType` dropdown and
-   a `rescale` checkbox.
-2. Leave 16x16 selected with rescale disabled and confirm `/json/info` reports
-   `mapping=native` on the 16x16 test matrix.
-3. Select Clock in the official app and confirm WLED selects
-   `iDotMatrix Display`.
-4. Move between Graffiti and Clock and confirm WLED stays on the same
-   `iDotMatrix Display` effect ID while `content` changes.
-5. Verify all eight styles, selected colours, and 12/24-hour conversion.
-6. Enable date display and verify 30 seconds of `HH:MM` followed by 5 seconds
-   of `DD/MM`.
-7. Confirm the displayed time follows WLED timezone/NTP rather than maintaining
-   a second Usermod clock.
-8. Set profile 64x64, reboot, and leave rescale disabled: the mismatched 16x16
-   target must remain black and report `mapping=mismatch blocked`.
-9. Enable rescale without reboot: the 64x64 logical content must appear as a
-   lossy 16x16 preview and report `mapping=rescale`.
-10. Return to profile 16x16 before stable-release regression testing.
+- Interrupt or cancel a media transfer and then send a normal command. The
+  device must recover without requiring a BLE reconnect.
+- Disconnect during a transfer. Reconnect and verify the next valid command
+  works.
+- Change `deviceName` or `screenType`; verify `/json/info` reports that a restart
+  is required until reboot.
+- Configure a digital RMT bus and verify the Usermod refuses to start BLE rather
+  than entering the known Bluetooth/RMT reboot loop.
 
-### Additional 0.6.3-dev.3 TEXT rendering checks
+## Experimental profiles
 
-1. Open the app text editor, enter a short string, and send it.
-2. Confirm WLED remains on `iDotMatrix Display`, changes to `content=text`, and
-   displays the app-rasterized glyphs.
-3. Confirm `bulkChunks`, `bulkComplete`, and `textParsed` increase together.
-4. Confirm `bulkCrcErrors=0`, `bulkRejected=0`, `reassemblyErrors=0`,
-   `unknown=0`, and `dropped=0`.
-5. Confirm `textParseErrors=0`, and record `textBytes` plus `textGlyphs`.
-6. Repeat with enough text to require more than one chunk; every incomplete
-   chunk must receive status `0x01` and the final chunk status `0x03`.
-7. Test fixed colour, background, left/right/up/down movement, blink, pulse,
-   sparkle, laser, and every dynamic colour mode exposed by the app.
-8. On a 32x32 logical profile, test a marker-`0x05` 16x32 glyph payload.
-
-## Expected limitations
-
-- WLED brightness changes do not move the app slider.
-- Moving the app slider updates WLED.
-- Full-screen RGB follows active/selected WLED segments.
-- RMT prevents BLE startup and reports a diagnostic.
-- The supplied 4 MB layout has no OTA slot; use USB/serial.
-
-## Stable-release regression checks
-
-- all five host tests pass with warnings as errors;
-- a clean pinned WLED build succeeds;
-- app discovery, connection, power, brightness, RGB, and graffiti pass;
-- repeated connections do not increase `dropped`;
-- Wi-Fi remains reachable during BLE use;
-- README, protocol, history, and TODO report the same version/features.
+32x32 and 64x64 are not release-gating targets for 0.7.0. Test them only as
+development profiles. In particular, GIF playback is intentionally limited to
+16x16 by the low-RAM AnimatedGIF build.

@@ -1,8 +1,102 @@
 # Release history
 
+## 0.7.0 - 2026-09-04 - Stable media release
+
+- Promoted the 16x16 media branch after physical validation with the official
+  iDotMatrix app on classic ESP32/WLED 16.0.1.
+- Fixed TEXT speed so the app slider now spans a clearly observable range from
+  approximately 500 ms to 15 ms per pixel instead of being effectively capped
+  by visual-effect refresh timing.
+- Fixed cloud/static-image transport by requesting BLE MTU 517 and matching the
+  reference behavior: ATT fragments are reassembled first and are not ACKed as
+  independent protocol packets.
+- Added a five-second stale-FA02 recovery path so an interrupted media transfer
+  cannot poison later clock, colour, or content commands until reconnect.
+- Verified RAW/cloud images with complete CRC-valid type-`0x02` transfers.
+- Stabilized GIF reception and playback: type-`0x01` streams to LittleFS, is
+  promoted outside BLE callbacks, and opens in a later loop iteration.
+- Identified the stock AnimatedGIF object's RAM footprint as incompatible with
+  WLED + Wi-Fi + NimBLE on the tested classic ESP32. Added a build-local 16x16
+  AnimatedGIF patch, reducing the decoder object to about 8 KiB and using fixed
+  placement storage to avoid heap fragmentation.
+- Earlier stabilization experiments are intentionally recorded here: allocating
+  the stock decoder late failed on fragmented heap; placing the full stock
+  decoder in static DRAM overflowed `.dram0.bss`; reserving its full footprint
+  dynamically at startup/after BLE initialization caused runtime reset loops.
+  Reducing the decoder itself was the successful fix.
+- Hardware-tested multiple GIFs in sequence, GIF replacement, and transition
+  back to clock without reboot, BLE reconnect, or stuck display state.
+- Removed development-only packet/CRC/heap/fragment diagnostics from
+  `/json/info`; stable status now exposes only connection, profile, name,
+  restart requirement, and active content owner.
+- Removed temporary PJ debug notes and consolidated installation, hardware
+  requirements, architecture, protocol, testing, and roadmap documentation.
+- Stable scope is explicitly 16x16. The 32x32/64x64 logical profiles remain
+  experimental, and the low-RAM GIF decoder is intentionally capped at 16x16.
+
 This file records stable snapshots and significant experimental builds. Failures
 are retained because they define compatibility constraints that should not be
 rediscovered later.
+
+## 0.7.0-dev.3 - 2026-09-04 - Media hardening and TEXT speed range
+
+- Kept the complete type-`0x00` PNG, type-`0x01` GIF, type-`0x02` RAW, and
+  type-`0x03` TEXT routing introduced by the preceding candidate.
+- Widened TEXT movement timing from 140..20 ms to 500..15 ms per pixel so the
+  official app's speed-slider extremes are clearly distinguishable.
+- Added `textSpeed` and `pngPackets` diagnostics for direct hardware evidence.
+- Separated the completed GIF pending slot from the active receive slot. Rapid
+  consecutive uploads now use newest-valid-wins semantics without losing or
+  confusing the file waiting for deferred promotion.
+- Added a sixth host test for GIF streaming, deferred promotion/open, failed
+  replacement, rapid replacement, and malformed PNG rejection.
+
+## 0.7.0-dev.2 - 2026-09-03 - Complete image/media candidate
+
+- Added common bulk type `0x01` GIF alongside type `0x02` RAW RGB and type
+  `0x03` TEXT.
+- GIF chunks stream to alternating LittleFS RX files. A valid completion is
+  promoted to a distinct PLAY file outside BLE callback context.
+- Recreate `AnimatedGIF` for every upload. Decoder teardown, file promotion,
+  decoder open, and playback occur in separate WLED loop iterations without
+  `delay()`.
+- Added an animation canvas for atomic frame publication.
+- Added the newly observed compact type-`0x00` PNG envelope: a 9-byte header,
+  little-endian PNG size at offsets 5..8, and PNG at offset 9. This remains an
+  experimental inference from the trace `140 = 9 + 131`.
+- Ported the reference non-interlaced 8-bit RGB/RGBA PNG decoder. Its miniz
+  inflater state is heap allocated to protect the ESP32 loop-task stack.
+- Added expected/calculated CRC diagnostics and PNG/GIF counters.
+- Retained 0.6.3 as stable; this build requires physical validation.
+
+## 0.7.0-dev.1 - 2026-09-03 - Atomic RAW/cloud images
+
+- Extended the confirmed FA02 bulk transport to type `0x02` RAW RGB while
+  retaining type `0x03` TEXT behavior and ACK semantics.
+- Added chunk offset/length delivery from the WLED-independent bulk layer so a
+  64x64 image does not require a second permanent 12288-byte payload buffer.
+- Added a temporary renderer canvas sized exactly to the current logical
+  profile: 768, 3072, or 12288 bytes.
+- RAW chunks are copied in loop context. The temporary canvas replaces the
+  visible framebuffer only after the full transfer passes CRC32 validation.
+- A CRC error, malformed transaction, allocation failure, size mismatch, or
+  disconnect discards the temporary canvas without publishing partial pixels.
+- RAW image content reuses the existing `iDotMatrix Display` effect and the
+  existing native/rescale mapping path; no new WLED effect was added.
+- Added `content=image`, `rawImages`, `rawRejected`, and `rawBytes` diagnostics.
+- Extended protocol, bulk, renderer, and WLED-adapter host tests for RAW begin,
+  multi-chunk writes, atomic publication, rejection, and RGB pixel order.
+- GIF type `0x01` remains deliberately unsupported in this snapshot; its next
+  implementation step will stream alternating RX files into LittleFS before
+  any AnimatedGIF decoder is introduced.
+
+## 0.6.3 - 2026-09-03 - Stable text milestone
+
+- Promoted 0.6.3-dev.3 after successful physical testing with the official app.
+- Confirmed that a valid TEXT transfer replaces clock content inside the same
+  `iDotMatrix Display` effect and renders correctly on the 16x16 matrix.
+- Retained marker `0x05` and the complete visual-mode matrix as explicit
+  follow-up hardware tests rather than overstating their validation status.
 
 ## 0.6.3-dev.3 - 2026-09-03 - App-rasterized text rendering
 
@@ -298,7 +392,7 @@ rediscovered later.
 ## 0.5.0 - 2026-09-02 - First stable BLE foundation
 
 - Froze the first experimentally verified baseline.
-- Confirmed WLED 0.16.0.1 remains operational over Wi-Fi.
+- Confirmed WLED 16.0.1 remains operational over Wi-Fi.
 - Confirmed discovery and successful connection from the official iDotMatrix app.
 - Pinned Espressif platform 6.13.x, Arduino-ESP32 2.0.17, ESP-IDF 4.4.7, and
   NimBLE-Arduino 1.4.3.

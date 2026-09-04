@@ -1,137 +1,115 @@
 # Architecture
 
-## Goal
+This document describes the stable 0.7.0 architecture.
 
-The standalone ESP32 emulator is the behavioral reference, not the desired WLED
-structure. BLE transport, protocol semantics, and WLED integration remain
-separate so future features do not recreate a monolithic sketch.
+## Design goals
+
+The Usermod keeps BLE transport, reverse-engineered protocol semantics, media
+handling, rendering, and WLED state changes separate. BLE callbacks must stay
+short and bounded; filesystem access, CRC-heavy work, decoding, allocation, and
+WLED rendering happen in normal WLED loop/effect context.
 
 ## Components
 
 ### `IDotMatrixBLEServer`
 
-Owns NimBLE, FA/AE GATT, advertising, reconnection, short callbacks, the bounded
-receive queue, FA03 notifications, and connection-time device-info scheduling.
-It also owns bounded FA02 write-to-logical-packet reassembly. AE01 is retained
-for GATT compatibility but is not the bulk path in BUILD 80. The server does
-not interpret WLED commands or render pixels.
+Owns NimBLE, the FA/AE GATT database, advertising, reconnection, delayed device
+information notifications, short-command queuing, and FA02 logical-packet
+reassembly. It requests MTU 517 so the official app can use large ATT payloads.
+It does not render pixels or directly change WLED state.
 
 ### `IDotMatrixFA02Assembler`
 
-Owns the single bounded 4112-byte reconstruction buffer. It uses the first
-write's little-endian packet length and accepts continuation writes until the
-logical packet is complete. It has no BLE, protocol, or WLED dependency.
+Owns one bounded 4112-byte logical-packet buffer. The first two little-endian
+bytes define the complete FA02 packet length. ATT fragments are appended until
+the logical packet is complete. No protocol ACK is emitted for an ATT fragment.
+An abandoned partial transfer is cleared after five seconds so later commands
+cannot be poisoned by stale reassembly state.
 
 ### `IDotMatrixBulkTransfer`
 
-Owns WLED-independent bulk-header validation, bounded TEXT assembly, streaming
-CRC32, and transfer-result state. A valid type-`0x03` payload is passed to the
-protocol layer from WLED loop context.
+Validates the common bulk header, enforces sequential chunks, calculates CRC32,
+and exposes decoded chunk spans. TEXT is retained in a bounded buffer; RAW and
+GIF are streamed onward chunk by chunk.
 
 ### `IDotMatrixProtocol`
 
-Owns length validation, command recognition, TEXT header/glyph-record parsing,
-field extraction, clamping, ACKs, device-info responses, and typed events. It
-includes neither NimBLE nor WLED and is host-testable.
-
-### `IDotMatrixWLEDAdapter`
-
-Is the only current WLED boundary. It maps typed events to power, master
-brightness, static colour, and display-content ownership. It registers one
-`iDotMatrix Display` effect and renders every app-driven canvas from that WLED
-segment-service callback. It is also the only layer
-that reads WLED local time or maps logical pixels to physical segment pixels.
+Owns WLED-independent command validation, typed command decoding, TEXT record
+parsing, ACK generation, device-information replies, and the media-sink
+boundary. It is host-testable.
 
 ### `IDotMatrixRenderer`
 
-Owns the logical RGB canvas and no WLED or BLE APIs. It allocates three bytes per
-pixel at runtime: 768 bytes for 16x16, 3072 bytes for 32x32, or 12288 bytes for
-64x64. It validates logical coordinates and renders clock artwork and
-app-rasterized text without WLED dependencies. Glyph storage is allocated in
-loop context and reused when possible. The renderer is independently
-host-testable.
+Owns the logical RGB framebuffer, graffiti pixels, clock artwork, text glyphs,
+and animation frame publication. The visible canvas uses three bytes per pixel:
+768 bytes at 16x16, 3072 at 32x32, and 12288 at 64x64. RAW transfers use a
+temporary canvas and are published atomically only after successful completion.
+
+### `IDotMatrixMedia`
+
+Owns filesystem-backed GIF reception/playback and compact PNG decoding. GIF
+chunks stream to alternating RX files, a valid completed upload is promoted to
+a PLAY file, and decoding begins in a later WLED loop iteration.
+
+For 0.7.0 the repository patches AnimatedGIF 1.4.7 at PlatformIO build time for
+the validated 16x16 target. The decoder uses a maximum width of 16, a 1024-byte
+file buffer, a 1024-entry LZW dictionary, and reduced pixel workspace. The
+`AnimatedGIF` object is then stored in fixed Usermod memory and reconstructed in
+place for each animation, avoiding heap fragmentation without consuming the
+~22 KiB required by the stock library configuration.
+
+### `IDotMatrixWLEDAdapter`
+
+Is the WLED boundary. It maps power, brightness, RGB, and app-content ownership
+to WLED. It registers one effect named `iDotMatrix Display`, reads WLED local
+time for clocks, and applies WLED's configured 2D mapping/rescale when emitting
+pixels.
 
 ### `usermod_idotmatrix.cpp`
 
-Owns registration, settings, the I2S/RMT guard, Wi-Fi modem-sleep requirement,
-delayed BLE startup, and `/json/info` diagnostics.
+Owns Usermod lifecycle, settings, the I2S/RMT safety guard, Wi-Fi modem-sleep
+requirement, delayed BLE startup, and compact runtime status under `/json/info`.
 
 ## Execution model
 
-1. WLED initializes LED and Wi-Fi facilities.
-2. The Usermod waits five seconds, then starts NimBLE.
-3. A BLE callback copies bounded data into a four-entry queue.
-4. The WLED loop dequeues the write.
-5. The protocol validates and decodes it.
-6. The adapter applies a typed event to WLED.
-7. A bounded reply is notified through FA03.
-
-For graffiti, the adapter updates the canvas during step 6 and selects the
-registered `iDotMatrix Display` effect. WLED calls that effect during its
-normal segment service, after establishing the current segment and its virtual
-XY dimensions. The effect copies the logical canvas through
-`SEGMENT.setPixelColorXY()`, so WLED retains physical mapping ownership.
-
-For clock commands, the adapter stores typed options and selects the same
-`iDotMatrix Display` effect. Its callback reads WLED `localTime`, asks the
-renderer to update the logical canvas, and then uses the same bounded output
-path. TEXT payloads are parsed in loop context, copied into bounded reusable
-glyph storage, and rendered through this same effect. Future media and timers
-should also use this single display effect.
-
-BLE callbacks do not call WLED state/rendering APIs and contain no `delay()`.
-
-## Connection sequence
-
-1. The callback records connection state and queues an event.
-2. The WLED loop applies logical screen ON.
-3. Device info is sent after about 1.2 seconds.
-4. The same packet is retried after about 2.5 seconds.
-
-The retry handles app subscription/UI timing observed in WLED.
+1. WLED initializes LEDs and Wi-Fi.
+2. The Usermod allocates its logical renderer and waits five seconds.
+3. NimBLE starts and advertises the iDotMatrix-compatible GATT database.
+4. BLE callbacks only copy bounded writes or append FA02 fragments.
+5. The WLED loop processes complete packets and sends replies.
+6. Protocol events are applied through the WLED adapter.
+7. `iDotMatrix Display` renders app-owned content from WLED effect context.
+8. GIF filesystem/decoder work runs in normal loop context, never a BLE callback.
 
 ## State ownership
 
 | State | Authority |
 |---|---|
-| Power | WLED, changed by app events or WLED interfaces |
-| Brightness | WLED `bri`/`briLast` and WLED persistence |
-| Solid colour/effect | WLED selected-segment state |
-| App brightness UI | App-local and unreadable by the device |
-| Emulated profile | Usermod configuration |
-| Graffiti pixels | `IDotMatrixRenderer` logical framebuffer |
-| Clock time, timezone, and DST | WLED time/NTP subsystem |
-| Clock style/colour/date option | Last command received from the app |
-| Text bitmap/style/motion | Last valid app-rasterized TEXT payload |
+| Power / brightness | WLED |
+| Solid colour | WLED segment state |
+| BLE logical profile | Usermod configuration |
+| Graffiti / RAW / PNG / GIF visible pixels | `IDotMatrixRenderer` |
+| Clock time, timezone, DST | WLED time subsystem |
+| Clock style / text style | last valid app command |
 | Physical XY/serpentine mapping | WLED matrix configuration |
 
-Brightness persistence is intentionally not duplicated.
+## Memory rules
 
-## Memory and concurrency rules
+- no blocking media decode in NimBLE callbacks;
+- four 64-byte queue slots for complete short commands;
+- one 4112-byte FA02 reassembly buffer for fragmented/large packets;
+- one persistent logical framebuffer;
+- RAW uses one temporary framebuffer only during reception;
+- TEXT storage is bounded and allocated only outside BLE callbacks;
+- GIF bytes are streamed to LittleFS rather than buffered completely in RAM;
+- 0.7.0's 16x16 AnimatedGIF object is about 8 KiB and uses fixed placement
+  storage to avoid heap fragmentation;
+- PNG/miniz scratch memory is temporary;
+- PSRAM is not required for the validated 16x16 target.
 
-- The protocol decoder uses fixed response storage.
-- The callback queue is four 64-byte entries plus metadata.
-- Fragmented or large FA02 traffic uses one 4112-byte reconstruction slot; the
-  callback copies into it and loop context performs parsing, CRC, and replies.
-- The canvas is allocated once during Usermod setup and never from a BLE
-  callback.
-- TEXT bitmap storage is allocated or grown only in loop context, is reused,
-  and is capped at 4096 bytes.
-- Large transfers must use a separate streaming path.
-- Future media must stream to LittleFS using separate RX and PLAY files.
-- AnimatedGIF must be recreated for each promoted GIF.
-- PSRAM may optimize large profiles but cannot be required for 16x16.
+## Profile scope
 
-## Renderer extension
-
-Graffiti and clock use `IDotMatrixRenderer` with a resolution-independent
-16x16/32x32/64x64 logical framebuffer. Future text and decoded media should draw
-into the same canvas and explicitly take display-content ownership.
-
-The advertised profile remains an explicit Usermod setting. The WLED segment is
-the physical target. Strict native-size matching is the default; optional
-nearest-neighbour rescale permits lossy 32/64-to-16 previews and unusual target
-sizes without changing protocol coordinates.
-
-Bulk reassembly/streaming must be separate from the small-command queue before
-text or GIF support is enabled.
+The renderer and protocol retain 16x16, 32x32, and 64x64 logical profile
+support. Stable 0.7.0 hardware validation is 16x16. The low-RAM GIF decoder is
+specifically capped at 16x16, so larger-profile GIF support is intentionally a
+future task rather than a 0.7.0 claim.

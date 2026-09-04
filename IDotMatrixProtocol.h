@@ -51,6 +51,17 @@ public:
     size_t bitmapLength
   ) = 0;
   virtual void onTextComplete() = 0;
+  virtual bool onRawImageBegin(size_t byteLength) = 0;
+  virtual bool onRawImageData(
+    size_t offset,
+    const uint8_t* data,
+    size_t length
+  ) = 0;
+  virtual bool onRawImageComplete(bool crcValid) = 0;
+  virtual bool onPngImage(const uint8_t* data, size_t length) = 0;
+  virtual bool onGifBegin(size_t byteLength) = 0;
+  virtual bool onGifData(size_t offset, const uint8_t* data, size_t length) = 0;
+  virtual bool onGifComplete(bool crcValid) = 0;
 };
 
 struct IDotMatrixReply {
@@ -71,6 +82,13 @@ public:
   void makeDeviceInfoReply(IDotMatrixReply& reply) const;
   bool processFA02(const uint8_t* data, size_t length, IDotMatrixReply& reply);
   bool processTextPayload(const uint8_t* data, size_t length);
+  bool beginRawImage(size_t byteLength);
+  bool writeRawImage(size_t offset, const uint8_t* data, size_t length);
+  bool completeRawImage(bool crcValid);
+  bool processInlinePng(const uint8_t* data, size_t length, IDotMatrixReply& reply);
+  bool beginGif(size_t byteLength);
+  bool writeGif(size_t offset, const uint8_t* data, size_t length);
+  bool completeGif(bool crcValid);
 
 private:
   static bool hasValidLength(const uint8_t* data, size_t length);

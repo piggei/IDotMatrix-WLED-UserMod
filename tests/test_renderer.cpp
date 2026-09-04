@@ -27,7 +27,33 @@ int main() {
   assert(pixel != nullptr);
   assert(pixel->red == 0x12 && pixel->green == 0x34 && pixel->blue == 0x56);
   assert(!renderer.setPixel(16, 15, 1, 2, 3));
-  assert(renderer.acceptedPixelUpdates() == 1);
+
+  uint8_t rawImage[16 * 16 * 3]{};
+  rawImage[0] = 0xA1;
+  rawImage[1] = 0xB2;
+  rawImage[2] = 0xC3;
+  rawImage[sizeof(rawImage) - 3] = 4;
+  rawImage[sizeof(rawImage) - 2] = 5;
+  rawImage[sizeof(rawImage) - 1] = 6;
+  assert(!renderer.beginRawImage(sizeof(rawImage) - 1));
+  assert(renderer.beginRawImage(sizeof(rawImage)));
+  assert(renderer.writeRawImage(0, rawImage, 400));
+  assert(renderer.writeRawImage(400, rawImage + 400, sizeof(rawImage) - 400));
+  assert(renderer.completeRawImage(true));
+  pixel = renderer.pixel(0, 0);
+  assert(pixel != nullptr);
+  assert(pixel->red == 0xA1 && pixel->green == 0xB2 && pixel->blue == 0xC3);
+  pixel = renderer.pixel(15, 15);
+  assert(pixel != nullptr);
+  assert(pixel->red == 4 && pixel->green == 5 && pixel->blue == 6);
+
+  assert(renderer.beginRawImage(sizeof(rawImage)));
+  const uint8_t replacement[] = {9, 9, 9};
+  assert(renderer.writeRawImage(0, replacement, sizeof(replacement)));
+  assert(!renderer.completeRawImage(false));
+  pixel = renderer.pixel(0, 0);
+  assert(pixel != nullptr);
+  assert(pixel->red == 0xA1 && pixel->green == 0xB2 && pixel->blue == 0xC3);
 
   renderer.setVisible(true);
   assert(renderer.isVisible());
@@ -98,4 +124,31 @@ int main() {
   // Invalid profiles retain the reference implementation's 16x16 fallback.
   assert(renderer.begin(0xFF));
   assert(renderer.width() == 16 && renderer.height() == 16);
+
+  // Text speed spans a deliberately wide 500..15 ms interval.  A left-moving
+  // glyph starts just outside the right edge and enters only when its interval
+  // has elapsed.
+  assert(renderer.beginText(
+    1, 8, 16, 16, 1, 0, 1,
+    1, 2, 3, false, 0, 0, 0, 0
+  ));
+  assert(renderer.setTextGlyph(0, glyph8x16, sizeof(glyph8x16)));
+  renderer.renderText(0);
+  renderer.renderText(499);
+  expectBlack(renderer.pixel(15, 0));
+  renderer.renderText(500);
+  pixel = renderer.pixel(15, 0);
+  assert(pixel != nullptr && pixel->red == 1 && pixel->green == 2 && pixel->blue == 3);
+
+  assert(renderer.beginText(
+    1, 8, 16, 16, 1, 100, 1,
+    4, 5, 6, false, 0, 0, 0, 0
+  ));
+  assert(renderer.setTextGlyph(0, glyph8x16, sizeof(glyph8x16)));
+  renderer.renderText(0);
+  renderer.renderText(14);
+  expectBlack(renderer.pixel(15, 0));
+  renderer.renderText(15);
+  pixel = renderer.pixel(15, 0);
+  assert(pixel != nullptr && pixel->red == 4 && pixel->green == 5 && pixel->blue == 6);
 }

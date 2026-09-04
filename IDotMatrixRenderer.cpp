@@ -8,6 +8,8 @@ static_assert(sizeof(IDotMatrixRenderer::Pixel) == 3, "RGB framebuffer must use 
 IDotMatrixRenderer::~IDotMatrixRenderer() {
   delete[] pixels_;
   delete[] textBitmaps_;
+  delete[] rawImagePixels_;
+  delete[] animationPixels_;
 }
 
 bool IDotMatrixRenderer::begin(uint8_t screenType) {
@@ -15,11 +17,12 @@ bool IDotMatrixRenderer::begin(uint8_t screenType) {
   const size_t requestedPixelCount = size_t(dimension) * dimension;
   textValid_ = false;
   textFrameRendered_ = false;
+  cancelRawImage();
+  endAnimation();
 
   if (pixels_ != nullptr && requestedPixelCount == pixelCount_) {
     clear();
     visible_ = false;
-    acceptedPixelUpdates_ = 0;
     return true;
   }
 
@@ -32,7 +35,6 @@ bool IDotMatrixRenderer::begin(uint8_t screenType) {
   width_ = dimension;
   height_ = dimension;
   visible_ = false;
-  acceptedPixelUpdates_ = 0;
   clear();
   return true;
 }
@@ -40,6 +42,42 @@ bool IDotMatrixRenderer::begin(uint8_t screenType) {
 void IDotMatrixRenderer::clear() {
   if (pixels_ == nullptr) return;
   memset(pixels_, 0, pixelCount_ * sizeof(Pixel));
+}
+
+bool IDotMatrixRenderer::beginAnimation() {
+  if (pixels_ == nullptr || pixelCount_ == 0) return false;
+  if (animationPixels_ == nullptr) {
+    animationPixels_ = new (std::nothrow) Pixel[pixelCount_];
+    if (animationPixels_ == nullptr) return false;
+  }
+  clearAnimation();
+  return true;
+}
+
+void IDotMatrixRenderer::clearAnimation() {
+  if (animationPixels_ != nullptr) {
+    memset(animationPixels_, 0, pixelCount_ * sizeof(Pixel));
+  }
+}
+
+bool IDotMatrixRenderer::setAnimationPixel(
+  uint8_t x, uint8_t y, uint8_t red, uint8_t green, uint8_t blue
+) {
+  if (animationPixels_ == nullptr || x >= width_ || y >= height_) return false;
+  animationPixels_[size_t(y) * width_ + x] = Pixel{red, green, blue};
+  return true;
+}
+
+bool IDotMatrixRenderer::publishAnimationFrame() {
+  if (pixels_ == nullptr || animationPixels_ == nullptr) return false;
+  memcpy(pixels_, animationPixels_, pixelCount_ * sizeof(Pixel));
+  visible_ = true;
+  return true;
+}
+
+void IDotMatrixRenderer::endAnimation() {
+  delete[] animationPixels_;
+  animationPixels_ = nullptr;
 }
 
 bool IDotMatrixRenderer::setPixel(
@@ -55,7 +93,6 @@ bool IDotMatrixRenderer::setPixel(
   target.red = red;
   target.green = green;
   target.blue = blue;
-  ++acceptedPixelUpdates_;
   return true;
 }
 
@@ -438,6 +475,7 @@ bool IDotMatrixRenderer::beginText(
   textBackground_ = Pixel{backgroundRed, backgroundGreen, backgroundBlue};
   textAnimationStart_ = now;
   textLastFrame_ = now;
+  textLastMove_ = now;
   textFrameRendered_ = false;
   textValid_ = true;
 
@@ -487,12 +525,24 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
   if (!textValid_ || textBitmaps_ == nullptr || pixels_ == nullptr) return;
 
   const uint8_t boundedSpeed = textSpeed_ > 100 ? 100 : textSpeed_;
-  uint16_t interval = 140u - uint16_t(boundedSpeed) * 120u / 100u;
-  if ((textMotionEffect_ >= 5 || textColorMode_ >= 2) && interval > 45) interval = 45;
-  if (textFrameRendered_ && uint32_t(now - textLastFrame_) < interval) return;
+  // The app uses the full 0..100 field, but common presets sit near the slow
+  // end (for example speed=5).  The former 140..20 ms mapping made most of the
+  // slider feel almost identical.  Use a deliberately wider 500..15 ms range:
+  // movement now spans from clearly readable to approximately one pixel per
+  // WLED effect frame at the fast end.
+  const uint16_t moveInterval = 500u - uint16_t(boundedSpeed) * 485u / 100u;
+
+  // Visual effects (blink/colour animation) may need frequent redraws, but they
+  // must not change the text movement cadence.  The previous implementation
+  // clamped the common interval to 45 ms, effectively defeating the speed
+  // slider whenever one of those effects was selected.
+  const bool animatedVisual = textMotionEffect_ >= 5 || textColorMode_ >= 2;
+  const uint16_t renderInterval = animatedVisual ? 45u : moveInterval;
+  if (textFrameRendered_ && uint32_t(now - textLastFrame_) < renderInterval) return;
 
   const int16_t textWidth = int16_t(textGlyphCount_) * textGlyphWidth_;
-  if (textFrameRendered_) {
+  const bool moveNow = !textFrameRendered_ || uint32_t(now - textLastMove_) >= moveInterval;
+  if (textFrameRendered_ && moveNow) {
     switch (textMotionEffect_) {
       case 1:
         if (--textOffsetX_ < -textWidth) textOffsetX_ = width_;
@@ -509,6 +559,7 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
       default:
         break;
     }
+    textLastMove_ = now;
   }
   textLastFrame_ = now;
   textFrameRendered_ = true;
@@ -578,6 +629,55 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
     }
   }
   visible_ = true;
+}
+
+bool IDotMatrixRenderer::beginRawImage(size_t byteLength) {
+  cancelRawImage();
+  const size_t required = pixelCount_ * sizeof(Pixel);
+  if (pixels_ == nullptr || required == 0 || byteLength != required) return false;
+
+  rawImagePixels_ = new (std::nothrow) Pixel[pixelCount_];
+  if (rawImagePixels_ == nullptr) return false;
+  memset(rawImagePixels_, 0, required);
+  rawImageBytes_ = required;
+  return true;
+}
+
+bool IDotMatrixRenderer::writeRawImage(
+  size_t offset,
+  const uint8_t* data,
+  size_t length
+) {
+  if (rawImagePixels_ == nullptr || data == nullptr ||
+      offset > rawImageBytes_ || length > rawImageBytes_ - offset) {
+    return false;
+  }
+  memcpy(reinterpret_cast<uint8_t*>(rawImagePixels_) + offset, data, length);
+  return true;
+}
+
+bool IDotMatrixRenderer::completeRawImage(bool crcValid) {
+  if (rawImagePixels_ == nullptr) return false;
+  if (!crcValid) {
+    cancelRawImage();
+    return false;
+  }
+
+  Pixel* previous = pixels_;
+  pixels_ = rawImagePixels_;
+  rawImagePixels_ = nullptr;
+  rawImageBytes_ = 0;
+  delete[] previous;
+  textValid_ = false;
+  textFrameRendered_ = false;
+  visible_ = true;
+  return true;
+}
+
+void IDotMatrixRenderer::cancelRawImage() {
+  delete[] rawImagePixels_;
+  rawImagePixels_ = nullptr;
+  rawImageBytes_ = 0;
 }
 
 uint8_t IDotMatrixRenderer::dimensionForScreenType(uint8_t screenType) {

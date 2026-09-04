@@ -1,7 +1,6 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes stable WLED iDotMatrix Usermod 0.6.2 plus the
-0.6.3-dev.3 TEXT-rendering candidate. The standalone
+This document describes the protocol subset implemented by stable WLED iDotMatrix Usermod 0.7.0. The standalone
 `IDotMatrix-ESP32-Emulator` repository remains the primary, complete protocol
 reference.
 
@@ -66,7 +65,7 @@ Command:
 
 Response: `05 00 01 80 01`
 
-Version 0.6.3-dev.3 acknowledges but does not apply the time fields. This is an
+Version 0.7.0 acknowledges but does not apply the time fields. This is an
 intentional WLED integration decision: WLED `localTime`, NTP, timezone, and DST
 configuration remain the sole clock authority.
 
@@ -146,8 +145,8 @@ effect, which copies the canvas while WLED services the current segment and has
 valid virtual XY state. A valid pixel packet also selects the effect. No
 physical serpentine mapping is duplicated in this module.
 
-**Limitation:** one complete logical packet must still fit a queued BLE write of
-at most 64 bytes. Fragment reassembly is a separate pending milestone.
+Complete short packets use the 64-byte queue. Larger logical FA02 packets are
+reassembled in the dedicated 4112-byte slot before protocol dispatch.
 
 ## Clock
 
@@ -223,11 +222,65 @@ therefore observed no chunks; 0.6.3-dev.2 follows the source implementation.
 One dedicated FA02 assembler accepts an observed 4096-byte payload chunk plus
 the 16-byte header. The callback only performs bounded copies; logical-packet
 dispatch, CRC32, and notification happen in the normal Usermod loop. TEXT is
-bounded to 4096 payload bytes.
+bounded to 4096 payload bytes; RAW is bounded to the 12288 bytes required by a
+64x64 RGB frame. GIF is streamed to LittleFS and capped at 2 MiB here.
 
-Matching BUILD 80, an otherwise unknown complete short FA02 command is logged
-and receives `05 00 COMMAND SUBCOMMAND 01`. Unsupported GIF/RAW bulk packets
-are not covered by that compatibility ACK.
+Matching BUILD 80, an otherwise unknown complete short FA02 command is
+tolerated and receives `05 00 COMMAND SUBCOMMAND 01`.
+
+The routed common types are `0x01` GIF, `0x02` RAW RGB, and `0x03` TEXT. Their
+ACK retains the type and uses `0x01` while incomplete and `0x03` when the
+transaction terminates.
+
+## Compact PNG envelope (experimental)
+
+A physical app trace produced this 140-byte packet prefix:
+
+```text
+8c 00 00 00 00 83 00 00 00 89 50 4e 47 ...
+```
+
+Packet length 140, size 131, and the PNG signature at offset 9 imply:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 2 | packet length, little-endian |
+| 2 | 1 | content type `00` |
+| 3..4 | 2 | observed `00 00`, semantics unknown |
+| 5 | 4 | PNG byte length, little-endian |
+| 9 | remaining | PNG beginning `89 50 4E 47...` |
+
+The 0.7.0 implementation replies `05 00 00 00 03`. No outer CRC was observed; PNG/zlib
+structure is validated. This layout is a new inference from the WLED trace,
+not yet a confirmed BUILD 80 or original-device fact. The decoder accepts
+non-interlaced 8-bit RGB/RGBA and exact logical-profile dimensions. In 0.7.0 the complete compact PNG envelope must fit the 4112-byte FA02 slot.
+
+## GIF payload
+
+**Confirmed by the reference:** common type `0x01` contains a standard
+`GIF87a` or `GIF89a` stream. CRC32 covers the complete compressed payload. The
+WLED integration writes chunks to an RX file and starts playback only after a
+valid completion and deferred RX-to-PLAY promotion.
+
+Stable 0.7.0 validates GIF playback only on the 16x16 profile. The build-time
+AnimatedGIF configuration rejects dimensions larger than 16x16 to keep the
+decoder RAM footprint compatible with classic ESP32 + WLED + Wi-Fi + NimBLE.
+
+## RAW RGB image payload
+
+**Confirmed protocol:** bulk type `0x02` contains row-major RGB triplets. Its
+declared size must match the active logical profile:
+
+| Profile | Resolution | RAW bytes |
+|---:|---:|---:|
+| `0x01` | 16x16 | 768 |
+| `0x03` | 32x32 | 3072 |
+| `0x04` | 64x64 | 12288 |
+
+Each pixel is `R G B`; pixels advance left-to-right and rows top-to-bottom.
+The WLED mapping is intentionally separate from the protocol order: the
+logical image is published only after valid CRC32, then the existing display
+effect lets WLED apply its configured matrix mapping or the optional rescale.
 
 ## TEXT payload and glyph records
 
@@ -238,7 +291,7 @@ are not covered by that compatibility ACK.
 | 0 | glyph count |
 | 1..3 | not yet documented |
 | 4 | movement/effect |
-| 5 | speed |
+| 5 | speed (`0..100`; mapped by 0.7.0 to 500..15 ms per pixel) |
 | 6 | colour mode |
 | 7..9 | text RGB |
 | 10 | background enabled/mode |
@@ -253,7 +306,7 @@ Each glyph begins with a four-byte metadata prefix followed by its bitmap:
 | `0x03` | reference compatibility alias, unconfirmed | 8x16 | 16 bytes | 20 bytes |
 | `0x06` | reference compatibility alias, unconfirmed | 16x32 | 64 bytes | 68 bytes |
 
-Version 0.6.3-dev.3 accepts only the experimentally confirmed `0x02` and
+Version 0.7.0 accepts only the experimentally confirmed `0x02` and
 `0x05` markers. Bitmap rows are consecutive, and the least-significant bit is
 the leftmost pixel within each byte. Mixed glyph sizes in one payload have not
 been observed and are not supported.
@@ -264,12 +317,12 @@ background, speed, movement, and effects are rendered locally. SimSun and
 SimHei require no WLED font library because the official app rasterizes them
 before transmission.
 
-## Unsupported in 0.6.3-dev.3
+## Unsupported in 0.7.0
 
-- generic fragmented FA02 commands outside the bounded bulk reassembly path;
-- GIF/RAW FA02 bulk processing;
 - unconfirmed TEXT marker aliases `0x03` and `0x06`;
-- GIF/cloud media;
+- interlaced PNG, other PNG colour types, and PNG dimensions differing from
+  the logical profile;
+- GIF dimensions larger than 16x16 in the stable low-RAM decoder build;
 - countdown, stopwatch, scoreboard, alarms, schedules;
 - energy saving, rotation, standalone light effects, and reset.
 

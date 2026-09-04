@@ -2,6 +2,7 @@
 #include "IDotMatrixBLEServer.h"
 #include "IDotMatrixProtocol.h"
 #include "IDotMatrixRenderer.h"
+#include "IDotMatrixMedia.h"
 #include "IDotMatrixWLEDAdapter.h"
 
 namespace {
@@ -19,7 +20,8 @@ private:
   String deviceName_ = "IDM-858931";
   bool rescale_ = false;
   IDotMatrixRenderer renderer_;
-  IDotMatrixWLEDAdapter adapter_{renderer_};
+  IDotMatrixMedia media_{renderer_};
+  IDotMatrixWLEDAdapter adapter_{renderer_, &media_};
   IDotMatrixProtocol protocol_{adapter_};
   IDotMatrixBLEServer ble_{protocol_};
   bool blockedByRmt_ = false;
@@ -117,6 +119,9 @@ public:
     }
 
     ble_.loop();
+
+
+    media_.loop(millis());
   }
 
   void addToJsonInfo(JsonObject& root) override {
@@ -134,70 +139,18 @@ public:
       return;
     }
 
-    info.add(startPending_ ? F("BLE advertising pending") : ble_.isInitialized()
+    info.add(startPending_ ? F("BLE startup pending") : ble_.isInitialized()
       ? (ble_.isConnected() ? F("BLE connected") : ble_.isAdvertising()
-        ? F("BLE advertising") : F("BLE ready, not advertising"))
+        ? F("BLE advertising") : F("BLE ready"))
       : F("BLE init failed"));
-    info.add(String(F("profile=0x")) + String(ble_.screenType(), HEX));
+    info.add(String(F("profile=")) + String(renderer_.width()) + 'x' + String(renderer_.height()));
     info.add(String(F("name=")) + deviceName_);
-    if (ble_.isInitialized()) info.add(String(F("nameActive=")) + ble_.deviceName());
-    if (bleRestartRequired_) info.add(F("BLE restart required"));
-    info.add(String(F("rx=")) + String(ble_.receivedPackets()));
-    info.add(String(F("dropped=")) + String(ble_.droppedPackets()));
-    info.add(String(F("bulkChunks=")) + String(ble_.bulkChunks()));
-    info.add(String(F("bulkComplete=")) + String(ble_.bulkCompleted()));
-    info.add(String(F("bulkCrcErrors=")) + String(ble_.bulkCRCErrors()));
-    info.add(String(F("bulkRejected=")) + String(ble_.bulkRejected()));
-    info.add(String(F("fragments=")) + String(ble_.fragmentedWrites()));
-    info.add(String(F("reassemblyErrors=")) + String(ble_.reassemblyErrors()));
-    if (ble_.reassemblyExpected() > 0) {
-      info.add(String(F("reassembly=")) + String(ble_.reassemblyReceived()) + '/' +
-        String(ble_.reassemblyExpected()));
-    }
-    info.add(String(F("unknown=")) + String(ble_.unknownPackets()));
-    if (ble_.lastUnknownStored() > 0) {
-      String unknown = String(F("lastUnknown=")) + String(ble_.lastUnknownLength()) + ':';
-      const uint8_t* bytes = ble_.lastUnknownData();
-      for (uint8_t index = 0; index < ble_.lastUnknownStored(); ++index) {
-        if (index > 0) unknown += ' ';
-        if (bytes[index] < 0x10) unknown += '0';
-        unknown += String(bytes[index], HEX);
-      }
-      info.add(unknown);
-    }
-    if (ble_.textPayloadLength() > 0) {
-      info.add(String(F("textBytes=")) + String(ble_.textPayloadLength()));
-    }
-    info.add(String(F("textParsed=")) + String(ble_.textParsed()));
-    info.add(String(F("textParseErrors=")) + String(ble_.textParseErrors()));
-    info.add(String(F("infoPushAttempts=")) + String(ble_.deviceInfoPushAttempts()));
-    info.add(renderer_.isReady()
-      ? String(F("canvas=")) + String(renderer_.width()) + 'x' + String(renderer_.height())
-      : String(F("canvas=allocation failed")));
+    if (bleRestartRequired_) info.add(F("Restart required after name/profile change"));
     info.add(adapter_.isClockActive() ? F("content=clock") :
       adapter_.isTextActive() ? F("content=text") :
+      adapter_.isGifActive() ? F("content=gif") :
+      adapter_.isRawImageActive() ? F("content=image") :
       renderer_.isVisible() ? F("content=graffiti") : F("content=WLED"));
-    info.add(String(F("pixelUpdates=")) + String(renderer_.acceptedPixelUpdates()));
-    info.add(adapter_.isDisplayEffectRegistered()
-      ? String(F("displayFx=")) + String(adapter_.displayEffectId()) +
-        (adapter_.isDisplayEffectActive() ? F(" active") : F(" inactive"))
-      : String(F("displayFx=registration failed")));
-    if (adapter_.isClockActive()) {
-      info.add(String(F("clockStyle=")) + String(adapter_.clockStyle() & 0x07) +
-        (adapter_.clockUses24Hour() ? F(" 24h") : F(" 12h")) +
-        (adapter_.clockShowsDate() ? F(" date") : F("")));
-    }
-    if (adapter_.isTextActive()) {
-      info.add(String(F("textGlyphs=")) + String(adapter_.textGlyphCount()) + ' ' +
-        String(adapter_.textGlyphWidth()) + 'x' + String(adapter_.textGlyphHeight()));
-    }
-    info.add(String(F("effectFrames=")) + String(adapter_.renderedFrames()));
-    if (adapter_.renderedFrames() > 0) {
-      info.add(String(F("target=")) + String(adapter_.targetWidth()) + 'x' +
-        String(adapter_.targetHeight()));
-      info.add(adapter_.dimensionsMatch() ? F("mapping=native") :
-        adapter_.rescaleEnabled() ? F("mapping=rescale") : F("mapping=mismatch blocked"));
-    }
   }
 
   void addToConfig(JsonObject& root) override {

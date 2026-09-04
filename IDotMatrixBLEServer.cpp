@@ -26,6 +26,10 @@ bool IDotMatrixBLEServer::begin(const char* deviceName, uint8_t screenType) {
   protocol_.setScreenType(screenType_);
 
   NimBLEDevice::init(deviceName_);
+  // Match the standalone emulator as closely as NimBLE allows.  The peer still
+  // chooses the final negotiated MTU, but advertising the maximum local MTU
+  // prevents an unnecessarily small server-side ceiling.
+  NimBLEDevice::setMTU(517);
   server_ = NimBLEDevice::createServer();
   if (server_ == nullptr) return false;
   server_->setCallbacks(&serverCallbacks_);
@@ -77,6 +81,10 @@ void IDotMatrixBLEServer::loop() {
       deviceInfoPushAt_ = millis() + 1200;
     } else {
       bulkTransfer_.reset();
+      protocol_.completeRawImage(false);
+      protocol_.completeGif(false);
+      rawTransferReady_ = false;
+      gifTransferReady_ = false;
       portENTER_CRITICAL(&queueMux_);
       faAssembler_.reset();
       portEXIT_CRITICAL(&queueMux_);
@@ -88,7 +96,6 @@ void IDotMatrixBLEServer::loop() {
       IDotMatrixReply reply;
       protocol_.makeDeviceInfoReply(reply);
       sendFA03(reply.data, reply.length);
-      ++deviceInfoPushAttempts_;
       --deviceInfoPushesRemaining_;
       if (deviceInfoPushesRemaining_ > 0) deviceInfoPushAt_ = millis() + 1300;
     } else {
@@ -104,6 +111,20 @@ void IDotMatrixBLEServer::loop() {
   RxPacket packet;
   while (dequeue(packet)) {
     processPacket(packet);
+  }
+
+  // Never let an abandoned fragmented media packet poison the characteristic
+  // indefinitely.  A reconnect used to be the only way to clear this state.
+  if (faAssembler_.expected() > 0 && !faAssembler_.complete() &&
+      uint32_t(millis() - reassemblyLastWriteAt_) >= 5000u) {
+    portENTER_CRITICAL(&queueMux_);
+    faAssembler_.reset();
+    portEXIT_CRITICAL(&queueMux_);
+    bulkTransfer_.reset();
+    protocol_.completeRawImage(false);
+    protocol_.completeGif(false);
+    rawTransferReady_ = false;
+    gifTransferReady_ = false;
   }
 
   // The standalone reference assembles FA02 fragments until the length in the
@@ -130,6 +151,13 @@ void IDotMatrixBLEServer::ServerCallbacks::onDisconnect(NimBLEServer* server) {
   owner_.onDisconnect();
 }
 
+void IDotMatrixBLEServer::ServerCallbacks::onMTUChange(
+  uint16_t mtu, ble_gap_conn_desc* desc
+) {
+  (void)desc;
+  owner_.onMTUChange(mtu);
+}
+
 void IDotMatrixBLEServer::WriteCallbacks::onWrite(NimBLECharacteristic* characteristic) {
   owner_.enqueueFromCallback(characteristic);
 }
@@ -147,6 +175,10 @@ void IDotMatrixBLEServer::onDisconnect() {
   restartAdvertisingAt_ = millis() + 300;
 }
 
+void IDotMatrixBLEServer::onMTUChange(uint16_t mtu) {
+  (void)mtu;
+}
+
 void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characteristic) {
   if (characteristic == nullptr) return;
 
@@ -156,26 +188,20 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
   const RxChannel channel = characteristic == ae01_ ? RxChannel::AE01 : RxChannel::FA02;
 
   portENTER_CRITICAL(&queueMux_);
-  ++receivedPackets_;
   if (channel == RxChannel::FA02) {
     if (faAssembler_.complete()) {
-      ++droppedPackets_;
       portEXIT_CRITICAL(&queueMux_);
       return;
     }
 
     if (faAssembler_.expected() == 0) {
       if (value.length() < 2) {
-        ++reassemblyErrors_;
-        ++droppedPackets_;
         portEXIT_CRITICAL(&queueMux_);
         return;
       }
       const uint16_t declaredLength = uint16_t(uint8_t(value[0])) |
         (uint16_t(uint8_t(value[1])) << 8);
       if (declaredLength == 0 || declaredLength > BULK_PACKET_MAX) {
-        ++reassemblyErrors_;
-        ++droppedPackets_;
         portEXIT_CRITICAL(&queueMux_);
         return;
       }
@@ -184,7 +210,6 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
       // rapid power/brightness/colour writes do not contend for the bulk slot.
       if (declaredLength <= RX_PACKET_MAX && value.length() >= declaredLength) {
         if (rxCount_ >= RX_QUEUE_SIZE) {
-          ++droppedPackets_;
           portEXIT_CRITICAL(&queueMux_);
           return;
         }
@@ -198,8 +223,6 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
         return;
       }
 
-    } else {
-      ++fragmentedWrites_;
     }
 
     const IDotMatrixFA02Assembler::Result result = faAssembler_.append(
@@ -208,8 +231,11 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
     );
     if (result == IDotMatrixFA02Assembler::Result::Invalid ||
         result == IDotMatrixFA02Assembler::Result::Busy) {
-      ++reassemblyErrors_;
-      ++droppedPackets_;
+      // Malformed or overlapping fragments are discarded; the app can retry.
+    } else if (result == IDotMatrixFA02Assembler::Result::Accumulating) {
+      reassemblyLastWriteAt_ = millis();
+      // Do not emit a protocol ACK for an ATT fragment.  The verified standalone
+      // emulator only ACKs after the complete logical FA02 packet is assembled.
     }
     portEXIT_CRITICAL(&queueMux_);
     return;
@@ -218,7 +244,6 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
   // AE01 is retained because it belongs to the emulated GATT database, but the
   // BUILD 80 reference only logs it. No implemented content path uses it.
   if (rxCount_ >= RX_QUEUE_SIZE) {
-    ++droppedPackets_;
     portEXIT_CRITICAL(&queueMux_);
     return;
   }
@@ -266,16 +291,56 @@ void IDotMatrixBLEServer::processFA02Complete(
   IDotMatrixReply& reply
 ) {
   reply.length = 0;
+  // Newly observed app format: a complete PNG is wrapped in a compact
+  // 9-byte type-0 envelope rather than the common 16-byte CRC bulk header.
+  if (protocol_.processInlinePng(data, length, reply)) {
+    return;
+  }
   IDotMatrixBulkResult bulkResult;
   if (bulkTransfer_.processPacket(data, length, bulkResult)) {
-    if (bulkResult.completed && bulkResult.crcValid) {
-      if (protocol_.processTextPayload(
-            bulkTransfer_.textPayload(),
-            bulkTransfer_.textPayloadLength())) {
-        ++textParsed_;
-      } else {
-        ++textParseErrors_;
+    if (bulkResult.aborted) {
+      protocol_.completeRawImage(false);
+      protocol_.completeGif(false);
+      rawTransferReady_ = false;
+      gifTransferReady_ = false;
+    }
+
+    if (bulkResult.type == 0x01) {
+      if (bulkResult.began) {
+        gifTransferReady_ = protocol_.beginGif(bulkResult.totalLength);
       }
+      if (bulkResult.chunkLength > 0 && gifTransferReady_) {
+        gifTransferReady_ = protocol_.writeGif(
+          bulkResult.chunkOffset, bulkResult.chunkData, bulkResult.chunkLength
+        );
+      }
+      if (bulkResult.completed) {
+        protocol_.completeGif(bulkResult.crcValid && gifTransferReady_);
+        gifTransferReady_ = false;
+      }
+    } else if (bulkResult.type == 0x02) {
+      if (bulkResult.began) {
+        // The transfer's total length is validated by the renderer when the
+        // first chunk arrives. For sequential RAW data, its final byte count
+        // must match the logical RGB framebuffer exactly.
+        rawTransferReady_ = protocol_.beginRawImage(bulkResult.totalLength);
+      }
+      if (bulkResult.chunkLength > 0 && rawTransferReady_) {
+        rawTransferReady_ = protocol_.writeRawImage(
+          bulkResult.chunkOffset,
+          bulkResult.chunkData,
+          bulkResult.chunkLength
+        );
+      }
+      if (bulkResult.completed) {
+        protocol_.completeRawImage(bulkResult.crcValid && rawTransferReady_);
+        rawTransferReady_ = false;
+      }
+    } else if (bulkResult.type == 0x03 && bulkResult.completed && bulkResult.crcValid) {
+      protocol_.processTextPayload(
+        bulkTransfer_.textPayload(),
+        bulkTransfer_.textPayloadLength()
+      );
     }
     if (bulkResult.replyAvailable) {
       const uint8_t response[] = {
@@ -288,10 +353,9 @@ void IDotMatrixBLEServer::processFA02Complete(
   }
 
   if (!protocol_.processFA02(data, length, reply)) {
-    recordUnknown(data, length);
     // BUILD 80 acknowledges unknown short commands. Preserve that tolerant
     // behavior so an app revision can continue, while deliberately not
-    // acknowledging unsupported GIF/RAW bulk packets as if they were handled.
+    // acknowledging unsupported GIF bulk packets as if they were handled.
     if (length >= 4 && length <= RX_PACKET_MAX) {
       const uint8_t response[] = {0x05, 0x00, data[2], data[3], 0x01};
       memcpy(reply.data, response, sizeof(response));
@@ -308,58 +372,4 @@ void IDotMatrixBLEServer::processAE01(
   reply.length = 0;
   (void)data;
   (void)length;
-}
-
-void IDotMatrixBLEServer::recordUnknown(const uint8_t* data, size_t length) {
-  ++unknownPackets_;
-  lastUnknownLength_ = length > 0xFFFFu ? 0xFFFFu : static_cast<uint16_t>(length);
-  lastUnknownStored_ = static_cast<uint8_t>(
-    length < UNKNOWN_BYTES ? length : UNKNOWN_BYTES
-  );
-  if (data != nullptr && lastUnknownStored_ > 0) {
-    memcpy(lastUnknownData_, data, lastUnknownStored_);
-  }
-}
-
-void IDotMatrixBLEServer::sendFA03(const uint8_t* data, size_t length) {
-  if (!connected_ || fa03_ == nullptr || data == nullptr || length == 0) return;
-  fa03_->setValue(data, length);
-  fa03_->notify();
-}
-
-void IDotMatrixBLEServer::startAdvertising() {
-  if (!initialized_ || connected_) return;
-
-  NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
-  if (advertising == nullptr) return;
-
-  if (advertising_) {
-    advertising->stop();
-    advertising_ = false;
-  }
-
-  NimBLEAdvertisementData advertisementData;
-  advertisementData.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
-  advertisementData.setName(deviceName_);
-  // Use the 16-bit representation in the packet. The full GATT UUID is the
-  // same Bluetooth-base UUID, while the short form keeps advertising <31 B.
-  advertisementData.setCompleteServices(NimBLEUUID(uint16_t(0x00FA)));
-
-  const char manufacturerData[] = {
-    static_cast<char>(0x54),
-    static_cast<char>(0x52),
-    static_cast<char>(0x00),
-    static_cast<char>(0x70),
-    static_cast<char>(screenType_)
-  };
-  advertisementData.setManufacturerData(
-    std::string(manufacturerData, sizeof(manufacturerData))
-  );
-  advertising->setAdvertisementData(advertisementData);
-
-  NimBLEAdvertisementData scanResponseData;
-  scanResponseData.setCompleteServices(NimBLEUUID(uint16_t(0xAE00)));
-  advertising->setScanResponseData(scanResponseData);
-  advertising->start();
-  advertising_ = true;
 }

@@ -2,10 +2,14 @@
 
 #include "IDotMatrixProtocol.h"
 #include "IDotMatrixRenderer.h"
+#include "IDotMatrixMediaSink.h"
 
 class IDotMatrixWLEDAdapter final : public IDotMatrixProtocolEvents {
 public:
-  explicit IDotMatrixWLEDAdapter(IDotMatrixRenderer& renderer) : renderer_(renderer) {}
+  explicit IDotMatrixWLEDAdapter(
+    IDotMatrixRenderer& renderer,
+    IDotMatrixMediaSink* media = nullptr
+  ) : renderer_(renderer), media_(media) {}
 
   bool registerDisplayEffect();
   void setRescaleEnabled(bool enabled) { rescaleEnabled_ = enabled; }
@@ -29,6 +33,17 @@ public:
     size_t bitmapLength
   ) override;
   void onTextComplete() override;
+  bool onRawImageBegin(size_t byteLength) override;
+  bool onRawImageData(
+    size_t offset,
+    const uint8_t* data,
+    size_t length
+  ) override;
+  bool onRawImageComplete(bool crcValid) override;
+  bool onPngImage(const uint8_t* data, size_t length) override;
+  bool onGifBegin(size_t byteLength) override;
+  bool onGifData(size_t offset, const uint8_t* data, size_t length) override;
+  bool onGifComplete(bool crcValid) override;
 
   void renderDisplayEffectFrame();
   bool isDiySessionActive() const { return diySessionActive_; }
@@ -37,34 +52,36 @@ public:
   uint8_t displayEffectId() const { return displayEffectId_; }
   bool isClockActive() const { return clockActive_; }
   bool isTextActive() const { return textActive_; }
+  bool isRawImageActive() const { return rawImageActive_; }
+  bool isGifActive() const { return gifActive_; }
   uint8_t clockStyle() const { return clockSettings_.style; }
   bool clockUses24Hour() const { return clockSettings_.use24Hour; }
   bool clockShowsDate() const { return clockSettings_.showDate; }
   uint8_t textGlyphCount() const { return renderer_.textGlyphCount(); }
   uint8_t textGlyphWidth() const { return renderer_.textGlyphWidth(); }
   uint8_t textGlyphHeight() const { return renderer_.textGlyphHeight(); }
+  uint8_t textSpeed() const { return renderer_.textSpeed(); }
   bool rescaleEnabled() const { return rescaleEnabled_; }
   bool dimensionsMatch() const { return dimensionsMatch_; }
-  uint32_t renderedFrames() const { return renderedFrames_; }
-  uint16_t targetWidth() const { return targetWidth_; }
-  uint16_t targetHeight() const { return targetHeight_; }
 
 private:
   void activateDisplayEffect();
   void renderCanvasToSegment();
 
   IDotMatrixRenderer& renderer_;
+  IDotMatrixMediaSink* media_ = nullptr;
   bool screenOn_ = false;
   bool diySessionActive_ = false;
   bool clockActive_ = false;
   bool textActive_ = false;
+  bool rawImageActive_ = false;
+  bool gifActive_ = false;
   bool textLoadReady_ = false;
   bool rescaleEnabled_ = false;
   bool dimensionsMatch_ = false;
   uint8_t displayEffectId_ = 0xFF;
   IDotMatrixClockSettings clockSettings_{};
   uint32_t clockCycleStartedAt_ = 0;
-  uint32_t renderedFrames_ = 0;
   uint16_t targetWidth_ = 0;
   uint16_t targetHeight_ = 0;
 };

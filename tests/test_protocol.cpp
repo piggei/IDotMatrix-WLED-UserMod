@@ -68,6 +68,52 @@ public:
 
   void onTextComplete() override { textCompleteReceived = true; }
 
+  bool onRawImageBegin(size_t byteLength) override {
+    rawBeginReceived = true;
+    rawExpectedBytes = byteLength;
+    return rawAccept;
+  }
+
+  bool onRawImageData(
+    size_t offset,
+    const uint8_t* data,
+    size_t length
+  ) override {
+    rawDataReceived = true;
+    rawOffset = offset;
+    rawLength = length;
+    if (data != nullptr && length > 0) rawFirstByte = data[0];
+    return rawAccept;
+  }
+
+  bool onRawImageComplete(bool crcValid) override {
+    rawCompleteReceived = true;
+    rawCRCValid = crcValid;
+    return rawAccept && crcValid;
+  }
+
+  bool onPngImage(const uint8_t* data, size_t length) override {
+    pngReceived = data != nullptr;
+    pngLength = length;
+    return true;
+  }
+
+  bool onGifBegin(size_t byteLength) override {
+    gifLength = byteLength;
+    return true;
+  }
+
+  bool onGifData(size_t offset, const uint8_t* data, size_t length) override {
+    gifOffset = offset;
+    gifDataLength = length;
+    return data != nullptr;
+  }
+
+  bool onGifComplete(bool crcValid) override {
+    gifCRCValid = crcValid;
+    return crcValid;
+  }
+
   bool screenEventReceived = false;
   bool screenOn = false;
   bool brightnessEventReceived = false;
@@ -93,6 +139,21 @@ public:
   size_t textLastBitmapLength = 0;
   uint8_t textLastBitmap[64]{};
   IDotMatrixTextSettings textSettings{};
+  bool rawAccept = true;
+  bool rawBeginReceived = false;
+  bool rawDataReceived = false;
+  bool rawCompleteReceived = false;
+  bool rawCRCValid = false;
+  size_t rawExpectedBytes = 0;
+  size_t rawOffset = 0;
+  size_t rawLength = 0;
+  uint8_t rawFirstByte = 0;
+  bool pngReceived = false;
+  size_t pngLength = 0;
+  size_t gifLength = 0;
+  size_t gifOffset = 0;
+  size_t gifDataLength = 0;
+  bool gifCRCValid = false;
 };
 
 static void expectReply(
@@ -252,4 +313,29 @@ int main() {
   assert(events.textLastBitmapLength == 64);
   assert(events.textLastBitmap[0] == 0x01);
   assert(events.textLastBitmap[63] == 0x80);
+
+  const uint8_t rawBytes[] = {1, 2, 3};
+  assert(protocol.beginRawImage(sizeof(rawBytes)));
+  assert(protocol.writeRawImage(0, rawBytes, sizeof(rawBytes)));
+  assert(protocol.completeRawImage(true));
+  assert(events.rawBeginReceived && events.rawDataReceived &&
+    events.rawCompleteReceived && events.rawCRCValid);
+  assert(events.rawExpectedBytes == sizeof(rawBytes));
+  assert(events.rawOffset == 0 && events.rawLength == sizeof(rawBytes));
+  assert(events.rawFirstByte == 1);
+
+  uint8_t pngPacket[17] = {
+    17, 0, 0, 0, 0, 8, 0, 0, 0,
+    0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A
+  };
+  assert(protocol.processInlinePng(pngPacket, sizeof(pngPacket), reply));
+  const uint8_t pngAck[] = {5, 0, 0, 0, 3};
+  expectReply(reply, pngAck, sizeof(pngAck));
+  assert(events.pngReceived && events.pngLength == 8);
+
+  assert(protocol.beginGif(123));
+  assert(protocol.writeGif(4, rawBytes, sizeof(rawBytes)));
+  assert(protocol.completeGif(true));
+  assert(events.gifLength == 123 && events.gifOffset == 4);
+  assert(events.gifDataLength == sizeof(rawBytes) && events.gifCRCValid);
 }

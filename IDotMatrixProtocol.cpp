@@ -153,6 +153,56 @@ bool IDotMatrixProtocol::processTextPayload(const uint8_t* data, size_t length) 
   return true;
 }
 
+bool IDotMatrixProtocol::beginRawImage(size_t byteLength) {
+  return events_.onRawImageBegin(byteLength);
+}
+
+bool IDotMatrixProtocol::writeRawImage(
+  size_t offset,
+  const uint8_t* data,
+  size_t length
+) {
+  return events_.onRawImageData(offset, data, length);
+}
+
+bool IDotMatrixProtocol::completeRawImage(bool crcValid) {
+  return events_.onRawImageComplete(crcValid);
+}
+
+bool IDotMatrixProtocol::processInlinePng(
+  const uint8_t* data,
+  size_t length,
+  IDotMatrixReply& reply
+) {
+  reply.length = 0;
+  if (!hasValidLength(data, length) || length < 17 || data[2] != 0x00 ||
+      data[3] != 0x00) return false;
+  const uint32_t payloadLength = uint32_t(data[5]) |
+    (uint32_t(data[6]) << 8) | (uint32_t(data[7]) << 16) |
+    (uint32_t(data[8]) << 24);
+  static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+  if (payloadLength != length - 9 || memcmp(data + 9, signature, sizeof(signature)) != 0) {
+    return false;
+  }
+  events_.onPngImage(data + 9, payloadLength);
+  const uint8_t response[] = {0x05, 0x00, 0x00, 0x00, 0x03};
+  memcpy(reply.data, response, sizeof(response));
+  reply.length = sizeof(response);
+  return true;
+}
+
+bool IDotMatrixProtocol::beginGif(size_t byteLength) {
+  return events_.onGifBegin(byteLength);
+}
+
+bool IDotMatrixProtocol::writeGif(size_t offset, const uint8_t* data, size_t length) {
+  return events_.onGifData(offset, data, length);
+}
+
+bool IDotMatrixProtocol::completeGif(bool crcValid) {
+  return events_.onGifComplete(crcValid);
+}
+
 bool IDotMatrixProtocol::hasValidLength(const uint8_t* data, size_t length) {
   if (data == nullptr || length < 2 || length > 0xFFFFu) return false;
   const uint16_t declaredLength = uint16_t(data[0]) | (uint16_t(data[1]) << 8);

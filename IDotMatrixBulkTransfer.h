@@ -10,12 +10,22 @@ struct IDotMatrixBulkResult {
   uint8_t status = 0;
   bool completed = false;
   bool crcValid = false;
+  bool began = false;
+  bool aborted = false;
+  const uint8_t* chunkData = nullptr;
+  size_t chunkOffset = 0;
+  size_t chunkLength = 0;
+  uint32_t totalLength = 0;
+  uint32_t expectedCRC = 0;
+  uint32_t calculatedCRC = 0;
 };
 
 class IDotMatrixBulkTransfer {
 public:
   static constexpr size_t HEADER_SIZE = 16;
   static constexpr size_t MAX_TEXT_PAYLOAD = 4096;
+  static constexpr size_t MAX_RAW_PAYLOAD = 64u * 64u * 3u;
+  static constexpr size_t MAX_GIF_PAYLOAD = 2u * 1024u * 1024u;
 
   bool processPacket(
     const uint8_t* data,
@@ -27,10 +37,7 @@ public:
   bool textReady() const { return textReady_; }
   const uint8_t* textPayload() const { return textPayload_; }
   size_t textPayloadLength() const { return textPayloadLength_; }
-  uint32_t acceptedChunks() const { return acceptedChunks_; }
-  uint32_t completedTransfers() const { return completedTransfers_; }
-  uint32_t crcErrors() const { return crcErrors_; }
-  uint32_t rejectedTransfers() const { return rejectedTransfers_; }
+  uint8_t activeType() const { return activeType_; }
 
 private:
   static uint32_t updateCRC32(uint32_t crc, const uint8_t* data, size_t length);
@@ -45,8 +52,4 @@ private:
   uint8_t textPayload_[MAX_TEXT_PAYLOAD]{};
   size_t textPayloadLength_ = 0;
   bool textReady_ = false;
-  uint32_t acceptedChunks_ = 0;
-  uint32_t completedTransfers_ = 0;
-  uint32_t crcErrors_ = 0;
-  uint32_t rejectedTransfers_ = 0;
 };

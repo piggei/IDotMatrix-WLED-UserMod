@@ -20,6 +20,7 @@ build_flags =
 lib_deps =
   ${env:esp32dev.lib_deps}
   h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
   symlink://../wled-usermod-idotmatrix

@@ -85,7 +85,6 @@ int main() {
 
   const uint8_t coordinates[] = {1, 2, 15, 14, 16, 0, 9};
   adapter.onGraffitiPixels(0x21, 0x43, 0x65, coordinates, sizeof(coordinates));
-  assert(renderer.acceptedPixelUpdates() == 2);
   assert(stripTriggerCount == 2);
 
   strip.renderEffect();
@@ -154,6 +153,26 @@ int main() {
   assert(adapter.isDisplayEffectActive());
   strip.renderEffect();
   assert(strip.segmentRef().colorAt(0, 0) == RGBW32(11, 22, 33, 0));
+
+  uint8_t rawImage[16 * 16 * 3]{};
+  rawImage[0] = 41;
+  rawImage[1] = 42;
+  rawImage[2] = 43;
+  const size_t lastPixel = sizeof(rawImage) - 3;
+  rawImage[lastPixel] = 91;
+  rawImage[lastPixel + 1] = 92;
+  rawImage[lastPixel + 2] = 93;
+  assert(adapter.onRawImageBegin(sizeof(rawImage)));
+  assert(adapter.onRawImageData(0, rawImage, 400));
+  assert(adapter.onRawImageData(400, rawImage + 400, sizeof(rawImage) - 400));
+  assert(adapter.onRawImageComplete(true));
+  assert(adapter.isRawImageActive());
+  assert(!adapter.isTextActive());
+  assert(!adapter.isClockActive());
+  assert(adapter.isDisplayEffectActive());
+  strip.renderEffect();
+  assert(strip.segmentRef().colorAt(0, 0) == RGBW32(41, 42, 43, 0));
+  assert(strip.segmentRef().colorAt(15, 15) == RGBW32(91, 92, 93, 0));
 
   // A profile/segment mismatch is black in strict mode and nearest-neighbour
   // sampled only when rescale is explicitly enabled.

@@ -89,6 +89,9 @@ void IDotMatrixWLEDAdapter::onSolidColor(
   diySessionActive_ = false;
   clockActive_ = false;
   textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  if (media_ != nullptr) media_->stopPlayback();
   renderer_.setVisible(false);
 
   auto& segment = strip.getFirstSelectedSeg();
@@ -116,6 +119,9 @@ void IDotMatrixWLEDAdapter::onGraffitiMode(bool enter) {
   if (enter) {
     clockActive_ = false;
     textActive_ = false;
+    rawImageActive_ = false;
+    gifActive_ = false;
+    if (media_ != nullptr) media_->stopPlayback();
   }
   if (enter) activateDisplayEffect();
 }
@@ -145,6 +151,9 @@ void IDotMatrixWLEDAdapter::onGraffitiPixels(
   diySessionActive_ = true;
   clockActive_ = false;
   textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  if (media_ != nullptr) media_->stopPlayback();
   activateDisplayEffect();
 }
 
@@ -152,6 +161,9 @@ void IDotMatrixWLEDAdapter::onClock(const IDotMatrixClockSettings& settings) {
   diySessionActive_ = false;
   clockActive_ = true;
   textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  if (media_ != nullptr) media_->stopPlayback();
   clockSettings_ = settings;
   clockCycleStartedAt_ = millis();
   renderer_.setVisible(true);
@@ -193,12 +205,74 @@ void IDotMatrixWLEDAdapter::onTextComplete() {
   diySessionActive_ = false;
   clockActive_ = false;
   textActive_ = true;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  if (media_ != nullptr) media_->stopPlayback();
   renderer_.setVisible(true);
   activateDisplayEffect();
 }
 
+bool IDotMatrixWLEDAdapter::onRawImageBegin(size_t byteLength) {
+  return renderer_.beginRawImage(byteLength);
+}
+
+bool IDotMatrixWLEDAdapter::onRawImageData(
+  size_t offset,
+  const uint8_t* data,
+  size_t length
+) {
+  return renderer_.writeRawImage(offset, data, length);
+}
+
+bool IDotMatrixWLEDAdapter::onRawImageComplete(bool crcValid) {
+  if (!renderer_.completeRawImage(crcValid)) return false;
+  diySessionActive_ = false;
+  clockActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = true;
+  gifActive_ = false;
+  if (media_ != nullptr) media_->stopPlayback();
+  activateDisplayEffect();
+  return true;
+}
+
+bool IDotMatrixWLEDAdapter::onPngImage(const uint8_t* data, size_t length) {
+  if (media_ == nullptr) return false;
+  if (!media_->decodePng(data, length)) return false;
+  media_->stopPlayback();
+  diySessionActive_ = false;
+  clockActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = true;
+  gifActive_ = false;
+  renderer_.setVisible(true);
+  activateDisplayEffect();
+  return true;
+}
+
+bool IDotMatrixWLEDAdapter::onGifBegin(size_t byteLength) {
+  return media_ != nullptr && media_->beginGif(byteLength);
+}
+
+bool IDotMatrixWLEDAdapter::onGifData(
+  size_t offset, const uint8_t* data, size_t length
+) {
+  return media_ != nullptr && media_->writeGif(offset, data, length);
+}
+
+bool IDotMatrixWLEDAdapter::onGifComplete(bool crcValid) {
+  if (media_ == nullptr || !media_->completeGif(crcValid)) return false;
+  diySessionActive_ = false;
+  clockActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = true;
+  renderer_.setVisible(true);
+  activateDisplayEffect();
+  return true;
+}
+
 void IDotMatrixWLEDAdapter::renderDisplayEffectFrame() {
-  ++renderedFrames_;
   if (clockActive_) {
     const uint32_t elapsed = millis() - clockCycleStartedAt_;
     const bool renderDate = clockSettings_.showDate && (elapsed % 35000u) >= 30000u;

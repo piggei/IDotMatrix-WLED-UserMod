@@ -52,6 +52,15 @@ public:
   );
   bool setTextGlyph(uint8_t index, const uint8_t* bitmap, size_t bitmapLength);
   void renderText(uint32_t now);
+  bool beginRawImage(size_t byteLength);
+  bool writeRawImage(size_t offset, const uint8_t* data, size_t length);
+  bool completeRawImage(bool crcValid);
+  void cancelRawImage();
+  bool beginAnimation();
+  void clearAnimation();
+  bool setAnimationPixel(uint8_t x, uint8_t y, uint8_t red, uint8_t green, uint8_t blue);
+  bool publishAnimationFrame();
+  void endAnimation();
 
   void setVisible(bool visible) { visible_ = visible; }
   bool isVisible() const { return visible_; }
@@ -59,11 +68,12 @@ public:
   uint8_t width() const { return width_; }
   uint8_t height() const { return height_; }
   size_t pixelCount() const { return pixelCount_; }
-  uint32_t acceptedPixelUpdates() const { return acceptedPixelUpdates_; }
   bool isTextReady() const { return textValid_; }
   uint8_t textGlyphCount() const { return textGlyphCount_; }
   uint8_t textGlyphWidth() const { return textGlyphWidth_; }
   uint8_t textGlyphHeight() const { return textGlyphHeight_; }
+  uint8_t textSpeed() const { return textSpeed_; }
+  bool isRawImagePending() const { return rawImagePixels_ != nullptr; }
   const Pixel* pixels() const { return pixels_; }
   const Pixel* pixel(uint8_t x, uint8_t y) const;
 
@@ -75,7 +85,6 @@ private:
   uint8_t width_ = 0;
   uint8_t height_ = 0;
   bool visible_ = false;
-  uint32_t acceptedPixelUpdates_ = 0;
   uint8_t* textBitmaps_ = nullptr;
   size_t textBitmapCapacity_ = 0;
   bool textValid_ = false;
@@ -94,4 +103,8 @@ private:
   int16_t textOffsetY_ = 0;
   uint32_t textAnimationStart_ = 0;
   uint32_t textLastFrame_ = 0;
+  uint32_t textLastMove_ = 0;
+  Pixel* rawImagePixels_ = nullptr;
+  size_t rawImageBytes_ = 0;
+  Pixel* animationPixels_ = nullptr;
 };

@@ -19,24 +19,6 @@ public:
   bool isConnected() const { return connected_; }
   uint8_t screenType() const { return screenType_; }
   const char* deviceName() const { return deviceName_; }
-  uint32_t receivedPackets() const { return receivedPackets_; }
-  uint32_t droppedPackets() const { return droppedPackets_; }
-  uint32_t deviceInfoPushAttempts() const { return deviceInfoPushAttempts_; }
-  uint32_t bulkChunks() const { return bulkTransfer_.acceptedChunks(); }
-  uint32_t bulkCompleted() const { return bulkTransfer_.completedTransfers(); }
-  uint32_t bulkCRCErrors() const { return bulkTransfer_.crcErrors(); }
-  uint32_t bulkRejected() const { return bulkTransfer_.rejectedTransfers(); }
-  size_t textPayloadLength() const { return bulkTransfer_.textPayloadLength(); }
-  uint32_t textParsed() const { return textParsed_; }
-  uint32_t textParseErrors() const { return textParseErrors_; }
-  uint32_t fragmentedWrites() const { return fragmentedWrites_; }
-  uint32_t reassemblyErrors() const { return reassemblyErrors_; }
-  uint16_t reassemblyExpected() const { return faAssembler_.expected(); }
-  uint16_t reassemblyReceived() const { return faAssembler_.received(); }
-  uint32_t unknownPackets() const { return unknownPackets_; }
-  uint16_t lastUnknownLength() const { return lastUnknownLength_; }
-  const uint8_t* lastUnknownData() const { return lastUnknownData_; }
-  uint8_t lastUnknownStored() const { return lastUnknownStored_; }
 
 private:
   static constexpr size_t RX_PACKET_MAX = 64;
@@ -44,7 +26,6 @@ private:
   // The reference reassembles fragmented FA02 writes before dispatching bulk.
   // Observed chunks are up to 4096 payload bytes; retain the 16-byte header.
   static constexpr size_t BULK_PACKET_MAX = IDotMatrixFA02Assembler::MAX_PACKET_SIZE;
-  static constexpr uint8_t UNKNOWN_BYTES = 12;
 
   enum class RxChannel : uint8_t {
     FA02,
@@ -62,6 +43,7 @@ private:
     explicit ServerCallbacks(IDotMatrixBLEServer& owner) : owner_(owner) {}
     void onConnect(NimBLEServer* server) override;
     void onDisconnect(NimBLEServer* server) override;
+    void onMTUChange(uint16_t mtu, ble_gap_conn_desc* desc) override;
 
   private:
     IDotMatrixBLEServer& owner_;
@@ -78,12 +60,12 @@ private:
 
   void onConnect();
   void onDisconnect();
+  void onMTUChange(uint16_t mtu);
   void enqueueFromCallback(NimBLECharacteristic* characteristic);
   bool dequeue(RxPacket& packet);
   void processPacket(const RxPacket& packet);
   void processFA02Complete(const uint8_t* data, size_t length, IDotMatrixReply& reply);
   void processAE01(const uint8_t* data, size_t length, IDotMatrixReply& reply);
-  void recordUnknown(const uint8_t* data, size_t length);
   void sendFA03(const uint8_t* data, size_t length);
   void startAdvertising();
 
@@ -95,7 +77,6 @@ private:
   volatile bool connectionEventPending_ = false;
   uint8_t deviceInfoPushesRemaining_ = 0;
   uint32_t deviceInfoPushAt_ = 0;
-  uint32_t deviceInfoPushAttempts_ = 0;
   volatile bool restartAdvertising_ = false;
   uint32_t restartAdvertisingAt_ = 0;
   uint8_t screenType_ = 0x01;
@@ -115,15 +96,8 @@ private:
   volatile uint8_t rxHead_ = 0;
   volatile uint8_t rxTail_ = 0;
   volatile uint8_t rxCount_ = 0;
-  volatile uint32_t receivedPackets_ = 0;
-  volatile uint32_t droppedPackets_ = 0;
   IDotMatrixFA02Assembler faAssembler_;
-  volatile uint32_t fragmentedWrites_ = 0;
-  volatile uint32_t reassemblyErrors_ = 0;
-  volatile uint32_t unknownPackets_ = 0;
-  uint32_t textParsed_ = 0;
-  uint32_t textParseErrors_ = 0;
-  uint16_t lastUnknownLength_ = 0;
-  uint8_t lastUnknownStored_ = 0;
-  uint8_t lastUnknownData_[UNKNOWN_BYTES]{};
+  volatile uint32_t reassemblyLastWriteAt_ = 0;
+  bool rawTransferReady_ = false;
+  bool gifTransferReady_ = false;
 };

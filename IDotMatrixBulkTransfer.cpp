@@ -4,6 +4,8 @@
 
 namespace {
 constexpr uint8_t TEXT_TYPE = 0x03;
+constexpr uint8_t RAW_TYPE = 0x02;
+constexpr uint8_t GIF_TYPE = 0x01;
 constexpr uint8_t ACK_CONTINUE = 0x01;
 constexpr uint8_t ACK_COMPLETE = 0x03;
 
@@ -25,7 +27,8 @@ bool IDotMatrixBulkTransfer::processPacket(
 
   const uint16_t declaredLength = uint16_t(data[0]) | (uint16_t(data[1]) << 8);
   const uint8_t type = data[2];
-  if (declaredLength != length || data[3] != 0x00 || type != TEXT_TYPE) {
+  if (declaredLength != length || data[3] != 0x00 ||
+      (type != TEXT_TYPE && type != RAW_TYPE && type != GIF_TYPE)) {
     return false;
   }
 
@@ -33,9 +36,12 @@ bool IDotMatrixBulkTransfer::processPacket(
   result.type = type;
   const uint32_t totalSize = readLE32(data + 5);
   const uint32_t expectedCRC = readLE32(data + 9);
+  result.totalLength = totalSize;
+  result.expectedCRC = expectedCRC;
 
-  if (totalSize == 0 || totalSize > MAX_TEXT_PAYLOAD) {
-    ++rejectedTransfers_;
+  const uint32_t maximumSize = type == TEXT_TYPE ? MAX_TEXT_PAYLOAD :
+    type == RAW_TYPE ? MAX_RAW_PAYLOAD : MAX_GIF_PAYLOAD;
+  if (totalSize == 0 || totalSize > maximumSize) {
     resetActive();
     result.replyAvailable = true;
     result.status = ACK_COMPLETE;
@@ -50,25 +56,32 @@ bool IDotMatrixBulkTransfer::processPacket(
     expectedCRC_ = expectedCRC;
     runningCRC_ = 0xFFFFFFFFu;
     receivedSize_ = 0;
-    textPayloadLength_ = 0;
-    textReady_ = false;
+    if (type == TEXT_TYPE) {
+      textPayloadLength_ = 0;
+      textReady_ = false;
+    }
+    result.began = true;
   } else if (type != activeType_ || totalSize != expectedSize_ ||
              expectedCRC != expectedCRC_) {
-    ++rejectedTransfers_;
     resetActive();
+    result.aborted = true;
     return true;
   }
 
   const size_t payloadLength = length - HEADER_SIZE;
   const uint32_t remaining = expectedSize_ - receivedSize_;
   const size_t useful = payloadLength < remaining ? payloadLength : remaining;
+  result.chunkData = data + HEADER_SIZE;
+  result.chunkOffset = receivedSize_;
+  result.chunkLength = useful;
   if (useful > 0) {
-    memcpy(textPayload_ + receivedSize_, data + HEADER_SIZE, useful);
+    if (type == TEXT_TYPE) {
+      memcpy(textPayload_ + receivedSize_, data + HEADER_SIZE, useful);
+    }
     runningCRC_ = updateCRC32(runningCRC_, data + HEADER_SIZE, useful);
     receivedSize_ += useful;
-    textPayloadLength_ = receivedSize_;
+    if (type == TEXT_TYPE) textPayloadLength_ = receivedSize_;
   }
-  ++acceptedChunks_;
 
   result.replyAvailable = true;
   if (receivedSize_ < expectedSize_) {
@@ -78,14 +91,15 @@ bool IDotMatrixBulkTransfer::processPacket(
 
   result.status = ACK_COMPLETE;
   result.completed = true;
-  result.crcValid = (runningCRC_ ^ 0xFFFFFFFFu) == expectedCRC_;
+  result.calculatedCRC = runningCRC_ ^ 0xFFFFFFFFu;
+  result.crcValid = result.calculatedCRC == expectedCRC_;
   if (result.crcValid) {
-    textReady_ = true;
-    ++completedTransfers_;
+    if (type == TEXT_TYPE) textReady_ = true;
   } else {
-    textReady_ = false;
-    textPayloadLength_ = 0;
-    ++crcErrors_;
+    if (type == TEXT_TYPE) {
+      textReady_ = false;
+      textPayloadLength_ = 0;
+    }
   }
   resetActive();
   return true;
