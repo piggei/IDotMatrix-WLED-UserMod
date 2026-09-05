@@ -5,12 +5,49 @@
 #include "IDotMatrixMedia.h"
 #include "IDotMatrixWLEDAdapter.h"
 
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_system.h>
+#include <esp_heap_caps.h>
+#endif
+
+static constexpr const char* IDOTMATRIX_BUILD = "0.7.1";
+
 namespace {
 const char USERMOD_NAME[] PROGMEM = "iDotMatrix";
 const char CFG_ENABLED[] PROGMEM = "enabled";
 const char CFG_SCREEN_TYPE[] PROGMEM = "screenType";
 const char CFG_DEVICE_NAME[] PROGMEM = "deviceName";
 const char CFG_RESCALE[] PROGMEM = "rescale";
+
+#if defined(ARDUINO_ARCH_ESP32)
+struct CrashSnapshot {
+  uint32_t magic;
+  uint32_t freeHeap;
+  uint32_t minFreeHeap;
+  uint32_t largestBlock;
+  uint32_t uptimeMs;
+  uint8_t content;
+};
+RTC_NOINIT_ATTR CrashSnapshot rtcSnapshot;
+constexpr uint32_t SNAPSHOT_MAGIC = 0x49444D38u; // "IDM8"
+
+const char* resetReasonText(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON: return "poweron";
+    case ESP_RST_EXT: return "external";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "int-wdt";
+    case ESP_RST_TASK_WDT: return "task-wdt";
+    case ESP_RST_WDT: return "wdt";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "sdio";
+    case ESP_RST_UNKNOWN:
+    default: return "unknown";
+  }
+}
+#endif
 }
 
 class IDotMatrixUsermod final : public Usermod {
@@ -28,6 +65,18 @@ private:
   bool startPending_ = false;
   uint32_t startAt_ = 0;
   bool bleRestartRequired_ = false;
+#if defined(ARDUINO_ARCH_ESP32)
+  esp_reset_reason_t bootResetReason_ = ESP_RST_UNKNOWN;
+  CrashSnapshot previousSnapshot_{};
+  bool previousSnapshotValid_ = false;
+  uint32_t nextSnapshotAt_ = 0;
+#endif
+
+  static uint8_t dimensionForScreenType(uint8_t screenType) {
+    if (screenType == 0x03) return 32;
+    if (screenType == 0x04) return 64;
+    return 16;
+  }
 
   static String normalizedDeviceName(String value) {
     value.trim();
@@ -68,6 +117,15 @@ private:
 
 public:
   void setup() override {
+#if defined(ARDUINO_ARCH_ESP32)
+    bootResetReason_ = esp_reset_reason();
+    if (rtcSnapshot.magic == SNAPSHOT_MAGIC) {
+      previousSnapshot_ = rtcSnapshot;
+      previousSnapshotValid_ = true;
+    }
+    rtcSnapshot = CrashSnapshot{};
+    rtcSnapshot.magic = SNAPSHOT_MAGIC;
+#endif
     if (!enabled_) return;
 
     // WLED's ESP32 RMT-HI LED driver shares a high-level interrupt with the
@@ -85,8 +143,21 @@ public:
     // intentionally abort after Bluetooth has been enabled.
     noWifiSleep = false;
 
-    if (!renderer_.begin(screenType_)) {
-      DEBUG_PRINTLN(F("[iDotMatrix] logical framebuffer allocation failed"));
+    uint8_t storageWidth = 0;
+    uint8_t storageHeight = 0;
+#ifndef WLED_DISABLE_2D
+    if (rescale_ && strip.isMatrix) {
+      const uint8_t logical = dimensionForScreenType(screenType_);
+      storageWidth = uint8_t(Segment::maxWidth < logical ? Segment::maxWidth : logical);
+      storageHeight = uint8_t(Segment::maxHeight < logical ? Segment::maxHeight : logical);
+      if (storageWidth == 0 || storageHeight == 0) {
+        storageWidth = 0;
+        storageHeight = 0;
+      }
+    }
+#endif
+    if (!renderer_.begin(screenType_, storageWidth, storageHeight)) {
+      DEBUG_PRINTLN(F("[iDotMatrix] framebuffer allocation failed"));
     }
     adapter_.setRescaleEnabled(rescale_);
 
@@ -120,8 +191,30 @@ public:
 
     ble_.loop();
 
-
+    // WLED effects can be selected directly from the Web UI/API while an
+    // iDotMatrix GIF or other media mode is active. Detect that ownership
+    // change before servicing media so dynamic decoder RAM is released at once.
+    adapter_.syncWLEDControl();
     media_.loop(millis());
+    adapter_.syncGifPlayback(
+      media_.gifActive(),
+      media_.lastError() != IDotMatrixMedia::Error::None
+    );
+
+#if defined(ARDUINO_ARCH_ESP32)
+    const uint32_t now = millis();
+    if (int32_t(now - nextSnapshotAt_) >= 0) {
+      nextSnapshotAt_ = now + 250;
+      rtcSnapshot.magic = SNAPSHOT_MAGIC;
+      rtcSnapshot.freeHeap = ESP.getFreeHeap();
+      rtcSnapshot.minFreeHeap = ESP.getMinFreeHeap();
+      rtcSnapshot.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      rtcSnapshot.uptimeMs = now;
+      rtcSnapshot.content = adapter_.isClockActive() ? 1 :
+        adapter_.isTextActive() ? 2 : adapter_.isGifActive() ? 3 :
+        adapter_.isRawImageActive() ? 4 : renderer_.isVisible() ? 5 : 0;
+    }
+#endif
   }
 
   void addToJsonInfo(JsonObject& root) override {
@@ -143,9 +236,45 @@ public:
       ? (ble_.isConnected() ? F("BLE connected") : ble_.isAdvertising()
         ? F("BLE advertising") : F("BLE ready"))
       : F("BLE init failed"));
-    info.add(String(F("profile=")) + String(renderer_.width()) + 'x' + String(renderer_.height()));
+    info.add(String(F("profile=")) + String(renderer_.logicalWidth()) + 'x' + String(renderer_.logicalHeight()));
+    info.add(String(F("canvas=")) + String(renderer_.width()) + 'x' + String(renderer_.height()));
     info.add(String(F("name=")) + deviceName_);
+    info.add(String(F("build=")) + IDOTMATRIX_BUILD);
+    info.add(String(F("gifDecoder=")) + media_.gifDecoderModeText());
+    info.add(String(F("gifDecoderBytes=")) + media_.gifDecoderBytes());
+    if (media_.gifProbeFree() > 0) {
+      info.add(String(F("gifProbe=")) + media_.gifProbeFree() +
+        F(" largest=") + media_.gifProbeLargest() +
+        F(" reserve=") + media_.gifDramReserve());
+    }
+    if (adapter_.isGifPending()) info.add(F("gifPending=1"));
+    if (media_.gifCaching()) {
+      info.add(String(F("gifCache=building frames=")) + media_.gifCachedFrames());
+    } else if (media_.gifCachedFrames() > 0) {
+      info.add(String(F("gifCachedFrames=")) + media_.gifCachedFrames());
+    }
+    if (media_.gifCacheWaitCount() > 0) {
+      info.add(String(F("gifCacheWaits=")) + media_.gifCacheWaitCount() +
+        F(" low=") + media_.gifCacheLowHeapMin() +
+        F(" guard=") + media_.gifCacheRuntimeReserve());
+    }
     if (bleRestartRequired_) info.add(F("Restart required after name/profile change"));
+    if (media_.lastError() != IDotMatrixMedia::Error::None) {
+      info.add(String(F("mediaError=")) + media_.lastErrorText());
+    }
+#if defined(ARDUINO_ARCH_ESP32)
+    info.add(String(F("reset=")) + resetReasonText(bootResetReason_));
+    info.add(String(F("heap=")) + ESP.getFreeHeap() +
+      F(" min=") + ESP.getMinFreeHeap() +
+      F(" largest=") + heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    if (previousSnapshotValid_ && bootResetReason_ != ESP_RST_POWERON) {
+      info.add(String(F("preResetHeap=")) + previousSnapshot_.freeHeap +
+        F(" min=") + previousSnapshot_.minFreeHeap +
+        F(" largest=") + previousSnapshot_.largestBlock +
+        F(" ms=") + previousSnapshot_.uptimeMs +
+        F(" content=") + previousSnapshot_.content);
+    }
+#endif
     info.add(adapter_.isClockActive() ? F("content=clock") :
       adapter_.isTextActive() ? F("content=text") :
       adapter_.isGifActive() ? F("content=gif") :

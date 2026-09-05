@@ -81,6 +81,49 @@ int main() {
   assert(renderer.pixelCount() == 4096);
   assert(renderer.setPixel(63, 63, 255, 1, 2));
   assert(!renderer.setPixel(64, 63, 255, 1, 2));
+
+  // GIF playback reuses the logical canvas in 0.8-dev instead of allocating a
+  // second full-size animation framebuffer.
+  assert(renderer.beginAnimation());
+  assert(renderer.setAnimationPixel(63, 63, 7, 8, 9));
+  assert(renderer.publishAnimationFrame());
+  pixel = renderer.pixel(63, 63);
+  assert(pixel != nullptr && pixel->red == 7 && pixel->green == 8 && pixel->blue == 9);
+  renderer.clearAnimation();
+  expectBlack(renderer.pixel(63, 63));
+  renderer.endAnimation();
+
+  // Low-memory rescale: advertise a true 64x64 logical profile while storing
+  // only a 16x16 physical canvas. RAW and GIF source coordinates are sampled
+  // directly into the smaller storage without allocating 4096 RGB pixels.
+  assert(renderer.begin(0x04, 16, 16));
+  assert(renderer.logicalWidth() == 64 && renderer.logicalHeight() == 64);
+  assert(renderer.width() == 16 && renderer.height() == 16);
+  assert(renderer.pixelCount() == 256);
+  assert(renderer.lowMemoryRescale());
+  uint8_t raw64[64 * 64 * 3]{};
+  raw64[0] = 11; raw64[1] = 22; raw64[2] = 33;
+  const size_t sampled = (size_t(4) * 64 + 4) * 3;
+  raw64[sampled] = 44; raw64[sampled + 1] = 55; raw64[sampled + 2] = 66;
+  assert(renderer.beginRawImage(sizeof(raw64)));
+  // Deliberately split in the middle of RGB triplets to exercise BLE-style chunks.
+  assert(renderer.writeRawImage(0, raw64, 509));
+  assert(renderer.writeRawImage(509, raw64 + 509, sizeof(raw64) - 509));
+  assert(renderer.completeRawImage(true));
+  pixel = renderer.pixel(0, 0);
+  assert(pixel && pixel->red == 11 && pixel->green == 22 && pixel->blue == 33);
+  pixel = renderer.pixel(1, 1);
+  assert(pixel && pixel->red == 44 && pixel->green == 55 && pixel->blue == 66);
+  renderer.clearAnimation();
+  assert(renderer.setAnimationSourcePixel(8, 8, 70, 80, 90));
+  pixel = renderer.pixel(2, 2);
+  assert(pixel && pixel->red == 70 && pixel->green == 80 && pixel->blue == 90);
+  assert(renderer.setAnimationSourcePixel(9, 8, 1, 2, 3)); // unsampled source pixel
+  pixel = renderer.pixel(2, 2);
+  assert(pixel && pixel->red == 70 && pixel->green == 80 && pixel->blue == 90);
+
+  // Return to the full logical canvas for the existing renderer tests below.
+  assert(renderer.begin(0x04));
   for (uint8_t style = 0; style < 8; ++style) {
     renderer.renderClock(13, 27, 31, 12, style, false, false, 40, 50, 60, 1234);
     assert(renderer.isVisible());

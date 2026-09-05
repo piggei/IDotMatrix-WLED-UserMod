@@ -17,7 +17,7 @@ public:
   IDotMatrixRenderer(const IDotMatrixRenderer&) = delete;
   IDotMatrixRenderer& operator=(const IDotMatrixRenderer&) = delete;
 
-  bool begin(uint8_t screenType);
+  bool begin(uint8_t screenType, uint8_t storageWidth = 0, uint8_t storageHeight = 0);
   void clear();
   bool setPixel(uint8_t x, uint8_t y, uint8_t red, uint8_t green, uint8_t blue);
   void renderClock(
@@ -59,6 +59,7 @@ public:
   bool beginAnimation();
   void clearAnimation();
   bool setAnimationPixel(uint8_t x, uint8_t y, uint8_t red, uint8_t green, uint8_t blue);
+  bool setAnimationSourcePixel(uint8_t x, uint8_t y, uint8_t red, uint8_t green, uint8_t blue);
   bool publishAnimationFrame();
   void endAnimation();
 
@@ -67,6 +68,9 @@ public:
   bool isReady() const { return pixels_ != nullptr; }
   uint8_t width() const { return width_; }
   uint8_t height() const { return height_; }
+  uint8_t logicalWidth() const { return logicalWidth_; }
+  uint8_t logicalHeight() const { return logicalHeight_; }
+  bool lowMemoryRescale() const { return width_ != logicalWidth_ || height_ != logicalHeight_; }
   size_t pixelCount() const { return pixelCount_; }
   bool isTextReady() const { return textValid_; }
   uint8_t textGlyphCount() const { return textGlyphCount_; }
@@ -75,6 +79,8 @@ public:
   uint8_t textSpeed() const { return textSpeed_; }
   bool isRawImagePending() const { return rawImagePixels_ != nullptr; }
   const Pixel* pixels() const { return pixels_; }
+  uint8_t* animationFrameData() { return reinterpret_cast<uint8_t*>(pixels_); }
+  size_t animationFrameBytes() const { return pixelCount_ * sizeof(Pixel); }
   const Pixel* pixel(uint8_t x, uint8_t y) const;
 
 private:
@@ -84,6 +90,8 @@ private:
   size_t pixelCount_ = 0;
   uint8_t width_ = 0;
   uint8_t height_ = 0;
+  uint8_t logicalWidth_ = 0;
+  uint8_t logicalHeight_ = 0;
   bool visible_ = false;
   uint8_t* textBitmaps_ = nullptr;
   size_t textBitmapCapacity_ = 0;
@@ -106,5 +114,5 @@ private:
   uint32_t textLastMove_ = 0;
   Pixel* rawImagePixels_ = nullptr;
   size_t rawImageBytes_ = 0;
-  Pixel* animationPixels_ = nullptr;
+  bool rawImageInPlace_ = false;
 };

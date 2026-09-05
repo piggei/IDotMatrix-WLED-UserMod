@@ -373,3 +373,44 @@ void IDotMatrixBLEServer::processAE01(
   (void)data;
   (void)length;
 }
+
+void IDotMatrixBLEServer::sendFA03(const uint8_t* data, size_t length) {
+  if (!connected_ || fa03_ == nullptr || data == nullptr || length == 0) return;
+  fa03_->setValue(data, length);
+  fa03_->notify();
+}
+
+void IDotMatrixBLEServer::startAdvertising() {
+  if (!initialized_ || connected_) return;
+
+  NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
+  if (advertising == nullptr) return;
+
+  if (advertising_) {
+    advertising->stop();
+    advertising_ = false;
+  }
+
+  NimBLEAdvertisementData advertisementData;
+  advertisementData.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
+  advertisementData.setName(deviceName_);
+  advertisementData.setCompleteServices(NimBLEUUID(uint16_t(0x00FA)));
+
+  const char manufacturerData[] = {
+    static_cast<char>(0x54),
+    static_cast<char>(0x52),
+    static_cast<char>(0x00),
+    static_cast<char>(0x70),
+    static_cast<char>(screenType_)
+  };
+  advertisementData.setManufacturerData(
+    std::string(manufacturerData, sizeof(manufacturerData))
+  );
+  advertising->setAdvertisementData(advertisementData);
+
+  NimBLEAdvertisementData scanResponseData;
+  scanResponseData.setCompleteServices(NimBLEUUID(uint16_t(0xAE00)));
+  advertising->setScanResponseData(scanResponseData);
+  advertising->start();
+  advertising_ = true;
+}

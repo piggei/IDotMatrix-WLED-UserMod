@@ -1,3 +1,190 @@
+## 0.7.1 - 2026-09-05 - Larger logical profiles and low-memory 64x64 media
+
+- Promoted the final dev.14 behavior to stable 0.7.1; runtime behavior is unchanged apart from the release/build version string.
+- Preserved the stable 0.7.0 16x16 low-RAM media path as the default build.
+- Hardware-validated the compact 11-bit/32x32 profile on classic ESP32, including repeated GIF playback and decoder release back to WLED.
+- Added low-memory logical-to-physical storage so a 64x64 logical profile can use a 16x16 physical RGB canvas (768 B instead of 12,288 B) with `rescale=true`.
+- Added safe 64x64 GIF support with all 4096 legal LZW12 codes. PSRAM-capable builds select full AnimatedGIF/direct playback; classic ESP32 without PSRAM selects the compact12/LittleFS frame-cache backend automatically.
+- The no-PSRAM compact workspace is 16,128 B on the validated 64x64->16x16 setup, about 4.5 KiB smaller than the 20,660-byte full AnimatedGIF object measured with the same toolchain.
+- Added 10 KiB predecode admission reserve plus a 9 KiB wait/yield runtime guard; transient low heap no longer causes one-sample aborts, while sustained pressure still fails cleanly with `gif-ram-reserve`.
+- Fixed repeated GIF replacement lifecycle: old cached playback is retired only after the new transfer passes length/CRC validation, and failed post-validation replacement cannot reactivate an empty `iDotMatrix Display`.
+- Added black/blank physical staging while the no-PSRAM cache builder internally uses WLED `Static`; the previous primary colour is restored before playback or recovery.
+- Final hardware stress on classic ESP32 / physical 16x16 / `64x64-lite` passed large and 100-frame animations, 10+ alternating GIF replacements, clock/date/image/WLED transitions, and live Web UI/`/json/info` access without reboot or WLED Error 8/90.
+- Retained runtime build/backend/heap/reset/cache diagnostics because they are useful for the still-pending PSRAM/native-64/HUB75 validation.
+- Known release boundary: the PSRAM direct backend, native physical 64x64, and HUB75 DMA coexistence remain to be hardware-validated; aggressive 64->16 text rescale can make thin glyph strokes hard to read.
+
+## 0.7.1-dev.14 - blank GIF staging and pre-release polish
+
+- Kept the dev.12 compact-safe 4096-code LZW12 decoder, LittleFS frame cache, and dev.13 repeat-GIF lifecycle/wait-retry behavior unchanged.
+- The classic-ESP32/no-PSRAM precache still switches internally to WLED `Static` for the lowest runtime RAM footprint, but the selected segment primary colour is temporarily forced to black so the physical panel looks off while frames are prepared.
+- The previous segment primary colour is saved before staging and restored before `iDotMatrix Display` is activated, before failure recovery, and when WLED/API ownership interrupts a pending cache build. The temporary black state therefore cannot leak into later WLED effects.
+- Added host regressions for black staging, colour restoration after successful cached playback, restoration after replacement failure, clock recovery, and user/API cancellation during staging.
+- Hardware status entering dev.14: repeated A/B GIF replacement, large/100-frame GIFs, clock -> GIF, WLED effect -> GIF, static image transitions and Web UI responsiveness all passed on the classic ESP32 64x64-lite / physical 16x16 rescale setup.
+
+## 0.7.1-dev.13 - repeat-GIF lifecycle and transient-RAM recovery
+
+- Kept the dev.12 compact-safe 4096-code LZW12 decoder unchanged.
+- On the no-PSRAM frame-cache path, a fully validated replacement GIF now retires the previous cached playback immediately; CRC-failed/incomplete transfers still leave the current GIF untouched.
+- Replaced the one-sample 9 KiB cache-build abort with a wait/retry policy: transient low heap yields back to WLED/Wi-Fi/BLE and only a continuous 2-second low-heap condition fails with `gif-ram-reserve`.
+- Fixed GIF-to-GIF failure recovery so an already-retired previous GIF is not restored as an empty `iDotMatrix Display` effect. Recovery lands on WLED `Static`, matching the manual action that restored subsequent transfers during hardware testing.
+- Failed cache preparation from restorable non-GIF iDotMatrix content (clock/text/image/DIY) restores the previous display canvas visibility.
+- Added `/json/info` diagnostics `gifCacheWaits=N low=M guard=9216` when the cache builder has deferred frames for transient RAM pressure.
+- Added repeated cached-GIF replacement and failure-recovery host regressions.
+
+## 0.7.1-dev.12 - compact-safe 4096-code LZW12 backend
+
+- Added `IDotMatrixCompactGif`, a dedicated classic-ESP32/no-PSRAM decoder for the 64x64 frame-cache path.
+- Keeps all 4096 legal 12-bit GIF LZW codes; unlike the unsafe dev.4/dev.5 experiments it does not truncate the dictionary.
+- Packs the 4096 prefix entries into 6144 bytes (12 bits each), keeps 4096-byte suffix and reverse-stack tables, and allocates palette/disposal storage in one contiguous workspace.
+- With a 16x16 physical canvas the compact workspace is 16128 bytes, roughly 4.5 KiB below the 20660-byte AnimatedGIF object seen on hardware.
+- PSRAM-capable ESP32 targets continue to use AnimatedGIF/direct playback; backend selection is automatic at runtime.
+- Added a real two-frame 64x64 GIF host test for the compact decoder and frame downscale.
+
+## 0.7.1-dev.11 - guarded frame-cache predecode
+
+- Reduced the classic-ESP32 LZW12 predecode admission reserve from 12 KiB to 10 KiB.
+- Added a 9 KiB runtime free-heap guard before every cached GIF frame; if the guard trips, cache construction aborts cleanly, the decoder is released, and WLED remains responsive.
+- Keeps the full 4096-entry LZW12 dictionary and the 64x64 -> physical-canvas low-memory rescale.
+
+## 0.7.1-dev.10 - LittleFS GIF frame cache
+
+- Kept the safe full 4096-entry LZW12 decoder for 64x64 GIF correctness.
+- Added a classic-ESP32/no-PSRAM frame-cache path: GIFs are predecoded one frame per WLED loop, downscaled into the physical renderer canvas, and written to `/idot_cache.bin` on LittleFS.
+- The ~20 KiB decoder is destroyed before `iDotMatrix Display` is activated; cached playback therefore needs only the renderer canvas plus normal file I/O.
+- During predecode the adapter temporarily stages WLED `Static` rather than `iDotMatrix Display` to maximize contiguous heap for LZW12 and the network.
+- Added `gifCache=building frames=N` / `gifCachedFrames=N` diagnostics and retained `build=...`.
+- Added host coverage for the deferred frame-cache ownership transition while preserving direct 16x16/32x32 behavior.
+
+## 0.7.1-dev.9
+
+- Staged GIF activation now allocates the WLED display effect before the large GIF decoder.
+- Decoder allocation/open is deferred until a later WLED loop, so heap reserve measurements include effect-side RAM.
+- Failed GIF preparation restores the exact previous WLED effect instead of leaving an intermediate display state.
+- Keeps the safe full 4096-entry LZW12 dictionary and 64x64 low-memory rescale path.
+
+## 0.7.1-dev.8
+
+- Fixed the dev.7 activation race by staging the WLED display effect first, then deferring decoder allocation/open until a later WLED loop so effect-side RAM was already accounted for.
+- Failed preparation restored the previous WLED effect instead of exposing a partial GIF.
+- Kept the safe full 4096-entry LZW12 dictionary.
+
+## 0.7.1-dev.7
+
+- Made GIF activation transactional: a completed BLE transfer no longer claims the WLED display effect before filesystem promotion, decoder allocation, and `AnimatedGIF::open()` have succeeded.
+- A failed GIF open/reserve check now leaves the current WLED effect untouched instead of reporting `content=gif` for a decoder that never started.
+- Added `gifPending=1` to `/json/info` while a received GIF is waiting for asynchronous promotion/open.
+- Keeps the safe full 4096-entry LZW12 dictionary and low-memory 64x64 rescale from dev.6.
+
+## 0.7.1-dev.6 - safe LZW12
+
+- Restored the full 4096-entry LZW12 dictionary after hardware stress testing exposed RAM corruption with truncated 64x64 dictionaries.
+- Kept low-memory rescale and 1024-byte file I/O buffer.
+- Classic ESP32 64x64 GIF validation now uses the lite WLED override while preserving GIF correctness.
+
+## 0.7.1-dev.5
+
+- Added a compact 64x64 LZW12 profile for classic ESP32 testing.
+- Keeps 12-bit code-width handling while limiting the physical dictionary to 2560 entries and the reverse pixel stack/cache to 2048 bytes.
+- Targets a ~5 KiB decoder reduction versus dev.3 to avoid WLED Error 8 during 64x64 GIF playback.
+- 16x16, 32x32, BLE, RAW images and low-memory rescale are unchanged.
+- Complex GIFs that require more dictionary entries remain an explicit compatibility limit of this development build.
+
+## 0.7.1-dev.4
+
+- Experimental memory-reduction attempt for 64x64/LZW12: kept 12-bit code-width handling but reduced the physical dictionary to 2560 entries and the reverse stack/cache to 2048 bytes.
+- This was later proven unsafe by hardware stress: legal 12-bit codes could exceed the shortened arrays and corrupt RAM. The approach is retained only as historical evidence and must not be reused.
+
+## 0.7.1-dev.3
+
+- Added low-memory rescale storage: when `rescale=true`, the BLE/app profile remains 32x32 or 64x64 while the renderer stores only the physical WLED matrix dimensions. A 64x64 logical profile driving a 16x16 matrix now uses a 768-byte RGB canvas instead of 12,288 bytes.
+- RAW 32/64 media are downsampled while BLE chunks are received; the full logical RGB image is no longer buffered when the physical target is smaller. Chunk boundaries may split RGB pixels without affecting the result.
+- GIF draw callbacks now sample logical source coordinates directly into the smaller physical canvas. AnimatedGIF still decodes the real 64x64/LZW12 stream, but no full 64x64 RGB framebuffer is retained.
+- GIF/PNG validation now checks the logical BLE profile rather than the storage canvas size.
+- `/json/info` reports both `profile=...` and `canvas=...` so low-memory rescale is visible during testing.
+- Added host regression coverage for 64x64 logical -> 16x16 storage, including RAW chunks split at 509 bytes and sampled animation pixels.
+
+# History
+
+## 0.7.1-dev.2
+
+- Fixed the AnimatedGIF profile patch migration from the compact 11-bit/32x32 profile (`IDOT_LZW11C`) to the 12-bit/64x64 profile.
+- Added a regression test for switching profiles without deleting `.pio/libdeps`.
+- No media, BLE, renderer, or memory-policy changes from 0.7.1-dev.1.
+
+## 0.7.1-dev.1 - 2026-09-05 - 64x64/LZW12 validation line
+
+- Renumbered the larger-media work toward **0.7.1**. Version 0.8.0 is reserved for later feature/effect work; the previous 0.8.0-dev.N labels below are retained only as experimental history.
+- Promoted the compact 11-bit/32x32 path after hardware validation on classic ESP32: clock/text, ten consecutive GIFs, decoder release back to WLED, and no `Effect RAM depleted` failure.
+- Kept the validated 16x16/LZW10 and 32x32/LZW11 implementations unchanged.
+- Added `platformio_override.ini.64x64` with the full 12-bit/4096-entry GIF dictionary required for arbitrary 64x64 GIFs.
+- Reduced only AnimatedGIF's stream cache for the 12-bit profile to 1024 bytes, recovering roughly 3 KiB without reducing the 12-bit dictionary.
+- The 12-bit decoder prefers PSRAM. On classic ESP32 without PSRAM it may use internal DRAM only when at least 12 KiB remain reserved for WLED after the decoder allocation; otherwise media fails cleanly with `mediaError=gif-ram-reserve`.
+- Added optional `platformio_override.ini.64x64-lite` to measure whether disabling unused WLED integrations provides enough classic-ESP32 margin for 64x64 GIF playback.
+- Extended host tests to compile the media path under 10/11/12-bit profiles and to verify the 12-bit patch idempotently.
+
+### Experimental numbering note
+
+The `0.8.0-dev.2` through `0.8.0-dev.8` entries below were internal development builds created while solving larger-profile RAM constraints. Their technical findings remain valid, but the release line is now 0.7.1.
+
+## 0.8.0-dev.8 - 2026-09-04 - Compact 32x32 LZW11 decoder
+
+- Kept the validated 10-bit/16x16 decoder unchanged.
+- Reduced the transient 11-bit/32x32 GIF decoder by about 4 KiB versus dev.7.
+- A 32x32 frame can output at most 1024 pixels; therefore the LZW dictionary cannot reach the generic 2048-entry 11-bit ceiling. The compact profile retains 11-bit code-width handling while reserving 1282 dictionary entries and a 1024-byte reverse pixel stack.
+- Kept the dev.7 ownership fix: dynamic 11-bit storage is released immediately when normal WLED effects regain control.
+- Added `gifDecoderBytes=` to development `/json/info` so hardware tests can verify the actual compiled object size.
+- Host integration tests and patch idempotence tests pass.
+
+## 0.8.0-dev.7 - 2026-09-04 - Release GIF RAM when WLED takes control
+
+- Fixed a dynamic-decoder retention bug in the 32x32/LZW11 build.
+- If the Web UI/API changes the selected segment away from `iDotMatrix Display`, the Usermod now immediately releases iDotMatrix display ownership.
+- Active GIF playback is stopped, the dynamic 11-bit decoder storage is freed, content flags are cleared, and the private canvas is hidden before normal WLED effects continue.
+- This specifically addresses `Error 8: Effect RAM depleted!` seen after playing a GIF and then browsing ordinary WLED effects.
+- Added a host regression test for WLED effect takeover without a BLE content command.
+
+## 0.8.0-dev.6 - 2026-09-04 - Dedicated 32x32 validation build
+
+- Kept the media/renderer implementation from dev.4 unchanged after the 16x16 LZW10 profile passed ten consecutive GIFs without reboot or WLED effect-RAM exhaustion.
+- Added `platformio_override.ini.32x32`, a normal BLE/iDotMatrix build with `IDOT_GIF_LZW11` enabled and HUB75 deliberately disabled.
+- The 32x32 test build therefore isolates BLE/media memory use from HUB75 DMA memory use.
+- The existing HUB75 override remains available as an optional, separate build configuration.
+- Updated installation and testing instructions for the 32x32 validation sequence.
+
+## 0.8.0-dev.4 - 2026-09-04 - Profile-sized GIF decoders
+
+- Restored the default GIF decoder to the proven 10-bit/16x16 low-RAM profile used by 0.7.0.
+- Added build-time `IDOT_GIF_LZW11` for 32x32 GIFs.
+- Added build-time `IDOT_GIF_LZW12` for full 64x64 GIFs.
+- 10/11-bit decoder storage is fixed in DRAM to avoid the heap fragmentation observed in dev.2/dev.3.
+- The 12-bit decoder is allocated from PSRAM only; no-PSRAM builds fail with `gif-psram-required` instead of starving WLED effect RAM.
+- Added `gifDecoder=<bits>bit/<size>x<size>` to the temporary development status output.
+- Kept the dev.3 reset/heap flight recorder while larger profiles are being validated.
+- Host test suite remains green.
+
+## 0.8.0-dev.3 - 64x64 development
+
+- Packaging follow-up on this experimental line restored the BLE `sendFA03()` and `startAdvertising()` definitions accidentally dropped during the 0.7.0 cleanup.
+- Kept 0.7.0 as the stable 16x16 baseline and opened `develop-64x64` for the
+  next compatibility step.
+- Raised GIF validation from 16x16 to 64x64. The default build moves to an
+  11-bit low-RAM dictionary (complete for 32x32); `IDOT_GIF_LZW12` selects the
+  full 12-bit dictionary required by arbitrary 64x64 GIF files.
+- Removed the dedicated GIF animation framebuffer. AnimatedGIF `playFrame()` is
+  synchronous in the WLED loop, so decoded scanlines can safely update the
+  logical framebuffer directly; this saves 12,288 bytes at the 64x64 profile.
+- Large renderer and RAW buffers now prefer PSRAM on ESP32 when available and
+  fall back to internal RAM otherwise.
+- GIF decoder storage is allocated lazily, prefers PSRAM, is reused across
+  consecutive GIF replacements, and is released when GIF playback ends. An
+  allocation failure is therefore a media failure rather than a boot-loop risk.
+- Added the project HUB75 PlatformIO override as
+  `platformio_override.ini.hub75`.
+- Replaced the repository `.gitignore` with the project-supplied version.
+- Added a larger-profile regression plan using `rescale` so 32x32/64x64 logical
+  behavior can be exercised on a physical 16x16 matrix before larger hardware
+  is connected.
+
 # Release history
 
 ## 0.7.0 - 2026-09-04 - Stable media release
@@ -484,3 +671,4 @@ rediscovered later.
 - Added registration, enable setting, configuration persistence, loop hook, and
   WLED status output.
 - Confirmed the symlinked Usermod compiled, registered, and appeared in WLED.
+

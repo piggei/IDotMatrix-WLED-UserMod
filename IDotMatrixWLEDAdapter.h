@@ -49,11 +49,14 @@ public:
   bool isDiySessionActive() const { return diySessionActive_; }
   bool isDisplayEffectRegistered() const { return displayEffectId_ != 0xFF; }
   bool isDisplayEffectActive() const;
+  void syncWLEDControl();
+  void syncGifPlayback(bool playing, bool failed);
   uint8_t displayEffectId() const { return displayEffectId_; }
   bool isClockActive() const { return clockActive_; }
   bool isTextActive() const { return textActive_; }
   bool isRawImageActive() const { return rawImageActive_; }
   bool isGifActive() const { return gifActive_; }
+  bool isGifPending() const { return gifPending_; }
   uint8_t clockStyle() const { return clockSettings_.style; }
   bool clockUses24Hour() const { return clockSettings_.use24Hour; }
   bool clockShowsDate() const { return clockSettings_.showDate; }
@@ -66,6 +69,9 @@ public:
 
 private:
   void activateDisplayEffect();
+  void beginGifBlankStaging();
+  void endGifBlankStaging();
+  void stopMediaPlayback();
   void renderCanvasToSegment();
 
   IDotMatrixRenderer& renderer_;
@@ -76,6 +82,14 @@ private:
   bool textActive_ = false;
   bool rawImageActive_ = false;
   bool gifActive_ = false;
+  bool gifPending_ = false;
+  bool gifStaging_ = false;
+  bool gifPrecache_ = false;
+  bool gifReplacingActiveGif_ = false;
+  bool gifPreviousRendererVisible_ = false;
+  bool gifBlankStaging_ = false;
+  uint32_t gifStagingPrimaryColor_ = 0;
+  uint8_t gifPreviousEffect_ = 0;
   bool textLoadReady_ = false;
   bool rescaleEnabled_ = false;
   bool dimensionsMatch_ = false;

@@ -32,8 +32,75 @@ bool IDotMatrixWLEDAdapter::isDisplayEffectActive() const {
   return strip.getFirstSelectedSeg().mode == displayEffectId_;
 }
 
+void IDotMatrixWLEDAdapter::syncWLEDControl() {
+  // Frame-cache preparation intentionally happens while a low-RAM WLED static
+  // effect is selected.  Do not interpret that staging state as the user
+  // taking ownership away from iDotMatrix.
+  if (gifPending_ && gifPrecache_ && strip.getFirstSelectedSeg().mode == FX_MODE_STATIC) return;
+
+  // iDotMatrix owns the framebuffer only while its dedicated WLED effect is
+  // selected. A user/API can switch the segment to another WLED effect without
+  // sending a BLE media command. In that case release all media state
+  // immediately so ordinary WLED effects regain the RAM they need.
+  if (isDisplayEffectActive()) return;
+
+  const bool hadIDotContent = diySessionActive_ || clockActive_ || textActive_ ||
+    rawImageActive_ || gifActive_ || gifPending_ || gifStaging_ || renderer_.isVisible();
+  if (!hadIDotContent) return;
+
+  diySessionActive_ = false;
+  clockActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  gifPending_ = false;
+  gifStaging_ = false;
+  gifPrecache_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  textLoadReady_ = false;
+  stopMediaPlayback();
+  renderer_.setVisible(false);
+}
+
+void IDotMatrixWLEDAdapter::beginGifBlankStaging() {
+  if (gifBlankStaging_) return;
+
+  auto& segment = strip.getFirstSelectedSeg();
+  gifStagingPrimaryColor_ = segment.colors[0];
+  gifBlankStaging_ = true;
+
+  // Frame-cache preparation still uses WLED Static because it has the lowest
+  // runtime footprint on classic ESP32.  Temporarily make only the selected
+  // segment's primary colour black so the staging phase is visually blank
+  // without changing WLED's global brightness/power state or rewriting the
+  // global primary-colour setting. The original segment colour is restored
+  // before staging ends.
+  segment.colors[0] = BLACK;
+  segment.fill(BLACK);
+}
+
+void IDotMatrixWLEDAdapter::endGifBlankStaging() {
+  if (!gifBlankStaging_) return;
+
+  auto& segment = strip.getFirstSelectedSeg();
+  segment.colors[0] = gifStagingPrimaryColor_;
+  gifBlankStaging_ = false;
+}
+
+void IDotMatrixWLEDAdapter::stopMediaPlayback() {
+  endGifBlankStaging();
+  if (media_ != nullptr) media_->stopPlayback();
+}
+
 void IDotMatrixWLEDAdapter::activateDisplayEffect() {
   if (!isDisplayEffectRegistered()) return;
+
+  // Any transition back to the framebuffer effect ends the temporary black
+  // Static staging state.  Restore the user's WLED primary colour first; the
+  // display effect itself ignores it, but later WLED effects must see the
+  // exact colour that was active before the GIF transfer.
+  endGifBlankStaging();
 
   auto& segment = strip.getFirstSelectedSeg();
   if (segment.mode != displayEffectId_) {
@@ -91,7 +158,12 @@ void IDotMatrixWLEDAdapter::onSolidColor(
   textActive_ = false;
   rawImageActive_ = false;
   gifActive_ = false;
-  if (media_ != nullptr) media_->stopPlayback();
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  stopMediaPlayback();
   renderer_.setVisible(false);
 
   auto& segment = strip.getFirstSelectedSeg();
@@ -121,7 +193,8 @@ void IDotMatrixWLEDAdapter::onGraffitiMode(bool enter) {
     textActive_ = false;
     rawImageActive_ = false;
     gifActive_ = false;
-    if (media_ != nullptr) media_->stopPlayback();
+  gifPending_ = false;
+    stopMediaPlayback();
   }
   if (enter) activateDisplayEffect();
 }
@@ -153,7 +226,10 @@ void IDotMatrixWLEDAdapter::onGraffitiPixels(
   textActive_ = false;
   rawImageActive_ = false;
   gifActive_ = false;
-  if (media_ != nullptr) media_->stopPlayback();
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  stopMediaPlayback();
   activateDisplayEffect();
 }
 
@@ -163,7 +239,10 @@ void IDotMatrixWLEDAdapter::onClock(const IDotMatrixClockSettings& settings) {
   textActive_ = false;
   rawImageActive_ = false;
   gifActive_ = false;
-  if (media_ != nullptr) media_->stopPlayback();
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  stopMediaPlayback();
   clockSettings_ = settings;
   clockCycleStartedAt_ = millis();
   renderer_.setVisible(true);
@@ -207,7 +286,10 @@ void IDotMatrixWLEDAdapter::onTextComplete() {
   textActive_ = true;
   rawImageActive_ = false;
   gifActive_ = false;
-  if (media_ != nullptr) media_->stopPlayback();
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  stopMediaPlayback();
   renderer_.setVisible(true);
   activateDisplayEffect();
 }
@@ -231,7 +313,10 @@ bool IDotMatrixWLEDAdapter::onRawImageComplete(bool crcValid) {
   textActive_ = false;
   rawImageActive_ = true;
   gifActive_ = false;
-  if (media_ != nullptr) media_->stopPlayback();
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  stopMediaPlayback();
   activateDisplayEffect();
   return true;
 }
@@ -239,12 +324,13 @@ bool IDotMatrixWLEDAdapter::onRawImageComplete(bool crcValid) {
 bool IDotMatrixWLEDAdapter::onPngImage(const uint8_t* data, size_t length) {
   if (media_ == nullptr) return false;
   if (!media_->decodePng(data, length)) return false;
-  media_->stopPlayback();
+  stopMediaPlayback();
   diySessionActive_ = false;
   clockActive_ = false;
   textActive_ = false;
   rawImageActive_ = true;
   gifActive_ = false;
+  gifPending_ = false;
   renderer_.setVisible(true);
   activateDisplayEffect();
   return true;
@@ -261,15 +347,98 @@ bool IDotMatrixWLEDAdapter::onGifData(
 }
 
 bool IDotMatrixWLEDAdapter::onGifComplete(bool crcValid) {
-  if (media_ == nullptr || !media_->completeGif(crcValid)) return false;
-  diySessionActive_ = false;
-  clockActive_ = false;
-  textActive_ = false;
-  rawImageActive_ = false;
-  gifActive_ = true;
-  renderer_.setVisible(true);
-  activateDisplayEffect();
+  if (media_ == nullptr) return false;
+
+  // Capture the content that owns the segment before completeGif() releases
+  // an existing frame-cache playback.  A valid replacement may safely retire
+  // the old GIF, but an invalid/CRC-failed transfer must leave it untouched.
+  auto& segment = strip.getFirstSelectedSeg();
+  const uint8_t previousEffect = segment.mode;
+  const bool previousRendererVisible = renderer_.isVisible();
+  const bool replacingActiveGif = gifActive_ && previousEffect == displayEffectId_;
+
+  if (!media_->completeGif(crcValid)) return false;
+
+  gifPreviousEffect_ = previousEffect;
+  gifPreviousRendererVisible_ = previousRendererVisible;
+  gifReplacingActiveGif_ = replacingActiveGif;
+  gifPending_ = true;
+  gifPrecache_ = media_->gifUsesFrameCache();
+  gifStaging_ = !gifPrecache_;
+  if (gifReplacingActiveGif_) gifActive_ = false;
+  renderer_.setVisible(false);
+
+  if (gifPrecache_) {
+    // LZW12/no-PSRAM builds predecode into LittleFS before iDotMatrix Display
+    // is allowed to own the segment.  WLED Static still provides the smallest
+    // runtime footprint, but dev.14 blanks its primary colour temporarily so
+    // the user sees an OFF/black panel instead of a distracting solid colour
+    // while the cache is being prepared.
+    beginGifBlankStaging();
+    if (segment.mode != FX_MODE_STATIC) {
+      segment.setMode(FX_MODE_STATIC);
+      effectCurrent = FX_MODE_STATIC;
+      stateUpdated(CALL_MODE_DIRECT_CHANGE);
+    }
+    strip.trigger();
+  } else {
+    // Validated 10/11-bit direct playback keeps the established staged effect
+    // ordering used by the stable 16x16/32x32 paths.
+    activateDisplayEffect();
+  }
   return true;
+}
+
+void IDotMatrixWLEDAdapter::syncGifPlayback(bool playing, bool failed) {
+  if (playing) {
+    if (!gifPending_ && gifActive_) return;
+    diySessionActive_ = false;
+    clockActive_ = false;
+    textActive_ = false;
+    rawImageActive_ = false;
+    gifActive_ = true;
+    gifPending_ = false;
+    gifStaging_ = false;
+    if (gifPrecache_) activateDisplayEffect();
+    gifPrecache_ = false;
+    gifReplacingActiveGif_ = false;
+    gifPreviousRendererVisible_ = false;
+    renderer_.setVisible(true);
+    return;
+  }
+
+  if (!gifPending_ && !gifStaging_ && !gifPrecache_) return;
+  if (!failed) return;
+
+  // Decoder/cache preparation failed.  If this was replacing an active GIF,
+  // the old cache/decoder has already been retired and cannot be restored; in
+  // that case leave WLED on Static instead of reviving an empty
+  // iDotMatrix Display effect.  That empty effect was the reason one transient
+  // failure could poison all following GIF replacements until the user
+  // manually selected a solid colour.  Non-GIF content (clock/text/image/DIY)
+  // remains restorable because its renderer canvas/state is still present.
+  gifPending_ = false;
+  gifStaging_ = false;
+  const bool wasPrecache = gifPrecache_;
+  const bool replacingActiveGif = gifReplacingActiveGif_;
+  const bool restorePreviousCanvas = !replacingActiveGif &&
+    gifPreviousEffect_ == displayEffectId_ && gifPreviousRendererVisible_;
+  gifPrecache_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  gifActive_ = false;
+  renderer_.setVisible(false);
+  stopMediaPlayback();
+
+  auto& segment = strip.getFirstSelectedSeg();
+  const uint8_t restoreEffect = replacingActiveGif ? FX_MODE_STATIC : gifPreviousEffect_;
+  if (segment.mode == displayEffectId_ || (wasPrecache && segment.mode == FX_MODE_STATIC)) {
+    if (segment.mode != restoreEffect) segment.setMode(restoreEffect);
+    effectCurrent = restoreEffect;
+    stateUpdated(CALL_MODE_DIRECT_CHANGE);
+    strip.trigger();
+  }
+  if (restorePreviousCanvas) renderer_.setVisible(true);
 }
 
 void IDotMatrixWLEDAdapter::renderDisplayEffectFrame() {

@@ -2,38 +2,72 @@
 
 #include <cstring>
 #include <new>
+#include <cstdlib>
+
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_heap_caps.h>
+#include <esp32-hal-psram.h>
+#endif
 
 static_assert(sizeof(IDotMatrixRenderer::Pixel) == 3, "RGB framebuffer must use three bytes per pixel");
 
-IDotMatrixRenderer::~IDotMatrixRenderer() {
-  delete[] pixels_;
-  delete[] textBitmaps_;
-  delete[] rawImagePixels_;
-  delete[] animationPixels_;
+namespace {
+IDotMatrixRenderer::Pixel* allocatePixelBuffer(size_t count) {
+  if (count == 0) return nullptr;
+#if defined(ARDUINO_ARCH_ESP32)
+  const size_t bytes = count * sizeof(IDotMatrixRenderer::Pixel);
+  if (psramFound()) {
+    void* external = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (external != nullptr) return static_cast<IDotMatrixRenderer::Pixel*>(external);
+  }
+  return static_cast<IDotMatrixRenderer::Pixel*>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT));
+#else
+  return new (std::nothrow) IDotMatrixRenderer::Pixel[count];
+#endif
 }
 
-bool IDotMatrixRenderer::begin(uint8_t screenType) {
+void freePixelBuffer(IDotMatrixRenderer::Pixel* pixels) {
+#if defined(ARDUINO_ARCH_ESP32)
+  heap_caps_free(pixels);
+#else
+  delete[] pixels;
+#endif
+}
+}
+
+IDotMatrixRenderer::~IDotMatrixRenderer() {
+  cancelRawImage();
+  freePixelBuffer(pixels_);
+  delete[] textBitmaps_;
+}
+
+bool IDotMatrixRenderer::begin(uint8_t screenType, uint8_t storageWidth, uint8_t storageHeight) {
   const uint8_t dimension = dimensionForScreenType(screenType);
-  const size_t requestedPixelCount = size_t(dimension) * dimension;
+  logicalWidth_ = dimension;
+  logicalHeight_ = dimension;
+  if (storageWidth == 0 || storageWidth > dimension) storageWidth = dimension;
+  if (storageHeight == 0 || storageHeight > dimension) storageHeight = dimension;
+  const size_t requestedPixelCount = size_t(storageWidth) * storageHeight;
   textValid_ = false;
   textFrameRendered_ = false;
   cancelRawImage();
   endAnimation();
 
-  if (pixels_ != nullptr && requestedPixelCount == pixelCount_) {
+  if (pixels_ != nullptr && requestedPixelCount == pixelCount_ &&
+      width_ == storageWidth && height_ == storageHeight) {
     clear();
     visible_ = false;
     return true;
   }
 
-  Pixel* replacement = new (std::nothrow) Pixel[requestedPixelCount];
+  Pixel* replacement = allocatePixelBuffer(requestedPixelCount);
   if (replacement == nullptr) return false;
 
-  delete[] pixels_;
+  freePixelBuffer(pixels_);
   pixels_ = replacement;
   pixelCount_ = requestedPixelCount;
-  width_ = dimension;
-  height_ = dimension;
+  width_ = storageWidth;
+  height_ = storageHeight;
   visible_ = false;
   clear();
   return true;
@@ -46,38 +80,47 @@ void IDotMatrixRenderer::clear() {
 
 bool IDotMatrixRenderer::beginAnimation() {
   if (pixels_ == nullptr || pixelCount_ == 0) return false;
-  if (animationPixels_ == nullptr) {
-    animationPixels_ = new (std::nothrow) Pixel[pixelCount_];
-    if (animationPixels_ == nullptr) return false;
-  }
   clearAnimation();
   return true;
 }
 
 void IDotMatrixRenderer::clearAnimation() {
-  if (animationPixels_ != nullptr) {
-    memset(animationPixels_, 0, pixelCount_ * sizeof(Pixel));
-  }
+  clear();
 }
 
 bool IDotMatrixRenderer::setAnimationPixel(
   uint8_t x, uint8_t y, uint8_t red, uint8_t green, uint8_t blue
 ) {
-  if (animationPixels_ == nullptr || x >= width_ || y >= height_) return false;
-  animationPixels_[size_t(y) * width_ + x] = Pixel{red, green, blue};
-  return true;
+  return setPixel(x, y, red, green, blue);
+}
+
+bool IDotMatrixRenderer::setAnimationSourcePixel(
+  uint8_t x, uint8_t y, uint8_t red, uint8_t green, uint8_t blue
+) {
+  if (pixels_ == nullptr || x >= logicalWidth_ || y >= logicalHeight_) return false;
+  if (!lowMemoryRescale()) return setAnimationPixel(x, y, red, green, blue);
+
+  const uint8_t targetX = uint8_t(uint16_t(x) * width_ / logicalWidth_);
+  const uint8_t targetY = uint8_t(uint16_t(y) * height_ / logicalHeight_);
+  if (targetX >= width_ || targetY >= height_) return false;
+  // Match the nearest-neighbour sampling previously performed by the WLED
+  // adapter: only source pixels selected by the destination grid are stored.
+  if (uint16_t(targetX) * logicalWidth_ / width_ != x ||
+      uint16_t(targetY) * logicalHeight_ / height_ != y) return true;
+  return setAnimationPixel(targetX, targetY, red, green, blue);
 }
 
 bool IDotMatrixRenderer::publishAnimationFrame() {
-  if (pixels_ == nullptr || animationPixels_ == nullptr) return false;
-  memcpy(pixels_, animationPixels_, pixelCount_ * sizeof(Pixel));
+  if (pixels_ == nullptr) return false;
+  // playFrame() is synchronous inside the WLED loop, so the display effect
+  // cannot observe a half-decoded frame. Reusing the visible canvas removes
+  // a second 12,288-byte framebuffer at the 64x64 profile.
   visible_ = true;
   return true;
 }
 
 void IDotMatrixRenderer::endAnimation() {
-  delete[] animationPixels_;
-  animationPixels_ = nullptr;
+  // The animation canvas is the normal logical framebuffer.
 }
 
 bool IDotMatrixRenderer::setPixel(
@@ -480,12 +523,12 @@ bool IDotMatrixRenderer::beginText(
   textValid_ = true;
 
   const int16_t textWidth = int16_t(textGlyphCount_) * textGlyphWidth_;
-  const int16_t centeredY = height_ > textGlyphHeight_
-    ? int16_t(height_ - textGlyphHeight_) / 2
+  const int16_t centeredY = logicalHeight_ > textGlyphHeight_
+    ? int16_t(logicalHeight_ - textGlyphHeight_) / 2
     : 0;
   switch (textMotionEffect_) {
     case 1:
-      textOffsetX_ = width_;
+      textOffsetX_ = logicalWidth_;
       textOffsetY_ = centeredY;
       break;
     case 2:
@@ -494,7 +537,7 @@ bool IDotMatrixRenderer::beginText(
       break;
     case 3:
       textOffsetX_ = 0;
-      textOffsetY_ = height_;
+      textOffsetY_ = logicalHeight_;
       break;
     case 4:
       textOffsetX_ = 0;
@@ -545,16 +588,16 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
   if (textFrameRendered_ && moveNow) {
     switch (textMotionEffect_) {
       case 1:
-        if (--textOffsetX_ < -textWidth) textOffsetX_ = width_;
+        if (--textOffsetX_ < -textWidth) textOffsetX_ = logicalWidth_;
         break;
       case 2:
-        if (++textOffsetX_ > width_) textOffsetX_ = -textWidth;
+        if (++textOffsetX_ > logicalWidth_) textOffsetX_ = -textWidth;
         break;
       case 3:
-        if (--textOffsetY_ < -int16_t(textGlyphHeight_)) textOffsetY_ = height_;
+        if (--textOffsetY_ < -int16_t(textGlyphHeight_)) textOffsetY_ = logicalHeight_;
         break;
       case 4:
-        if (++textOffsetY_ > height_) textOffsetY_ = -int16_t(textGlyphHeight_);
+        if (++textOffsetY_ > logicalHeight_) textOffsetY_ = -int16_t(textGlyphHeight_);
         break;
       default:
         break;
@@ -570,7 +613,7 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
   const uint32_t elapsed = now - textAnimationStart_;
   const bool blinkHidden = textMotionEffect_ == 5 && ((elapsed / 350u) & 1u) != 0;
   const int16_t laserRow = textMotionEffect_ == 8
-    ? int16_t((elapsed / 70u) % height_)
+    ? int16_t((elapsed / 70u) % logicalHeight_)
     : -1;
   uint8_t brightnessScale = 255;
   if (textMotionEffect_ == 6) {
@@ -593,7 +636,7 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
           }
           const int16_t x = glyphX + column;
           const int16_t y = textOffsetY_ + row;
-          if (x < 0 || y < 0 || x >= width_ || y >= height_) continue;
+          if (x < 0 || y < 0 || x >= logicalWidth_ || y >= logicalHeight_) continue;
 
           Pixel value = textColor_;
           if (textColorMode_ == 2) {
@@ -609,7 +652,11 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
           }
           value = scaledColor(value, brightnessScale);
           if (laserRow >= 0 && y == laserRow) value = Pixel{255, 255, 255};
-          pixels_[size_t(y) * width_ + x] = value;
+          if (lowMemoryRescale()) {
+            setAnimationSourcePixel(uint8_t(x), uint8_t(y), value.red, value.green, value.blue);
+          } else {
+            pixels_[size_t(y) * width_ + x] = value;
+          }
         }
       }
     }
@@ -618,14 +665,21 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
   if (textMotionEffect_ == 7) {
     const uint16_t phase = elapsed / 100u;
     for (uint8_t index = 0; index < 8; ++index) {
-      const uint8_t x = uint8_t((index * 5u + index * index * 3u) % width_);
-      const uint8_t y = uint8_t((phase + index * 3u) % height_);
-      pixels_[size_t(y) * width_ + x] = Pixel{255, 255, 255};
+      const uint8_t x = uint8_t((index * 5u + index * index * 3u) % logicalWidth_);
+      const uint8_t y = uint8_t((phase + index * 3u) % logicalHeight_);
+      if (lowMemoryRescale()) setAnimationSourcePixel(x, y, 255, 255, 255);
+      else pixels_[size_t(y) * width_ + x] = Pixel{255, 255, 255};
     }
   } else if (textMotionEffect_ == 8 && laserRow >= 0) {
     const Pixel laser = scaledColor(Pixel{255, 0, 0}, 120);
-    for (uint8_t x = 0; x < width_; ++x) {
-      pixels_[size_t(laserRow) * width_ + x] = laser;
+    if (lowMemoryRescale()) {
+      for (uint8_t x = 0; x < logicalWidth_; ++x) {
+        setAnimationSourcePixel(x, uint8_t(laserRow), laser.red, laser.green, laser.blue);
+      }
+    } else {
+      for (uint8_t x = 0; x < width_; ++x) {
+        pixels_[size_t(laserRow) * width_ + x] = laser;
+      }
     }
   }
   visible_ = true;
@@ -633,14 +687,20 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
 
 bool IDotMatrixRenderer::beginRawImage(size_t byteLength) {
   cancelRawImage();
-  const size_t required = pixelCount_ * sizeof(Pixel);
-  if (pixels_ == nullptr || required == 0 || byteLength != required) return false;
+  const size_t sourceRequired = size_t(logicalWidth_) * logicalHeight_ * sizeof(Pixel);
+  if (pixels_ == nullptr || sourceRequired == 0 || byteLength != sourceRequired) return false;
 
-  rawImagePixels_ = new (std::nothrow) Pixel[pixelCount_];
-  if (rawImagePixels_ == nullptr) return false;
-  memset(rawImagePixels_, 0, required);
-  rawImageBytes_ = required;
-  return true;
+  rawImagePixels_ = allocatePixelBuffer(pixelCount_);
+  rawImageInPlace_ = rawImagePixels_ == nullptr;
+  if (rawImageInPlace_) {
+    rawImagePixels_ = pixels_;
+    visible_ = false;
+  } else {
+    memset(rawImagePixels_, 0, pixelCount_ * sizeof(Pixel));
+  }
+  // This is the source byte count, not the size of the downscaled storage.
+  rawImageBytes_ = sourceRequired;
+  return rawImagePixels_ != nullptr;
 }
 
 bool IDotMatrixRenderer::writeRawImage(
@@ -652,22 +712,59 @@ bool IDotMatrixRenderer::writeRawImage(
       offset > rawImageBytes_ || length > rawImageBytes_ - offset) {
     return false;
   }
-  memcpy(reinterpret_cast<uint8_t*>(rawImagePixels_) + offset, data, length);
+
+  if (!lowMemoryRescale()) {
+    memcpy(reinterpret_cast<uint8_t*>(rawImagePixels_) + offset, data, length);
+    return true;
+  }
+
+  // Stream a logical 32/64 image directly into the smaller physical canvas.
+  // RGB components may cross BLE chunk boundaries, so process byte-by-byte.
+  for (size_t i = 0; i < length; ++i) {
+    const size_t sourceByte = offset + i;
+    const size_t sourcePixel = sourceByte / sizeof(Pixel);
+    const uint8_t channel = uint8_t(sourceByte % sizeof(Pixel));
+    const uint8_t sourceX = uint8_t(sourcePixel % logicalWidth_);
+    const uint8_t sourceY = uint8_t(sourcePixel / logicalWidth_);
+    const uint8_t targetX = uint8_t(uint16_t(sourceX) * width_ / logicalWidth_);
+    const uint8_t targetY = uint8_t(uint16_t(sourceY) * height_ / logicalHeight_);
+    if (targetX >= width_ || targetY >= height_) continue;
+    if (uint16_t(targetX) * logicalWidth_ / width_ != sourceX ||
+        uint16_t(targetY) * logicalHeight_ / height_ != sourceY) continue;
+    uint8_t* target = reinterpret_cast<uint8_t*>(
+      &rawImagePixels_[size_t(targetY) * width_ + targetX]
+    );
+    target[channel] = data[i];
+  }
   return true;
 }
 
 bool IDotMatrixRenderer::completeRawImage(bool crcValid) {
   if (rawImagePixels_ == nullptr) return false;
   if (!crcValid) {
-    cancelRawImage();
+    if (rawImageInPlace_) {
+      rawImagePixels_ = nullptr;
+      rawImageBytes_ = 0;
+      rawImageInPlace_ = false;
+      clear();
+      visible_ = false;
+    } else {
+      cancelRawImage();
+    }
     return false;
   }
 
-  Pixel* previous = pixels_;
-  pixels_ = rawImagePixels_;
-  rawImagePixels_ = nullptr;
-  rawImageBytes_ = 0;
-  delete[] previous;
+  if (rawImageInPlace_) {
+    rawImagePixels_ = nullptr;
+    rawImageBytes_ = 0;
+    rawImageInPlace_ = false;
+  } else {
+    Pixel* previous = pixels_;
+    pixels_ = rawImagePixels_;
+    rawImagePixels_ = nullptr;
+    rawImageBytes_ = 0;
+    freePixelBuffer(previous);
+  }
   textValid_ = false;
   textFrameRendered_ = false;
   visible_ = true;
@@ -675,9 +772,12 @@ bool IDotMatrixRenderer::completeRawImage(bool crcValid) {
 }
 
 void IDotMatrixRenderer::cancelRawImage() {
-  delete[] rawImagePixels_;
+  if (rawImagePixels_ != nullptr && !rawImageInPlace_) {
+    freePixelBuffer(rawImagePixels_);
+  }
   rawImagePixels_ = nullptr;
   rawImageBytes_ = 0;
+  rawImageInPlace_ = false;
 }
 
 uint8_t IDotMatrixRenderer::dimensionForScreenType(uint8_t screenType) {

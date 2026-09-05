@@ -10,5 +10,6 @@ public:
   virtual bool beginGif(size_t byteLength) = 0;
   virtual bool writeGif(size_t offset, const uint8_t* data, size_t length) = 0;
   virtual bool completeGif(bool crcValid) = 0;
+  virtual bool gifUsesFrameCache() const { return false; }
   virtual void stopPlayback() = 0;
 };

@@ -73,13 +73,47 @@ int main() {
   assert(media.writeGif(3, gifA + 3, 3));
   assert(media.completeGif(true));
   media.loop(0);  // RX -> PLAY promotion
-  media.loop(0);  // decoder construction/open
+  media.loop(0);  // one loop reserved for staging
+  media.loop(0);  // decoder construction/open or cache construction
+  for (int i = 0; i < 4 && !media.gifActive(); ++i) media.loop(0);
   assert(media.gifActive());
+#if IDOT_GIF_BITS >= 12
+  assert(media.gifCachedFrames() == 1);
+  media.loop(0);  // play first cached frame
+  const IDotMatrixRenderer::Pixel* cached = renderer.pixel(0, 0);
+  assert(cached != nullptr);
+  assert(cached->red == 255 && cached->green == 255 && cached->blue == 255);
+#endif
 
   // A failed replacement must not be published.
   assert(media.beginGif(sizeof(gifA)));
   assert(media.writeGif(0, gifA, sizeof(gifA)));
   assert(!media.completeGif(false));
+#if IDOT_GIF_BITS >= 12
+  assert(media.gifActive());
+  assert(media.gifCachedFrames() == 1);
+#endif
+
+#if IDOT_GIF_BITS >= 12
+  // Replacing a cached GIF must retire the previous cache immediately after a
+  // fully valid transfer completes.  Repeated A/B-style replacements must not
+  // leave the old cache/read handle alive until the next decoder-open turn.
+  for (int cycle = 0; cycle < 12; ++cycle) {
+    assert(media.beginGif(sizeof(gifA)));
+    assert(media.writeGif(0, gifA, sizeof(gifA)));
+    assert(media.completeGif(true));
+    assert(!media.gifActive());
+    assert(media.gifCachedFrames() == 0);
+    media.loop(uint32_t(10 + cycle));
+    media.loop(uint32_t(10 + cycle));
+    media.loop(uint32_t(10 + cycle));
+    for (int i = 0; i < 4 && !media.gifActive(); ++i) {
+      media.loop(uint32_t(10 + cycle));
+    }
+    assert(media.gifActive());
+    assert(media.gifCachedFrames() == 1);
+  }
+#endif
 
   // Two valid transfers can complete before loop() promotes either one. The
   // newest complete file wins without confusing the RX and pending slots.
@@ -91,6 +125,8 @@ int main() {
   assert(media.completeGif(true));
   media.loop(1);
   media.loop(1);
+  media.loop(1);
+  for (int i = 0; i < 4 && !media.gifActive(); ++i) media.loop(1);
   assert(media.gifActive());
 
   media.stopPlayback();

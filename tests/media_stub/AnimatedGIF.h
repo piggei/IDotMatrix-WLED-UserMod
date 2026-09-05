@@ -15,8 +15,21 @@ public:
   void setDrawType(int) {}
   bool open(const char*, void* (*)(const char*, int32_t*), void (*)(void*),
     int32_t (*)(GIFFILE*, uint8_t*, int32_t), int32_t (*)(GIFFILE*, int32_t),
-    void (*)(GIFDRAW*)) { return true; }
+    void (*draw)(GIFDRAW*)) { draw_ = draw; return true; }
   void reset() {}
-  int playFrame(bool, int*) { return 1; }
+  int playFrame(bool, int* delay) {
+    if (delay) *delay = 50;
+    if (draw_) {
+      uint8_t pixel = 0;
+      uint16_t palette[1] = {0xFFFF};
+      GIFDRAW d{};
+      d.iY = 0; d.y = 0; d.iWidth = 1; d.iX = 0;
+      d.pPixels = &pixel; d.pPalette = palette;
+      draw_(&d);
+    }
+    return 0;
+  }
   void close() {}
+private:
+  void (*draw_)(GIFDRAW*) = nullptr;
 };

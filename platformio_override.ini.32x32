@@ -1,3 +1,5 @@
+; iDotMatrix 32x32 test profile: BLE/media only, no HUB75 bus.
+; Enables the 11-bit low-RAM GIF decoder required for 32x32 GIFs.
 [env:esp32dev_idotmatrix]
 extends = env:esp32dev
 
@@ -14,6 +16,7 @@ board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.c
 build_flags =
   ${env:esp32dev.build_flags}
   -D WLED_DISABLE_OTA
+  -D IDOT_GIF_LZW11
 
 ; Required explicitly: dependencies declared by a symlinked custom Usermod are
 ; not reliably propagated by WLED's build script.

@@ -37,24 +37,30 @@ public:
     return *this;
   }
 
+  Segment& setColor(uint8_t slot, uint32_t color) {
+    if (slot < 3) colors[slot] = color;
+    return *this;
+  }
+
   void fill(uint32_t color) {
-    for (auto& pixel : colors) pixel = color;
+    for (auto& pixel : pixels) pixel = color;
   }
 
   void setPixelColorXY(uint16_t x, uint16_t y, uint32_t color) {
-    if (x < 64 && y < 64) colors[size_t(y) * 64 + x] = color;
+    if (x < 64 && y < 64) pixels[size_t(y) * 64 + x] = color;
   }
 
   uint32_t colorAt(uint16_t x, uint16_t y) const {
-    return (x < 64 && y < 64) ? colors[size_t(y) * 64 + x] : 0;
+    return (x < 64 && y < 64) ? pixels[size_t(y) * 64 + x] : 0;
   }
 
+  uint32_t colors[3]{};
   uint8_t mode = FX_MODE_STATIC;
   uint16_t width = 16;
   uint16_t height = 16;
 
 private:
-  uint32_t colors[64 * 64]{};
+  uint32_t pixels[64 * 64]{};
 };
 
 class TestStrip {
@@ -71,6 +77,10 @@ public:
   uint32_t restartCount = 0;
   Segment& segmentRef() { return segment; }
   void renderEffect() {
+    if (segment.mode == FX_MODE_STATIC) {
+      segment.fill(segment.colors[0]);
+      return;
+    }
     const uint8_t index = segment.mode - framebufferEffectId;
     if (index < effectCount && effectFunctions[index]) effectFunctions[index]();
   }
@@ -81,7 +91,7 @@ public:
 
 private:
   Segment segment;
-  ModeFunction effectFunctions[4]{};
+  ModeFunction effectFunctions[8]{};
   uint8_t effectCount = 0;
 };
 

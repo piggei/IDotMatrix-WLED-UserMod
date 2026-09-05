@@ -1,0 +1,24 @@
+[env:esp32dev_idotmatrix]
+extends = env:esp32dev
+
+platform = espressif32@~6.13.0
+
+platform_packages =
+
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32dev.build_flags}
+  -D WLED_DISABLE_OTA
+  -D WLED_ENABLE_HUB75MATRIX
+  -D NO_GFX
+  -D NO_CIE1931
+
+
+lib_deps =
+  ${env:esp32dev.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA.git#f17fb7fe9d487e9643f919eb5aeedea8d9d1f8d7
+
+custom_usermods =
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix

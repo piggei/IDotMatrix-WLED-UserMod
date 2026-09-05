@@ -19,6 +19,18 @@ uint8_t testDay = 2;
 uint8_t testMonth = 9;
 TestStrip strip;
 
+class TestMediaSink final : public IDotMatrixMediaSink {
+public:
+  bool decodePng(const uint8_t*, size_t) override { return true; }
+  bool beginGif(size_t) override { return true; }
+  bool writeGif(size_t, const uint8_t*, size_t) override { return true; }
+  bool completeGif(bool crcValid) override { return crcValid; }
+  bool gifUsesFrameCache() const override { return cacheMode; }
+  void stopPlayback() override { ++stopCount; }
+  bool cacheMode = false;
+  uint32_t stopCount = 0;
+};
+
 void toggleOnOff() {
   if (bri == 0) {
     bri = briLast;
@@ -36,6 +48,7 @@ void stateUpdated(uint8_t callMode) {
 
 void colorUpdated(uint8_t callMode) {
   assert(callMode == CALL_MODE_DIRECT_CHANGE);
+  strip.segmentRef().colors[0] = RGBW32(colPri[0], colPri[1], colPri[2], colPri[3]);
   ++colorUpdateCount;
 }
 
@@ -185,4 +198,151 @@ int main() {
   adapter.setRescaleEnabled(true);
   strip.renderEffect();
   assert(strip.segmentRef().colorAt(1, 2) == RGBW32(90, 80, 70, 0));
+
+  // Switching to a normal WLED effect through the UI/API must release any
+  // active iDotMatrix media state even though no BLE content command arrived.
+  TestMediaSink media;
+  IDotMatrixWLEDAdapter mediaAdapter(renderer, &media);
+  assert(mediaAdapter.registerDisplayEffect());
+
+  // GIF reception is transactional: completing the BLE transfer stages the
+  // dedicated WLED effect first, but the GIF remains invisible/inactive until
+  // asynchronous decoder open succeeds.
+  strip.segmentRef().setMode(42);
+  assert(mediaAdapter.onGifComplete(true));
+  assert(!mediaAdapter.isGifActive());
+  assert(mediaAdapter.isDisplayEffectActive());
+  assert(!renderer.isVisible());
+  mediaAdapter.syncGifPlayback(true, false);
+  assert(mediaAdapter.isGifActive());
+  assert(mediaAdapter.isDisplayEffectActive());
+  assert(renderer.isVisible());
+
+  // Switching to a normal WLED effect through the UI/API must release any
+  // active iDotMatrix media state even though no BLE content command arrived.
+  strip.segmentRef().setMode(42);
+  mediaAdapter.syncWLEDControl();
+  assert(!mediaAdapter.isGifActive());
+  assert(!renderer.isVisible());
+  assert(media.stopCount == 1);
+
+  // A decoder/open failure after a valid transfer must be terminal and must
+  // restore the exact WLED effect that was active before staging.
+  strip.segmentRef().setMode(42);
+  assert(mediaAdapter.onGifComplete(true));
+  assert(!mediaAdapter.isGifActive());
+  assert(mediaAdapter.isDisplayEffectActive());
+  mediaAdapter.syncGifPlayback(false, true);
+  assert(!mediaAdapter.isGifActive());
+  assert(!mediaAdapter.isDisplayEffectActive());
+  assert(strip.segmentRef().mode == 42);
+  // LZW12/no-PSRAM frame-cache preparation must keep iDotMatrix Display
+  // inactive until the decoder has been released and the cache is ready.
+  TestMediaSink cacheMedia;
+  cacheMedia.cacheMode = true;
+  IDotMatrixWLEDAdapter cacheAdapter(renderer, &cacheMedia);
+  assert(cacheAdapter.registerDisplayEffect());
+  strip.segmentRef().setMode(42);
+  strip.segmentRef().colors[0] = RGBW32(0x12, 0x34, 0x56, 0);
+  assert(cacheAdapter.onGifComplete(true));
+  assert(!cacheAdapter.isGifActive());
+  assert(!cacheAdapter.isDisplayEffectActive());
+  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  // dev.14 keeps Static internally for its low RAM cost, but temporarily makes
+  // the physical panel black while the frame cache is being built.
+  assert(strip.segmentRef().colors[0] == BLACK);
+  strip.renderEffect();
+  assert(strip.segmentRef().colorAt(0, 0) == BLACK);
+  cacheAdapter.syncWLEDControl();
+  assert(cacheMedia.stopCount == 0);
+  cacheAdapter.syncGifPlayback(true, false);
+  assert(cacheAdapter.isGifActive());
+  assert(cacheAdapter.isDisplayEffectActive());
+  assert(renderer.isVisible());
+  // The user's WLED colour must survive the temporary blank staging phase.
+  assert(strip.segmentRef().colors[0] == RGBW32(0x12, 0x34, 0x56, 0));
+
+  strip.segmentRef().setMode(42);
+  cacheAdapter.syncWLEDControl();
+  assert(!cacheAdapter.isGifActive());
+  assert(cacheMedia.stopCount == 1);
+
+  // A transient failure while replacing an already active cached GIF must not
+  // restore an empty iDotMatrix Display effect.  The old cache is retired once
+  // the replacement transfer is valid, so failure recovery must land on
+  // WLED Static.  A following GIF can then stage cleanly without the user
+  // manually selecting a solid colour.
+  TestMediaSink replaceMedia;
+  replaceMedia.cacheMode = true;
+  IDotMatrixWLEDAdapter replaceAdapter(renderer, &replaceMedia);
+  assert(replaceAdapter.registerDisplayEffect());
+  strip.segmentRef().setMode(42);
+  strip.segmentRef().colors[0] = RGBW32(0x21, 0x43, 0x65, 0);
+  assert(replaceAdapter.onGifComplete(true));
+  assert(strip.segmentRef().colors[0] == BLACK);
+  replaceAdapter.syncGifPlayback(true, false);
+  assert(replaceAdapter.isGifActive());
+  assert(replaceAdapter.isDisplayEffectActive());
+  assert(strip.segmentRef().colors[0] == RGBW32(0x21, 0x43, 0x65, 0));
+
+  assert(replaceAdapter.onGifComplete(true));
+  assert(!replaceAdapter.isGifActive());
+  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().colors[0] == BLACK);
+  replaceAdapter.syncGifPlayback(false, true);
+  assert(!replaceAdapter.isGifActive());
+  assert(!replaceAdapter.isDisplayEffectActive());
+  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  // Even failure recovery must undo the temporary black staging colour.
+  assert(strip.segmentRef().colors[0] == RGBW32(0x21, 0x43, 0x65, 0));
+
+  // The next replacement attempt must still be able to stage and publish.
+  assert(replaceAdapter.onGifComplete(true));
+  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().colors[0] == BLACK);
+  replaceAdapter.syncGifPlayback(true, false);
+  assert(replaceAdapter.isGifActive());
+  assert(replaceAdapter.isDisplayEffectActive());
+  assert(renderer.isVisible());
+  assert(strip.segmentRef().colors[0] == RGBW32(0x21, 0x43, 0x65, 0));
+
+  // Non-GIF iDotMatrix content is restorable: a failed cache build after a
+  // clock must return to the display effect and make the prior canvas visible.
+  TestMediaSink clockMedia;
+  clockMedia.cacheMode = true;
+  IDotMatrixWLEDAdapter clockAdapter(renderer, &clockMedia);
+  assert(clockAdapter.registerDisplayEffect());
+  strip.segmentRef().colors[0] = RGBW32(0x31, 0x32, 0x33, 0);
+  IDotMatrixClockSettings clockSettings{};
+  clockAdapter.onClock(clockSettings);
+  assert(clockAdapter.isClockActive());
+  assert(clockAdapter.isDisplayEffectActive());
+  assert(renderer.isVisible());
+  assert(clockAdapter.onGifComplete(true));
+  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().colors[0] == BLACK);
+  assert(!renderer.isVisible());
+  clockAdapter.syncGifPlayback(false, true);
+  assert(clockAdapter.isClockActive());
+  assert(clockAdapter.isDisplayEffectActive());
+  assert(renderer.isVisible());
+  assert(strip.segmentRef().colors[0] == RGBW32(0x31, 0x32, 0x33, 0));
+
+  // If the user/API takes WLED ownership while a cache build is staged, the
+  // temporary black primary colour must never leak into the user's WLED state.
+  TestMediaSink cancelMedia;
+  cancelMedia.cacheMode = true;
+  IDotMatrixWLEDAdapter cancelAdapter(renderer, &cancelMedia);
+  assert(cancelAdapter.registerDisplayEffect());
+  strip.segmentRef().setMode(42);
+  strip.segmentRef().colors[0] = RGBW32(0x41, 0x42, 0x43, 0);
+  assert(cancelAdapter.onGifComplete(true));
+  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().colors[0] == BLACK);
+  strip.segmentRef().setMode(43);
+  cancelAdapter.syncWLEDControl();
+  assert(strip.segmentRef().mode == 43);
+  assert(strip.segmentRef().colors[0] == RGBW32(0x41, 0x42, 0x43, 0));
+  assert(cancelMedia.stopCount == 1);
+
 }

@@ -1,6 +1,6 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by stable WLED iDotMatrix Usermod 0.7.0. The standalone
+This document describes the protocol subset implemented by stable WLED iDotMatrix Usermod 0.7.1. The standalone
 `IDotMatrix-ESP32-Emulator` repository remains the primary, complete protocol
 reference.
 
@@ -65,7 +65,7 @@ Command:
 
 Response: `05 00 01 80 01`
 
-Version 0.7.0 acknowledges but does not apply the time fields. This is an
+Version 0.7.1 acknowledges but does not apply the time fields. This is an
 intentional WLED integration decision: WLED `localTime`, NTP, timezone, and DST
 configuration remain the sole clock authority.
 
@@ -177,8 +177,9 @@ original-device protocol requirement.
 ## Logical-to-physical mapping
 
 **WLED integration decision:** `screenType` selects the advertised logical
-profile and canvas. The physical output size comes from the selected WLED 2D
-segment. With `rescale=false`, unequal sizes are blocked and produce black. With
+profile. Renderer storage may use the smaller physical matrix dimensions when
+low-memory rescale is enabled. The physical output size comes from the selected
+WLED 2D segment. With `rescale=false`, unequal sizes are blocked and produce black. With
 `rescale=true`, nearest-neighbour sampling maps the complete logical canvas to
 the segment. WLED remains responsible for panel layout, rotation, mirroring,
 grouping, and serpentine wiring.
@@ -250,10 +251,10 @@ Packet length 140, size 131, and the PNG signature at offset 9 imply:
 | 5 | 4 | PNG byte length, little-endian |
 | 9 | remaining | PNG beginning `89 50 4E 47...` |
 
-The 0.7.0 implementation replies `05 00 00 00 03`. No outer CRC was observed; PNG/zlib
+The 0.7.1 implementation replies `05 00 00 00 03`. No outer CRC was observed; PNG/zlib
 structure is validated. This layout is a new inference from the WLED trace,
 not yet a confirmed BUILD 80 or original-device fact. The decoder accepts
-non-interlaced 8-bit RGB/RGBA and exact logical-profile dimensions. In 0.7.0 the complete compact PNG envelope must fit the 4112-byte FA02 slot.
+non-interlaced 8-bit RGB/RGBA and exact logical-profile dimensions. In 0.7.1 the complete compact PNG envelope must fit the 4112-byte FA02 slot.
 
 ## GIF payload
 
@@ -262,9 +263,13 @@ non-interlaced 8-bit RGB/RGBA and exact logical-profile dimensions. In 0.7.0 the
 WLED integration writes chunks to an RX file and starts playback only after a
 valid completion and deferred RX-to-PLAY promotion.
 
-Stable 0.7.0 validates GIF playback only on the 16x16 profile. The build-time
-AnimatedGIF configuration rejects dimensions larger than 16x16 to keep the
-decoder RAM footprint compatible with classic ESP32 + WLED + Wi-Fi + NimBLE.
+Stable 0.7.1 accepts GIF dimensions up to the active logical profile and the
+compiled decoder limit. The default build supports 16x16, `IDOT_GIF_LZW11`
+supports 32x32, and `IDOT_GIF_LZW12` supports 64x64 with the complete legal
+4096-code LZW12 space. On ESP32 with PSRAM the 64x64 build selects full
+AnimatedGIF/direct playback; on classic ESP32 without PSRAM it selects the
+compact12/LittleFS frame-cache backend. Backend choice is a WLED integration
+and memory-management detail, not a wire-protocol difference.
 
 ## RAW RGB image payload
 
@@ -291,7 +296,7 @@ effect lets WLED apply its configured matrix mapping or the optional rescale.
 | 0 | glyph count |
 | 1..3 | not yet documented |
 | 4 | movement/effect |
-| 5 | speed (`0..100`; mapped by 0.7.0 to 500..15 ms per pixel) |
+| 5 | speed (`0..100`; mapped by 0.7.1 to 500..15 ms per pixel) |
 | 6 | colour mode |
 | 7..9 | text RGB |
 | 10 | background enabled/mode |
@@ -306,7 +311,7 @@ Each glyph begins with a four-byte metadata prefix followed by its bitmap:
 | `0x03` | reference compatibility alias, unconfirmed | 8x16 | 16 bytes | 20 bytes |
 | `0x06` | reference compatibility alias, unconfirmed | 16x32 | 64 bytes | 68 bytes |
 
-Version 0.7.0 accepts only the experimentally confirmed `0x02` and
+Version 0.7.1 accepts only the experimentally confirmed `0x02` and
 `0x05` markers. Bitmap rows are consecutive, and the least-significant bit is
 the leftmost pixel within each byte. Mixed glyph sizes in one payload have not
 been observed and are not supported.
@@ -317,12 +322,13 @@ background, speed, movement, and effects are rendered locally. SimSun and
 SimHei require no WLED font library because the official app rasterizes them
 before transmission.
 
-## Unsupported in 0.7.0
+## Unsupported in 0.7.1
 
 - unconfirmed TEXT marker aliases `0x03` and `0x06`;
 - interlaced PNG, other PNG colour types, and PNG dimensions differing from
   the logical profile;
-- GIF dimensions larger than 16x16 in the stable low-RAM decoder build;
+- GIF dimensions larger than the active logical profile or larger than the
+  maximum compiled GIF decoder profile (16x16 default, 32x32 LZW11, 64x64 LZW12);
 - countdown, stopwatch, scoreboard, alarms, schedules;
 - energy saving, rotation, standalone light effects, and reset.
 
