@@ -19,7 +19,30 @@ public:
 
   bool begin(uint8_t screenType, uint8_t storageWidth = 0, uint8_t storageHeight = 0);
   void clear();
+  void fill(uint8_t red, uint8_t green, uint8_t blue);
   bool setPixel(uint8_t x, uint8_t y, uint8_t red, uint8_t green, uint8_t blue);
+  bool beginLightEffect(
+    uint8_t effect,
+    uint8_t speed,
+    uint8_t colorCount,
+    const Pixel* colors,
+    uint32_t now
+  );
+  void renderLightEffect(uint32_t now);
+  void renderAudio(
+    bool fft,
+    uint8_t mode,
+    uint8_t level,
+    const uint8_t bands[8],
+    uint32_t now
+  );
+  uint8_t lightEffectId() const { return lightEffectId_; }
+  uint8_t lightEffectSpeed() const { return lightEffectSpeed_; }
+  uint8_t lightEffectColorCount() const { return lightEffectColorCount_; }
+  void renderMMSS(uint32_t seconds, uint8_t red, uint8_t green, uint8_t blue);
+  void renderCountdown(uint32_t remainingMillis);
+  void renderStopwatch(uint32_t elapsedMillis);
+  void renderScoreboard(uint16_t scoreA, uint16_t scoreB);
   void renderClock(
     uint8_t hour,
     uint8_t minute,
@@ -93,6 +116,16 @@ private:
   uint8_t logicalWidth_ = 0;
   uint8_t logicalHeight_ = 0;
   bool visible_ = false;
+  static constexpr uint8_t MAX_LIGHT_EFFECT_COLORS = 16;
+  bool lightEffectValid_ = false;
+  bool lightEffectFrameRendered_ = false;
+  uint8_t lightEffectId_ = 0;
+  uint8_t lightEffectSpeed_ = 90;
+  uint8_t lightEffectColorCount_ = 0;
+  Pixel lightEffectColors_[MAX_LIGHT_EFFECT_COLORS]{};
+  uint32_t lightEffectStartMillis_ = 0;
+  uint32_t lightEffectLastFrameMillis_ = 0;
+  uint32_t lightEffectScrollOffset_ = 0;
   uint8_t* textBitmaps_ = nullptr;
   size_t textBitmapCapacity_ = 0;
   bool textValid_ = false;

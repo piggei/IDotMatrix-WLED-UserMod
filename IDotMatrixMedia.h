@@ -5,14 +5,11 @@
 #include <AnimatedGIF.h>
 #include "IDotMatrixMediaSink.h"
 #include "IDotMatrixCompactGif.h"
+#include "IDotMatrixBuildProfile.h"
 
 #ifndef IDOT_GIF_BITS
 #define IDOT_GIF_BITS 10
 #endif
-#ifndef IDOT_GIF_MAX_DIM
-#define IDOT_GIF_MAX_DIM 16
-#endif
-
 class IDotMatrixRenderer;
 
 class IDotMatrixMedia final : public IDotMatrixMediaSink {

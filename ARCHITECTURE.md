@@ -1,8 +1,10 @@
 # Architecture
 
-This document describes the **stable 0.7.1 architecture**, with special attention
-to the RAM constraints that shaped the 32x32 and 64x64 media paths on classic
-ESP32.
+This document describes the **stable 0.8.0 architecture**. It combines the
+validated 0.7.1 memory/media design with the feature layer added for light
+effects, timers, automation, active-buzzer support, Audio/Rhythm rendering, and
+build-aware resolution settings. Special attention remains on the RAM constraints
+that shaped the 32x32 and 64x64 media paths on classic ESP32.
 
 ## Design goals
 
@@ -49,8 +51,9 @@ boundary. It is host-testable.
 
 ### `IDotMatrixRenderer`
 
-Owns RGB storage, graffiti pixels, clock artwork, text glyphs, RAW image assembly,
-and animation-frame publication.
+Owns RGB storage, app Solid colour, the seven standalone light effects, graffiti
+pixels, clock artwork, text glyphs, RAW image assembly, and animation-frame
+publication.
 
 A pixel is exactly three bytes. If logical and storage dimensions match, the
 canvas sizes are:
@@ -98,10 +101,11 @@ It is used only during cache construction and is destroyed before playback.
 
 ### `IDotMatrixWLEDAdapter`
 
-Is the WLED boundary. It maps power, brightness, RGB, and app-content ownership
-to WLED. It registers one effect named `iDotMatrix Display`, reads WLED local
-time for clocks, and applies WLED's configured 2D mapping/rescale when emitting
-pixels.
+Is the WLED boundary. It maps power/brightness and app-content ownership to WLED.
+It registers one effect named `iDotMatrix Display`, reads WLED local time for
+clocks, and applies WLED's configured 2D mapping/rescale when emitting pixels.
+App Solid and light effects stay in the renderer rather than being translated
+into native WLED effect/colour state.
 
 It also owns GIF staging/recovery rules. On the classic-ESP32 frame-cache path,
 WLED `Static` is used internally while the cache is prepared because it has a
@@ -111,7 +115,7 @@ internal staging state is not shown to the user.
 ### `usermod_idotmatrix.cpp`
 
 Owns Usermod lifecycle, settings, the I2S/RMT safety guard, Wi-Fi modem-sleep
-requirement, delayed BLE startup, reset/heap flight-recorder diagnostics, and
+requirement, delayed BLE startup, reset/heap crash-snapshot diagnostics, and
 compact runtime status under `/json/info`.
 
 ## Execution model
@@ -134,19 +138,124 @@ BLE, WebSocket, WLED, and LittleFS can continue servicing transient work.
 | State | Authority |
 |---|---|
 | Power / brightness | WLED |
-| Solid colour | WLED segment state |
+| App Solid colour | `IDotMatrixRenderer` canvas |
 | BLE logical profile | Usermod configuration |
 | Renderer storage dimensions | physical WLED matrix when low-memory rescale is active |
 | Graffiti / RAW / PNG / GIF visible pixels | `IDotMatrixRenderer` |
 | Clock time, timezone, DST | WLED time subsystem |
-| Clock style / text style | last valid app command |
+| Clock style / text style / light-effect state | last valid app command |
+| Countdown / stopwatch state | emulated-device state in `IDotMatrixWLEDAdapter` |
+| Scoreboard values | last valid app command |
 | Physical XY/serpentine mapping | WLED matrix configuration |
+
+### Control-source isolation and user experience
+
+The official iDotMatrix app is effectively a one-way controller in this
+integration: it sends commands, but there is no confirmed general mechanism for
+WLED-side state changes to be pushed back into the app. Treating an iDotMatrix
+light effect as the corresponding native WLED effect would therefore create a
+misleading UI. For example, the app could still show a red strobe after the user
+changed the WLED strobe to blue. Both programs would be internally consistent,
+but the combined user experience would look desynchronized.
+
+In stable 0.8.0, **all app-originated visual content stays under one
+WLED effect: `iDotMatrix Display`**. That includes Solid colour and the seven
+standalone light effects in addition to graffiti, clock, text, images and GIFs.
+The WLED effect is only a framebuffer publisher; it does not expose the app
+content as a native WLED Solid/Strobe/etc. state.
+
+The resulting UX rule is deliberately simple:
+
+```text
+use iDotMatrix app -> iDotMatrix Display publishes app framebuffer
+select a WLED effect -> WLED takes the display as an explicit source change
+next supported iDotMatrix content command -> iDotMatrix Display takes it back
+```
+
+No attempt is made to synthesize a hybrid state such as "iDot effect + WLED
+colour + iDot speed". Power and master brightness remain WLED-level device
+controls because they affect the physical output independently of the content
+renderer. The only intentional internal exception is no-PSRAM GIF precache: it
+briefly uses WLED `Static` for RAM headroom while forcing the physical output
+black, then restores the previous WLED primary colour before the framebuffer
+effect is shown again.
+
+### Standalone light-effect renderer
+
+The seven effect algorithms are ported from the standalone ESP32 emulator rather
+than mapped to native WLED effects. The renderer keeps only a bounded palette
+(maximum 16 RGB colours), effect id, speed, and timing metadata. The existing
+RGB canvas is reused for every frame. There is no second framebuffer, no
+per-pixel effect-state array, and no effect-specific heap allocation.
+
+For scrolling effects 3, 4 and 5, the animation position is deliberately a
+frame counter rather than a value derived from elapsed wall-clock time. Each
+accepted renderer update advances the pattern by exactly one physical canvas
+pixel; app speed changes only the minimum interval between updates. If WLED,
+Wi-Fi, BLE or filesystem work delays a loop iteration, the effect may momentarily
+slow down but it cannot catch up by visibly jumping several pixels.
+
+On the host C++11 ABI used by the regression suite, adding the complete effect
+state increases `sizeof(IDotMatrixRenderer)` from 96 to 160 bytes. The exact ESP32
+alignment may differ, but the important property is architectural: persistent
+RAM growth is tens of bytes, not kilobytes, and does not touch the GIF decoder
+or frame-cache budgets that dominated 0.7.1.
+
+### Timers and scoreboard
+
+Countdown, stopwatch, and scoreboard are also rendered locally under
+`iDotMatrix Display`; they never map to native WLED effects. Countdown and
+stopwatch share a small 16x16 `MM:SS` renderer, while scoreboard draws two
+2-digit fields and a separator. The artwork is scaled through the same
+logical/physical path already used by the clock, so no additional framebuffer is
+allocated.
+
+Timer **display ownership** and timer **device state** are deliberately separate.
+If the user selects a native WLED effect while a countdown or stopwatch is
+running, WLED takes the panel but the emulated timer keeps advancing in the
+background. This matches the one-way-controller model better than freezing the
+timer invisibly: the iDotMatrix app has not been told that WLED took over and
+therefore still expects its timer state to be valid. A later pause/resume/start
+command from the app reclaims `iDotMatrix Display` using that retained state.
+
+Countdown completion is the first implemented asynchronous app-facing event: the
+adapter latches a one-bit completion flag, the protocol converts it to
+`05 00 08 80 03`, and the BLE server emits it on FA03 from the normal WLED loop
+context. No NimBLE callback performs rendering or timer-state mutation.
+
+The timer/scoreboard feature adds only bounded scalar state (booleans, timestamps,
+and two 16-bit scores) and uses no heap allocation, decoder workspace, filesystem
+cache, or per-pixel persistent state.
+
+### PlatformIO hardware targets and Usermod inheritance
+
+The PlatformIO layer is deliberately orthogonal to the media/protocol profile.
+`platformio_override.ini.example`, `.32x32`, and `.64x64` each expose the same
+classic-ESP32 and ESP32-S3 hardware target matrix while changing only the maximum
+iDotMatrix decoder profile. `platformio_override.ini.hub75` instead wraps WLED's
+board/pinout-specific HUB75 environments. See `BUILD_PROFILES.md` for the full
+matrix and validation status.
+
+Each normal/HUB75 wrapper preserves the selected WLED base environment's
+`custom_usermods` list before adding the external iDotMatrix entry. This avoids
+an external Usermod override unintentionally replacing Usermods already selected
+by WLED and avoids hard-coding one `${env:esp32dev.custom_usermods}` source for
+all boards.
+
+`platformio_override.ini.64x64-lite` is intentionally different. It is the
+classic-ESP32/no-PSRAM low-memory profile family, derived from the
+hardware-validated 4 MB baseline. Inherited Usermods are omitted by default to
+protect free and contiguous internal RAM during compact12 GIF precache. Users
+may opt back into base-environment Usermods, but that combination must be
+revalidated for internal-RAM pressure.
 
 ## Current memory rules
 
 - four 64-byte queue slots for complete short commands;
 - one 4112-byte FA02 reassembly buffer for fragmented/large packets;
 - one persistent RGB renderer canvas, sized to storage dimensions rather than automatically to logical dimensions;
+- standalone light effects reuse that canvas and add only a bounded 16-colour palette plus small timing/state fields;
+- countdown, stopwatch, and scoreboard reuse the same canvas and add only scalar timer/score state;
 - no second permanent GIF animation framebuffer;
 - RAW prefers a temporary atomic-publication buffer but can receive in-place/hidden if a second canvas cannot be allocated;
 - TEXT storage is bounded and allocated outside BLE callbacks;
@@ -362,7 +471,7 @@ change them.
 | 32x32 logical -> 16x16, repeated GIFs | `gifDecoderBytes=9372`; recorded minimum heap 7904 B; return to WLED recovered about 33.5 KiB free / 28.6 KiB largest block |
 | 64x64 logical -> 16x16, final compact backend | `gifDecoderBytes=16128`; large and 100-frame GIFs cached successfully |
 | repeated 64x64 A/B replacement | 10+ swaps passed without manual Solid reset; Web UI remained responsive |
-| final dev.14 GIF sample | `heap=33076 min=7468 largest=26612`, `gifCachedFrames=20`, `content=gif` |
+| representative compact-cache GIF sample | `heap=33076 min=7468 largest=26612`, `gifCachedFrames=20`, `content=gif` |
 | transition stress ending in WLED | cache wait diagnostics observed (`guard=9216`) while WLED remained responsive and recovered |
 
 The `min` value is historical since boot. It may be much lower than current free
@@ -370,10 +479,24 @@ heap because predecode intentionally creates the highest transient pressure.
 Current `heap`/`largest` during cached playback are more useful for judging
 whether WLED/network headroom has recovered.
 
+## Compile-time resolution capability (0.8.0)
+
+`patch_animatedgif_profiles.py` exports `IDOT_GIF_MAX_DIM` together with the
+selected LZW profile. `IDotMatrixBuildProfile.h` is the single C++ policy layer
+that converts that value into supported `screenType` choices, rescale availability
+and migration of older configuration values.
+
+The normal 16x16 build omits the rescale key from generated Usermod configuration
+and forces its runtime value off. LZW11 exposes 16x16/32x32; LZW12 exposes
+16x16/32x32/64x64. This prevents BLE from advertising a logical display whose
+GIF decoder was not compiled into the firmware. It also keeps UI visibility,
+stored configuration and runtime behavior governed by the same capability.
+
 ## Validation boundaries and future work
 
-0.7.1 hardware validation covers the classic-ESP32 no-PSRAM 64x64 **logical**
-profile when rescaled to a physical 16x16 WLED matrix. It does not yet prove:
+The 0.8.0 hardware matrix covers the classic-ESP32 no-PSRAM 64x64
+**logical** profile when rescaled to a physical 16x16 WLED matrix, together with
+the complete feature set on the validated 16x16 platform. It does not yet prove:
 
 - the automatic PSRAM/direct path on real PSRAM hardware;
 - a native physical 64x64 RGB canvas;
@@ -382,3 +505,41 @@ profile when rescaled to a physical 16x16 WLED matrix. It does not yet prove:
 
 Those tests should preserve the invariants above rather than reintroducing
 unsafe dictionary truncation or permanent large DRAM allocations.
+
+## Buzzer hardware boundary
+
+The optional buzzer is owned by the iDotMatrix usermod rather than the WLED effect engine. `IDotMatrixBuzzer` is a hardware-agnostic non-blocking pattern state machine; the usermod maps its logical ON/OFF output to the configured GPIO and active-high/active-low polarity. This keeps alarm/schedule semantics separate from the physical backend and leaves a clean path for a future passive/PWM implementation.
+
+The Usermod settings page can request a **one-shot test trill** through a small same-origin POST endpoint. The endpoint never changes persistent configuration and only operates on the GPIO/polarity already applied by WLED, so testing cannot silently drive an unsaved or conflicting pin. The one-shot path stops after three beeps; alarms use the repeating pattern, while programs use a finite multi-group activation notice.
+
+The active pattern matches the standalone emulator: three 90 ms pulses, 70 ms gaps, then a 550 ms pause. No `delay()` is used.
+
+WLED 0.16.x requires a compile-time `PinOwner` enum value for true PinManager ownership, which an out-of-tree library cannot add safely. The module therefore does not borrow another usermod's owner. The configuration key ends in `pin` so WLED's Usermods settings page includes it in its pin-use scan, and runtime setup rejects GPIOs already allocated by WLED. If WLED later adds external PinOwner registration, only the hardware setup/teardown boundary needs to change.
+
+## Countdown and stopwatch timer icon
+
+The countdown and stopwatch use the 16x16 artwork recovered from standalone emulator BUILD80: a 9x9 orange timer in rows 0..8 and full-width MM:SS in rows 10..14. The red hand uses an eight-position, 125 ms phase; countdown derives phase from remaining milliseconds while stopwatch derives it from elapsed milliseconds. Rendering remains capped at 200 ms to match the validated standalone implementation and avoid unnecessary WLED effect work.
+
+
+## Alarm and program buzzer semantics (0.8.0)
+
+The buzzer has two deliberately different automation semantics:
+
+- an alarm with its buzzer flag set owns the buzzer for the alarm lifetime and repeats the three-pulse trill until the alarm ends;
+- a program/schedule with global sound enabled emits only an activation notice: three groups of three short trills, then remains silent for the rest of the activity window.
+
+Program sound is started only by a real `startScheduleActivity()` transition. The normal automation loop never restarts the finite notice simply because the schedule remains active. If an alarm fires while the finite program notice is still playing, the alarm takes priority and switches the buzzer to its repeating pattern. The implementation remains non-blocking and does not change display ownership.
+
+## Audio/Rhythm stream and rendering (0.8.0)
+
+Audio FA02 traffic bypasses the ordinary length-prefixed command assembler.
+LEVEL frames are six bytes; FFT uses a continuous sequence of 21-byte logical
+frames even when ATT writes are 33 bytes and split the following frame. A
+21-byte carry buffer in `IDotMatrixProtocol` performs resynchronisation and
+publishes only complete, valid frames from WLED's main loop.
+
+`IDotMatrixWLEDAdapter` stores only the current family, mode, level and eight
+FFT bands. All ten BUILD80 renderers draw a temporary 16x16 legacy canvas on
+the stack and scale it immediately into the existing renderer canvas. There is
+no persistent second framebuffer. Animated visualizers are refreshed at an
+80 ms cadence while `iDotMatrix Display` owns the selected segment.

@@ -4,11 +4,23 @@ CXX="${CXX:-g++}"
 FLAGS="-std=c++11 -Wall -Wextra -Werror -pedantic"
 TMP="${TMPDIR:-/tmp}"
 
+$CXX $FLAGS -DEXPECTED_MAX_DIM=16 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile16_test"
+"$TMP/idotmatrix_profile16_test"
+$CXX $FLAGS -DIDOT_GIF_MAX_DIM=32 -DEXPECTED_MAX_DIM=32 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile32_test"
+"$TMP/idotmatrix_profile32_test"
+$CXX $FLAGS -DIDOT_GIF_MAX_DIM=64 -DEXPECTED_MAX_DIM=64 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile64_test"
+"$TMP/idotmatrix_profile64_test"
+
 $CXX $FLAGS IDotMatrixProtocol.cpp tests/test_protocol.cpp -o "$TMP/idotmatrix_protocol_test"
 "$TMP/idotmatrix_protocol_test"
 
 $CXX $FLAGS IDotMatrixRenderer.cpp tests/test_renderer.cpp -o "$TMP/idotmatrix_renderer_test"
 "$TMP/idotmatrix_renderer_test"
+
+$CXX $FLAGS IDotMatrixBuzzer.cpp tests/test_buzzer.cpp -o "$TMP/idotmatrix_buzzer_test"
+"$TMP/idotmatrix_buzzer_test"
+
+$CXX $FLAGS -Itests/automation_stub -fsyntax-only IDotMatrixAutomation.cpp
 
 $CXX $FLAGS -Itests/wled_stub IDotMatrixRenderer.cpp IDotMatrixWLEDAdapter.cpp tests/test_wled_adapter.cpp -o "$TMP/idotmatrix_adapter_test"
 "$TMP/idotmatrix_adapter_test"
@@ -32,5 +44,6 @@ $CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatr
 "$TMP/idotmatrix_media12_test"
 
 python3 tests/test_patch_profiles.py
+python3 tests/test_platformio_profiles.py
 
 echo "All iDotMatrix host tests passed."

@@ -27,6 +27,22 @@ bool IDotMatrixWLEDAdapter::registerDisplayEffect() {
   return displayEffectId_ != 0xFF;
 }
 
+void IDotMatrixWLEDAdapter::loop(uint32_t now) {
+  // Countdown/stopwatch state belongs to the emulated device, not to the
+  // currently selected WLED effect. Keep time moving even if the user has
+  // temporarily switched the panel back to native WLED content.
+  if (countdownRunning_) {
+    const uint32_t elapsed = now - countdownStartMillis_;
+    if (elapsed >= countdownRemainingMs_) {
+      countdownRemainingMs_ = 0;
+      countdownRunning_ = false;
+      countdownPaused_ = false;
+      countdownFinishPending_ = true;
+      if (countdownActive_ && isDisplayEffectActive()) renderCountdown(now, true);
+    }
+  }
+}
+
 bool IDotMatrixWLEDAdapter::isDisplayEffectActive() const {
   if (!isDisplayEffectRegistered()) return false;
   return strip.getFirstSelectedSeg().mode == displayEffectId_;
@@ -44,12 +60,24 @@ void IDotMatrixWLEDAdapter::syncWLEDControl() {
   // immediately so ordinary WLED effects regain the RAM they need.
   if (isDisplayEffectActive()) return;
 
-  const bool hadIDotContent = diySessionActive_ || clockActive_ || textActive_ ||
-    rawImageActive_ || gifActive_ || gifPending_ || gifStaging_ || renderer_.isVisible();
+  const bool hadIDotContent = solidActive_ || lightEffectActive_ || audioActive_ || diySessionActive_ ||
+    clockActive_ || countdownActive_ || stopwatchActive_ || scoreboardActive_ ||
+    textActive_ || rawImageActive_ || gifActive_ || gifPending_ || gifStaging_ ||
+    renderer_.isVisible();
   if (!hadIDotContent) return;
 
+  clearContentState();
+}
+
+void IDotMatrixWLEDAdapter::clearContentState() {
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
   diySessionActive_ = false;
   clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
   textActive_ = false;
   rawImageActive_ = false;
   gifActive_ = false;
@@ -61,6 +89,14 @@ void IDotMatrixWLEDAdapter::syncWLEDControl() {
   textLoadReady_ = false;
   stopMediaPlayback();
   renderer_.setVisible(false);
+}
+
+void IDotMatrixWLEDAdapter::cancelAutomationContent() {
+  clearContentState();
+}
+
+void IDotMatrixWLEDAdapter::restoreClockFallback() {
+  onClock(clockSettings_);
 }
 
 void IDotMatrixWLEDAdapter::beginGifBlankStaging() {
@@ -151,10 +187,18 @@ void IDotMatrixWLEDAdapter::onSolidColor(
   uint8_t green,
   uint8_t blue
 ) {
-  // A solid-colour command selects a new display mode in the reference and
-  // therefore releases ownership of the framebuffer effect.
+  // App-originated solid colour is iDotMatrix content, not WLED's own Static
+  // effect.  Keeping it on the dedicated framebuffer effect prevents the WLED
+  // UI and the one-way iDotMatrix app from appearing to share/synchronise a
+  // colour state that cannot actually be round-tripped.
+  solidActive_ = true;
+  lightEffectActive_ = false;
+  audioActive_ = false;
   diySessionActive_ = false;
   clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
   textActive_ = false;
   rawImageActive_ = false;
   gifActive_ = false;
@@ -164,19 +208,75 @@ void IDotMatrixWLEDAdapter::onSolidColor(
   gifReplacingActiveGif_ = false;
   gifPreviousRendererVisible_ = false;
   stopMediaPlayback();
-  renderer_.setVisible(false);
+  renderer_.fill(red, green, blue);
+  renderer_.setVisible(true);
+  activateDisplayEffect();
+}
 
-  auto& segment = strip.getFirstSelectedSeg();
-  if (segment.mode != FX_MODE_STATIC) segment.setMode(FX_MODE_STATIC);
+void IDotMatrixWLEDAdapter::onLightEffect(
+  const IDotMatrixLightEffectSettings& settings
+) {
+  IDotMatrixRenderer::Pixel colors[IDotMatrixLightEffectSettings::MAX_COLORS]{};
+  for (uint8_t i = 0; i < settings.colorCount; ++i) {
+    colors[i] = IDotMatrixRenderer::Pixel{
+      settings.colors[i].red,
+      settings.colors[i].green,
+      settings.colors[i].blue
+    };
+  }
 
-  // Follow WLED's normal global-colour path. It applies the static effect and
-  // primary colour to all active, selected segments and updates every interface.
-  effectCurrent = FX_MODE_STATIC;
-  colPri[0] = red;
-  colPri[1] = green;
-  colPri[2] = blue;
-  colPri[3] = 0;
-  colorUpdated(CALL_MODE_DIRECT_CHANGE);
+  if (!renderer_.beginLightEffect(
+        settings.effect,
+        settings.speed,
+        settings.colorCount,
+        colors,
+        millis())) return;
+
+  solidActive_ = false;
+  lightEffectActive_ = true;
+  audioActive_ = false;
+  diySessionActive_ = false;
+  clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  stopMediaPlayback();
+  renderer_.setVisible(true);
+  activateDisplayEffect();
+}
+
+void IDotMatrixWLEDAdapter::onAudio(const IDotMatrixAudioSettings& settings) {
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = true;
+  diySessionActive_ = false;
+  clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  stopMediaPlayback();
+  audioSettings_ = settings;
+  audioLastRenderMillis_ = millis();
+  renderer_.renderAudio(settings.fft, settings.mode, settings.level, settings.bands,
+                        audioLastRenderMillis_);
+  renderer_.setVisible(true);
+  activateDisplayEffect();
 }
 
 void IDotMatrixWLEDAdapter::onGraffitiMode(bool enter) {
@@ -189,7 +289,13 @@ void IDotMatrixWLEDAdapter::onGraffitiMode(bool enter) {
   }
   diySessionActive_ = enter;
   if (enter) {
+    solidActive_ = false;
+    lightEffectActive_ = false;
+    audioActive_ = false;
     clockActive_ = false;
+    countdownActive_ = false;
+    stopwatchActive_ = false;
+    scoreboardActive_ = false;
     textActive_ = false;
     rawImageActive_ = false;
     gifActive_ = false;
@@ -221,8 +327,14 @@ void IDotMatrixWLEDAdapter::onGraffitiPixels(
   // Some app versions may send pixel data without a preceding DIY-state
   // command. A valid pixel packet therefore also takes ownership of the
   // selected WLED segment.
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
   diySessionActive_ = true;
   clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
   textActive_ = false;
   rawImageActive_ = false;
   gifActive_ = false;
@@ -234,8 +346,14 @@ void IDotMatrixWLEDAdapter::onGraffitiPixels(
 }
 
 void IDotMatrixWLEDAdapter::onClock(const IDotMatrixClockSettings& settings) {
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
   diySessionActive_ = false;
   clockActive_ = true;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
   textActive_ = false;
   rawImageActive_ = false;
   gifActive_ = false;
@@ -247,6 +365,189 @@ void IDotMatrixWLEDAdapter::onClock(const IDotMatrixClockSettings& settings) {
   clockCycleStartedAt_ = millis();
   renderer_.setVisible(true);
   activateDisplayEffect();
+}
+
+void IDotMatrixWLEDAdapter::onCountdown(
+  const IDotMatrixCountdownSettings& settings
+) {
+  const uint32_t now = millis();
+  const uint32_t requestedMs =
+    (uint32_t(settings.minutes) * 60u + uint32_t(settings.seconds)) * 1000u;
+
+  switch (settings.mode) {
+    case 0:
+      countdownRunning_ = false;
+      countdownPaused_ = false;
+      countdownRemainingMs_ = 0;
+      countdownFinishPending_ = false;
+      break;
+    case 1:
+      countdownRemainingMs_ = requestedMs;
+      countdownStartMillis_ = now;
+      countdownRunning_ = true;
+      countdownPaused_ = false;
+      countdownFinishPending_ = false;
+      break;
+    case 2:
+      if (countdownRunning_) {
+        const uint32_t elapsed = now - countdownStartMillis_;
+        countdownRemainingMs_ = elapsed < countdownRemainingMs_
+          ? countdownRemainingMs_ - elapsed
+          : 0;
+      }
+      countdownRunning_ = false;
+      countdownPaused_ = true;
+      break;
+    case 3:
+      if (countdownRemainingMs_ != 0) {
+        countdownStartMillis_ = now;
+        countdownRunning_ = true;
+        countdownPaused_ = false;
+      }
+      break;
+    default:
+      break;
+  }
+
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
+  diySessionActive_ = false;
+  clockActive_ = false;
+  countdownActive_ = true;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  stopMediaPlayback();
+  renderer_.setVisible(true);
+  countdownLastRenderMillis_ = now;
+  renderCountdown(now, true);
+  activateDisplayEffect();
+}
+
+void IDotMatrixWLEDAdapter::onStopwatch(uint8_t mode) {
+  const uint32_t now = millis();
+  switch (mode) {
+    case 0:
+      stopwatchRunning_ = false;
+      stopwatchElapsedMs_ = 0;
+      break;
+    case 1:
+      stopwatchElapsedMs_ = 0;
+      stopwatchStartMillis_ = now;
+      stopwatchRunning_ = true;
+      break;
+    case 2:
+      if (stopwatchRunning_) stopwatchElapsedMs_ += now - stopwatchStartMillis_;
+      stopwatchRunning_ = false;
+      break;
+    case 3:
+      if (!stopwatchRunning_) {
+        stopwatchStartMillis_ = now;
+        stopwatchRunning_ = true;
+      }
+      break;
+    default:
+      break;
+  }
+
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
+  diySessionActive_ = false;
+  clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = true;
+  scoreboardActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  stopMediaPlayback();
+  renderer_.setVisible(true);
+  stopwatchLastRenderMillis_ = now;
+  renderStopwatch(now, true);
+  activateDisplayEffect();
+}
+
+void IDotMatrixWLEDAdapter::onScoreboard(uint16_t scoreA, uint16_t scoreB) {
+  scoreA_ = scoreA;
+  scoreB_ = scoreB;
+
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
+  diySessionActive_ = false;
+  clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = true;
+  textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  stopMediaPlayback();
+  renderer_.renderScoreboard(scoreA_, scoreB_);
+  renderer_.setVisible(true);
+  activateDisplayEffect();
+}
+
+bool IDotMatrixWLEDAdapter::takeCountdownFinished() {
+  if (!countdownFinishPending_) return false;
+  countdownFinishPending_ = false;
+  return true;
+}
+
+uint32_t IDotMatrixWLEDAdapter::countdownRemainingMillis(uint32_t now) const {
+  uint32_t remaining = countdownRemainingMs_;
+  if (countdownRunning_) {
+    const uint32_t elapsed = now - countdownStartMillis_;
+    remaining = elapsed < remaining ? remaining - elapsed : 0;
+  }
+  return remaining;
+}
+
+uint32_t IDotMatrixWLEDAdapter::countdownRemainingSeconds(uint32_t now) const {
+  return (countdownRemainingMillis(now) + 999u) / 1000u;
+}
+
+uint32_t IDotMatrixWLEDAdapter::stopwatchElapsedMillis(uint32_t now) const {
+  uint32_t elapsed = stopwatchElapsedMs_;
+  if (stopwatchRunning_) elapsed += now - stopwatchStartMillis_;
+  return elapsed;
+}
+
+uint32_t IDotMatrixWLEDAdapter::stopwatchElapsedSeconds(uint32_t now) const {
+  return stopwatchElapsedMillis(now) / 1000u;
+}
+
+void IDotMatrixWLEDAdapter::renderCountdown(uint32_t now, bool force) {
+  if (!countdownActive_) return;
+  if (!force && uint32_t(now - countdownLastRenderMillis_) < 200u) return;
+  countdownLastRenderMillis_ = now;
+  renderer_.renderCountdown(countdownRemainingMillis(now));
+}
+
+void IDotMatrixWLEDAdapter::renderStopwatch(uint32_t now, bool force) {
+  if (!stopwatchActive_) return;
+  if (!force && uint32_t(now - stopwatchLastRenderMillis_) < 200u) return;
+  stopwatchLastRenderMillis_ = now;
+  renderer_.renderStopwatch(stopwatchElapsedMillis(now));
 }
 
 bool IDotMatrixWLEDAdapter::onTextBegin(const IDotMatrixTextSettings& settings) {
@@ -281,8 +582,14 @@ void IDotMatrixWLEDAdapter::onTextGlyph(
 
 void IDotMatrixWLEDAdapter::onTextComplete() {
   if (!textLoadReady_) return;
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
   diySessionActive_ = false;
   clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
   textActive_ = true;
   rawImageActive_ = false;
   gifActive_ = false;
@@ -308,8 +615,14 @@ bool IDotMatrixWLEDAdapter::onRawImageData(
 
 bool IDotMatrixWLEDAdapter::onRawImageComplete(bool crcValid) {
   if (!renderer_.completeRawImage(crcValid)) return false;
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
   diySessionActive_ = false;
   clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
   textActive_ = false;
   rawImageActive_ = true;
   gifActive_ = false;
@@ -325,8 +638,14 @@ bool IDotMatrixWLEDAdapter::onPngImage(const uint8_t* data, size_t length) {
   if (media_ == nullptr) return false;
   if (!media_->decodePng(data, length)) return false;
   stopMediaPlayback();
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
   diySessionActive_ = false;
   clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
   textActive_ = false;
   rawImageActive_ = true;
   gifActive_ = false;
@@ -371,7 +690,7 @@ bool IDotMatrixWLEDAdapter::onGifComplete(bool crcValid) {
   if (gifPrecache_) {
     // LZW12/no-PSRAM builds predecode into LittleFS before iDotMatrix Display
     // is allowed to own the segment.  WLED Static still provides the smallest
-    // runtime footprint, but dev.14 blanks its primary colour temporarily so
+    // runtime footprint. Its primary colour is blanked temporarily so
     // the user sees an OFF/black panel instead of a distracting solid colour
     // while the cache is being prepared.
     beginGifBlankStaging();
@@ -392,8 +711,14 @@ bool IDotMatrixWLEDAdapter::onGifComplete(bool crcValid) {
 void IDotMatrixWLEDAdapter::syncGifPlayback(bool playing, bool failed) {
   if (playing) {
     if (!gifPending_ && gifActive_) return;
+    solidActive_ = false;
+    lightEffectActive_ = false;
+    audioActive_ = false;
     diySessionActive_ = false;
     clockActive_ = false;
+    countdownActive_ = false;
+    stopwatchActive_ = false;
+    scoreboardActive_ = false;
     textActive_ = false;
     rawImageActive_ = false;
     gifActive_ = true;
@@ -442,7 +767,16 @@ void IDotMatrixWLEDAdapter::syncGifPlayback(bool playing, bool failed) {
 }
 
 void IDotMatrixWLEDAdapter::renderDisplayEffectFrame() {
-  if (clockActive_) {
+  if (lightEffectActive_) {
+    renderer_.renderLightEffect(millis());
+  } else if (audioActive_) {
+    const uint32_t now = millis();
+    if (uint32_t(now - audioLastRenderMillis_) >= 80u) {
+      audioLastRenderMillis_ = now;
+      renderer_.renderAudio(audioSettings_.fft, audioSettings_.mode,
+                            audioSettings_.level, audioSettings_.bands, now);
+    }
+  } else if (clockActive_) {
     const uint32_t elapsed = millis() - clockCycleStartedAt_;
     const bool renderDate = clockSettings_.showDate && (elapsed % 35000u) >= 30000u;
     renderer_.renderClock(
@@ -458,6 +792,12 @@ void IDotMatrixWLEDAdapter::renderDisplayEffectFrame() {
       clockSettings_.blue,
       millis()
     );
+  } else if (countdownActive_) {
+    renderCountdown(millis());
+  } else if (stopwatchActive_) {
+    renderStopwatch(millis());
+  } else if (scoreboardActive_) {
+    // Scoreboard content is static and is rendered immediately on command.
   } else if (textActive_) {
     renderer_.renderText(millis());
   }

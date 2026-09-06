@@ -23,12 +23,14 @@ public:
 private:
   static constexpr size_t RX_PACKET_MAX = 64;
   static constexpr uint8_t RX_QUEUE_SIZE = 4;
-  // The reference reassembles fragmented FA02 writes before dispatching bulk.
-  // Observed chunks are up to 4096 payload bytes; retain the 16-byte header.
+  // The reference reassembles fragmented FA02 writes before dispatch. Normal
+  // media bulk stays near 4 KiB; alarm/program packets may grow to 8 KiB and
+  // the assembler allocates that extra capacity only while such a packet exists.
   static constexpr size_t BULK_PACKET_MAX = IDotMatrixFA02Assembler::MAX_PACKET_SIZE;
 
   enum class RxChannel : uint8_t {
     FA02,
+    AudioFA02,
     AE01
   };
 
@@ -96,6 +98,7 @@ private:
   volatile uint8_t rxHead_ = 0;
   volatile uint8_t rxTail_ = 0;
   volatile uint8_t rxCount_ = 0;
+  volatile bool audioStreamActive_ = false;
   IDotMatrixFA02Assembler faAssembler_;
   volatile uint32_t reassemblyLastWriteAt_ = 0;
   bool rawTransferReady_ = false;

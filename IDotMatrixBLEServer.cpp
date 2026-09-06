@@ -10,6 +10,31 @@ constexpr char FA03_UUID[]       = "0000fa03-0000-1000-8000-00805f9b34fb";
 constexpr char AE_SERVICE_UUID[] = "0000ae00-0000-1000-8000-00805f9b34fb";
 constexpr char AE01_UUID[]       = "0000ae01-0000-1000-8000-00805f9b34fb";
 constexpr char AE02_UUID[]       = "0000ae02-0000-1000-8000-00805f9b34fb";
+
+bool startsAudioFrame(const std::string& value) {
+  if (value.length() < 4) return false;
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(value.data());
+  return (data[0] == 0x06 && data[1] == 0x00 && data[2] == 0x00 && data[3] == 0x02) ||
+    (data[0] == 0x21 && data[1] == 0x00 && data[2] == 0x01 && data[3] == 0x02);
+}
+
+bool startsKnownNonAudioFrame(const std::string& value) {
+  if (value.length() < 4) return false;
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(value.data());
+  const uint8_t command = data[2], subcommand = data[3];
+  return (command == 0x01 && subcommand == 0x80) ||
+    (command == 0x00 && subcommand == 0x80) ||
+    (command == 0x07 && (subcommand == 0x80 || subcommand == 0x01)) ||
+    (command == 0x05 && (subcommand == 0x80 || subcommand == 0x01)) ||
+    (command == 0x04 && (subcommand == 0x80 || subcommand == 0x01)) ||
+    (command == 0x02 && subcommand == 0x02) ||
+    (command == 0x03 && subcommand == 0x02) ||
+    (command == 0x06 && subcommand == 0x01) ||
+    (command == 0x08 && subcommand == 0x80) ||
+    (command == 0x09 && subcommand == 0x80) ||
+    (command == 0x0A && subcommand == 0x80) ||
+    (command == 0x00 && subcommand == 0x00);
+}
 }
 
 bool IDotMatrixBLEServer::begin(const char* deviceName, uint8_t screenType) {
@@ -87,6 +112,8 @@ void IDotMatrixBLEServer::loop() {
       gifTransferReady_ = false;
       portENTER_CRITICAL(&queueMux_);
       faAssembler_.reset();
+      audioStreamActive_ = false;
+      protocol_.resetAudioStream();
       portEXIT_CRITICAL(&queueMux_);
     }
   }
@@ -139,6 +166,14 @@ void IDotMatrixBLEServer::loop() {
     portEXIT_CRITICAL(&queueMux_);
     if (reply.available()) sendFA03(reply.data, reply.length);
   }
+
+  // Some device events (currently countdown completion) are reported by
+  // the real display asynchronously on FA03 rather than as a direct command ACK.
+  // Poll after all command processing so normal ACK ordering always wins.
+  IDotMatrixReply asyncReply;
+  if (protocol_.pollAsyncReply(asyncReply) && asyncReply.available()) {
+    sendFA03(asyncReply.data, asyncReply.length);
+  }
 }
 
 void IDotMatrixBLEServer::ServerCallbacks::onConnect(NimBLEServer* server) {
@@ -187,6 +222,38 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
 
   const RxChannel channel = characteristic == ae01_ ? RxChannel::AE01 : RxChannel::FA02;
 
+  if (channel == RxChannel::FA02) {
+    const bool audioStart = startsAudioFrame(value);
+    const bool leaveAudio = audioStreamActive_ && startsKnownNonAudioFrame(value) && !audioStart;
+    if (leaveAudio) audioStreamActive_ = false;
+    if (audioStart || audioStreamActive_) {
+      audioStreamActive_ = true;
+      portENTER_CRITICAL(&queueMux_);
+      if (rxCount_ < RX_QUEUE_SIZE) {
+        RxPacket& packet = rxQueue_[rxHead_];
+        packet.channel = RxChannel::AudioFA02;
+        packet.length = static_cast<uint8_t>(value.length() > RX_PACKET_MAX
+          ? RX_PACKET_MAX : value.length());
+        memcpy(packet.data, value.data(), packet.length);
+        rxHead_ = (rxHead_ + 1) % RX_QUEUE_SIZE;
+        ++rxCount_;
+      }
+      portEXIT_CRITICAL(&queueMux_);
+      return;
+    }
+  }
+
+  // The rare alarm/program packet can be larger than the normal 4 KiB bulk
+  // packet. Reserve its temporary heap buffer before entering the spinlock: an
+  // allocator must never run while interrupts are held off.
+  if (channel == RxChannel::FA02 && faAssembler_.expected() == 0) {
+    if (value.length() < 2) return;
+    const uint16_t declaredLength = uint16_t(uint8_t(value[0])) |
+      (uint16_t(uint8_t(value[1])) << 8);
+    if (declaredLength == 0 || declaredLength > BULK_PACKET_MAX ||
+        !faAssembler_.ensureCapacity(declaredLength)) return;
+  }
+
   portENTER_CRITICAL(&queueMux_);
   if (channel == RxChannel::FA02) {
     if (faAssembler_.complete()) {
@@ -195,16 +262,8 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
     }
 
     if (faAssembler_.expected() == 0) {
-      if (value.length() < 2) {
-        portEXIT_CRITICAL(&queueMux_);
-        return;
-      }
       const uint16_t declaredLength = uint16_t(uint8_t(value[0])) |
         (uint16_t(uint8_t(value[1])) << 8);
-      if (declaredLength == 0 || declaredLength > BULK_PACKET_MAX) {
-        portEXIT_CRITICAL(&queueMux_);
-        return;
-      }
 
       // Preserve the original four-entry queue for complete short commands so
       // rapid power/brightness/colour writes do not contend for the bulk slot.
@@ -219,6 +278,9 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
         memcpy(packet.data, value.data(), declaredLength);
         rxHead_ = (rxHead_ + 1) % RX_QUEUE_SIZE;
         ++rxCount_;
+        // A short command never uses the assembler; release any capacity that
+        // may have been prepared from its length prefix.
+        faAssembler_.reset();
         portEXIT_CRITICAL(&queueMux_);
         return;
       }
@@ -274,7 +336,12 @@ bool IDotMatrixBLEServer::dequeue(RxPacket& packet) {
 }
 
 void IDotMatrixBLEServer::processPacket(const RxPacket& packet) {
-  if (packet.channel == RxChannel::FA02) {
+  if (packet.channel == RxChannel::AudioFA02) {
+    IDotMatrixReply reply;
+    protocol_.processAudioStream(packet.data, packet.length, reply);
+    if (reply.available()) sendFA03(reply.data, reply.length);
+  } else if (packet.channel == RxChannel::FA02) {
+    protocol_.resetAudioStream();
     IDotMatrixReply reply;
     processFA02Complete(packet.data, packet.length, reply);
     if (reply.available()) sendFA03(reply.data, reply.length);

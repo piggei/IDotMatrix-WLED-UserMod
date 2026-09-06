@@ -34,21 +34,21 @@ if has_define("IDOT_GIF_LZW11") and has_define("IDOT_GIF_LZW12"):
 bits = 12 if has_define("IDOT_GIF_LZW12") else 11 if has_define("IDOT_GIF_LZW11") else 10
 max_width = 64 if bits == 12 else 32 if bits == 11 else 16
 
-# Keep the validated 10-bit profile byte-for-byte equivalent to 0.8-dev.4.
+# Keep the validated 10-bit profile byte-for-byte equivalent to the stable low-RAM baseline.
 # For a 32x32 frame, at most 1024 output pixels can be produced. GIF LZW
 # starts with at most 258 reserved/initial codes and adds at most one
 # dictionary entry per decoded code after the first. Therefore a 32x32
 # frame can never require the full 2048-entry 11-bit dictionary. 1282
 # entries cover the worst case with a small guard while retaining 11-bit
 # code-width handling. The reverse pixel stack likewise needs at most one
-# byte per output pixel (1024 bytes). This recovers ~4 KiB versus dev.7.
+# byte per output pixel (1024 bytes). This recovers about 4 KiB versus generic 11-bit storage.
 if bits == 11:
     dictionary_entries = 1282
     file_buf = 1024
     marker = "IDOT_LZW11C"
 elif bits == 12:
     # SAFE 64x64 profile. A 12-bit GIF stream may legally reference any of
-    # 4096 dictionary codes. Earlier dev.4/dev.5 experiments truncated the
+    # 4096 dictionary codes. Earlier truncated-dictionary experiments reduced the
     # physical dictionary; complex GIFs could then index beyond the arrays
     # and corrupt RAM. Keep the complete dictionary and save memory only in
     # buffers whose size does not change the legal LZW code space.

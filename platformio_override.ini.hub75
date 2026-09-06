@@ -1,24 +1,153 @@
-[env:esp32dev_idotmatrix]
-extends = env:esp32dev
+; WLED iDotMatrix Usermod - experimental WLED HUB75 + iDotMatrix wrappers
+; Target baseline: WLED v16.0.1.
+;
+; DISPLAY PROFILE and HARDWARE TARGET are independent choices:
+;   - this file selects the complete 12-bit / max 64x64 decoder plus WLED HUB75 output;
+;   - the environment name selects one of WLED v16.0.1's official HUB75
+;     controller/pinout environments.
+;
+; All iDotMatrix environments deliberately use Espressif Arduino 2.0.17 /
+; ESP-IDF 4.4.7 (espressif32 ~6.13.0). WLED's default Tasmota framework does
+; not expose the complete BLE GATT server required by this Usermod.
+;
+; OTA is intentionally disabled in the supplied profiles. The custom partition
+; tables merge WLED's application slots into one large factory slot while
+; preserving the corresponding filesystem region. Flash over USB/serial.
+; See BUILD_PROFILES.md for the target matrix and OTA policy.
 
+; IMPORTANT: these are wrappers around HUB75 environments shipped by WLED v16.0.1.
+; Their board/pinout, HUB75 DMA flags, driver dependency, PSRAM mode and I2S/audio
+; pin policy remain owned by WLED. This file only adds the iDotMatrix BLE/media
+; Usermod, the LZW12 profile, the official Espressif framework required for BLE,
+; and the project's no-OTA partition policy.
+;
+; None of these HUB75 + BLE/media combinations has been release-hardware-validated
+; by this project yet. Select ONLY an environment matching the actual controller.
+; For an unlisted board, derive a new environment from WLED's matching HUB75
+; target instead of copying another board's pinout.
+
+; classic ESP32, WLED default HUB75 pinout
+[env:esp32dev_hub75_idotmatrix]
+extends = env:esp32dev_hub75
 platform = espressif32@~6.13.0
-
 platform_packages =
-
 board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
 
 build_flags =
-  ${env:esp32dev.build_flags}
+  ${env:esp32dev_hub75.build_flags}
   -D WLED_DISABLE_OTA
-  -D WLED_ENABLE_HUB75MATRIX
-  -D NO_GFX
-  -D NO_CIE1931
-
+  -D IDOT_GIF_LZW12
 
 lib_deps =
-  ${env:esp32dev.lib_deps}
+  ${env:esp32dev_hub75.lib_deps}
   h2zero/NimBLE-Arduino@1.4.3
-  https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA.git#f17fb7fe9d487e9643f919eb5aeedea8d9d1f8d7
+  bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
+  ${env:esp32dev.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; classic ESP32, SmartMatrix/forum pinout
+[env:esp32dev_hub75_forum_pinout_idotmatrix]
+extends = env:esp32dev_hub75_forum_pinout
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32dev_hub75_forum_pinout.build_flags}
+  -D WLED_DISABLE_OTA
+  -D IDOT_GIF_LZW12
+
+lib_deps =
+  ${env:esp32dev_hub75_forum_pinout.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32dev.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; Huidu HD-WF2; no PSRAM in WLED profile
+[env:esp32s3dev_4MB_qspi_hub75_idotmatrix]
+extends = env:esp32s3dev_4MB_qspi_hub75
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32s3dev_4MB_qspi_hub75.build_flags}
+  -D WLED_DISABLE_OTA
+  -D IDOT_GIF_LZW12
+
+lib_deps =
+  ${env:esp32s3dev_4MB_qspi_hub75.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32s3dev_8MB_qspi.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; Adafruit MatrixPortal ESP32-S3, 8 MB flash / 2 MB PSRAM
+[env:adafruit_matrixportal_esp32s3_idotmatrix]
+extends = env:adafruit_matrixportal_esp32s3
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_8MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:adafruit_matrixportal_esp32s3.build_flags}
+  -D WLED_DISABLE_OTA
+  -D IDOT_GIF_LZW12
+
+lib_deps =
+  ${env:adafruit_matrixportal_esp32s3.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32s3dev_8MB_qspi.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; MOONHUB / LilyGo T7-S3, 16 MB flash / octal PSRAM
+[env:esp32s3dev_16MB_opi_hub75_idotmatrix]
+extends = env:esp32s3dev_16MB_opi_hub75
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_16MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32s3dev_16MB_opi_hub75.build_flags}
+  -D WLED_DISABLE_OTA
+  -D IDOT_GIF_LZW12
+
+lib_deps =
+  ${env:esp32s3dev_16MB_opi_hub75.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32s3dev_8MB_opi.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; Waveshare ESP32-S3-RGB-Matrix, 32 MB flash / PSRAM
+[env:waveshare_esp32s3_32MB_hub75_idotmatrix]
+extends = env:waveshare_esp32s3_32MB_hub75
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_32MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:waveshare_esp32s3_32MB_hub75.build_flags}
+  -D WLED_DISABLE_OTA
+  -D IDOT_GIF_LZW12
+
+lib_deps =
+  ${env:waveshare_esp32s3_32MB_hub75.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:waveshare_esp32s3_32MB_hub75.custom_usermods}
   wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix

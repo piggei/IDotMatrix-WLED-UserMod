@@ -1,3 +1,161 @@
+# History
+
+## 0.8.0 - 2026-09-06 - Stable feature release
+
+- Promoted the behavior validated through `0.8.0-dev.20` to stable 0.8.0. The
+  Usermod runtime code remains unchanged; finalization adds release metadata,
+  documentation, tests, partitions, and the expanded PlatformIO target matrix.
+- Added seven source-isolated standalone light effects, including deterministic
+  one-pixel movement for effects 3, 4, and 5.
+- Added countdown, stopwatch, scoreboard, BUILD80 timer artwork, and the
+  asynchronous countdown-complete notification.
+- Added persistent alarms and up to 32 program/schedule activities with media,
+  weekday/time-window rules, WLED-time preference, and BLE-time fallback.
+- Added optional non-blocking active-buzzer support, a protected settings-page
+  test, repeating alarm sound, and a finite three-groups-of-three program notice.
+- Restored all five LEVEL and five FFT Audio/Rhythm visualizers with stream
+  reassembly across BLE write boundaries.
+- Finalized the Usermod settings layout and bounded ScreenType/Rescale choices to
+  the decoder profile compiled by each PlatformIO override.
+- Split media profile from hardware target in the supplied WLED 16.0.1
+  PlatformIO overrides: normal LZW10/LZW11/LZW12 profiles now include classic
+  ESP32 4/8/16 MB, ESP32-WROVER/PSRAM, and ESP32-S3 8/16 MB PSRAM environments.
+- Replaced the old HUB75 merge sketch with wrappers around WLED 16.0.1's native
+  HUB75 controller/pinout environments, preserving upstream DMA/PSRAM/pin rules.
+- Added matching 8/16/32 MB single-app/no-OTA partition tables and static host
+  regression checks for every supplied build environment and partition layout.
+- Retained the stable 0.7.1 media/memory architecture, including complete
+  4096-code LZW12 semantics, the classic-ESP32 compact12/LittleFS cache backend,
+  transactional GIF replacement, and low-memory rescale storage.
+- Completed the available classic-ESP32 hardware regressions and the complete
+  host test suite. PSRAM/direct 64x64, native physical 64x64, and HUB75 DMA remain
+  explicitly outside this release's validated hardware matrix.
+
+## 0.8.0-dev.20 - 2026-09-06 - Build-aware resolution choices
+
+- Added a shared compile-time capability policy driven by `IDOT_GIF_MAX_DIM`.
+- The standard LZW10 build now exposes only 16x16 and omits/forces off Rescale.
+- LZW11 exposes 16x16/32x32; LZW12 exposes 16x16/32x32/64x64, with Rescale
+  available only in these multi-profile builds.
+- Older larger-profile configurations are reduced to the nearest supported
+  value instead of advertising an undecodable resolution.
+- Added host coverage for all three compile-time profiles and expanded comments
+  in every supplied PlatformIO override.
+
+## 0.8.0-dev.19 - 2026-09-06 - Final settings labels
+
+- Replaced the remaining `Rescale` caption through a DOM-independent nearest-label
+  lookup rather than assuming table rows.
+- The full test-only rescale description now appears to the left of its checkbox.
+- Added consistent trailing colons to Enabled, ScreenType, DeviceName, rescale,
+  Buzzer Pin and BuzzerActiveHigh labels.
+- Kept the corrected fixed `IDM-` prefix and all dev.18 compatibility behavior.
+
+## 0.8.0-dev.18 - 2026-09-06 - Correct settings field targeting
+
+- Fixed the two dev.17 layout transformations that did not appear in WLED's
+  generated form because the controls are not exposed through the assumed IDs.
+- The fixed `IDM-` text is now inserted before the actual device-name input.
+- The left-hand `Rescale` label is now replaced by the complete sentence
+  `Scale the logical profile to the selected WLED 2D segment.`
+- Field lookup uses the generated `name` attribute with a row-label fallback;
+  BLE, media, rendering and buzzer behavior are unchanged.
+
+## 0.8.0-dev.17 - 2026-09-06 - Settings-page cleanup
+
+- Reworked the Usermod settings layout to remove long side descriptions.
+- Screen profile and device-name changes now show dedicated orange warnings
+  that both reboot and app reconnection are required.
+- The fixed `IDM-` prefix is rendered outside a suffix-only input; legacy full
+  names remain accepted and normalized without duplicating the prefix.
+- The rescale description is now the checkbox label and documentation defines
+  rescale as a test/diagnostic option, not a normal way to display higher-resolution
+  content on a smaller physical matrix.
+- The buzzer reminder now appears below the test button in orange.
+
+## 0.8.0-dev.16 - 2026-09-06 - Audio/Rhythm restoration
+
+- Restored all five LEVEL and five FFT BUILD80 visualizers under the single
+  `iDotMatrix Display` effect.
+- Added a 21-byte carry parser for FFT data, including the observed 33-byte BLE
+  writes containing one complete frame plus 12 bytes of the next frame.
+- Audio uses the existing RGB canvas and adds no framebuffer; 16x16 artwork is
+  scaled through the established renderer path for larger and low-memory profiles.
+- Added protocol, renderer, adapter, ownership and diagnostics coverage;
+  `/json/info` now reports `content=audio LEVEL mode=N` or `content=audio FFT mode=N`.
+- Preserved the 0.7.1 GIF/media pipeline, all 4096 LZW12 codes, and dev.15 buzzer timing.
+- Hardware validation confirmed all LEVEL/FFT visualizers and the automatic
+  return to `iDotMatrix Display`.
+- Documentation now treats OTA as intentionally disabled by default: official
+  WLED images omit the Usermod, while the validated 4 MB layout has one large
+  application slot. Rotation, energy-saving and reset remain WLED-owned policy.
+
+## 0.8.0-dev.15 - 2026-09-06 - Finite program activation sound
+
+- Changed program/schedule audio from a continuous activity-long trill to a finite activation notice: three groups of three short trills.
+- Kept alarm buzzer semantics unchanged: when requested by the alarm, the trill repeats for the configured alarm duration.
+- Added a dedicated finite `startScheduleAlert()` pattern and explicit alarm/program buzzer ownership so alarms can pre-empt a program notice without causing it to restart afterward.
+- Kept the settings-page **Test buzzer** as one group of three beeps and retained GPIO/polarity behavior.
+- Removed user-facing `-1` wording for the buzzer pin; the settings UI is intentionally just a pin selector plus polarity/test controls.
+- Hardware feedback on dev.14 confirmed the alarm/program path and buzzer were functioning; dev.15 changes only the schedule sound policy plus related documentation/tests.
+
+## 0.8.0-dev.14 - 2026-09-05 - Alarms and programs/schedules
+
+- Added the BUILD80 alarm subsystem: 10 persistent slots, enable/day/one-shot logic, duration, RAW/GIF media and per-alarm buzzer request.
+- Added up to 32 persistent program activities with global enable/sound flags, weekday/time windows, midnight crossing, staged list replacement and GIF/PNG/TEXT media.
+- Added `IDotMatrixAutomation` with NVS metadata, LittleFS media payloads, WLED local-time preference and BLE-time fallback.
+- Connected alarm/program requests to the optional non-blocking active buzzer and added `/json/info` automation diagnostics.
+- Removed the redundant buzzer GPIO help sentence from the Usermod settings page.
+
+## 0.8.0-dev.13 - 2026-09-05 - Buzzer configuration test
+
+- Added a **Test buzzer** control to Config → Usermods → iDotMatrix.
+- Added an authenticated same-origin POST endpoint used only by that settings control.
+- Added a finite one-shot three-beep trill for wiring/polarity validation; the repeating trill remains available for future alarm/schedule playback.
+- Kept the buzzer pattern engine running even if BLE startup is blocked by an incompatible RMT LED bus.
+- No protocol, GIF, media-cache, timer, light-effect, or override behavior changed.
+
+## 0.8.0-dev.12 - 2026-09-05 - Buzzer foundation and timer artwork
+
+- Added optional active-buzzer hardware configuration to the iDotMatrix usermod (`buzzer-pin`, `buzzerActiveHigh`).
+- Added a non-blocking three-pulse trill engine matching the standalone ESP32 server; it is intentionally idle until alarm/schedule support is connected to it.
+- Added GPIO validity/conflict checks and `/json/info` buzzer diagnostics. WLED 0.16.x has no collision-safe PinOwner for an out-of-tree usermod, so the module does not impersonate another usermod owner; the config pin is still exposed to WLED's Usermod settings pin scanner and already-allocated pins are refused at runtime.
+- Restored the BUILD80 countdown/stopwatch UI: 9x9 orange timer icon with a moving red hand above the MM:SS digits.
+- Countdown/stopwatch rendering now keeps millisecond precision for the timer-hand phase while retaining the validated 200 ms refresh cadence.
+
+## 0.8.0-dev.11 - 2026-09-05 - Countdown, stopwatch and scoreboard
+
+- Added the confirmed countdown command `08 80 MODE MINUTES SECONDS` with reset/start/pause/resume semantics from the standalone ESP32 emulator.
+- Added the confirmed stopwatch command `09 80 MODE` with reset/start/pause/resume semantics.
+- Added the confirmed scoreboard command `0A 80 A_lo A_hi B_lo B_hi`; the wire values remain 16-bit while the verified 16x16 artwork displays the last two decimal digits, matching the standalone reference.
+- Added the shared 16x16 `MM:SS` renderer used by countdown and stopwatch; countdown turns red for the final five seconds, stopwatch remains white, and the artwork scales through the existing logical/physical canvas path.
+- Added the reference asynchronous countdown-complete FA03 status `05 00 08 80 03`.
+- Timer state is retained independently of WLED display ownership, so a countdown/stopwatch continues to advance if the user temporarily selects a native WLED effect; the next timer command from the app can reclaim `iDotMatrix Display` without reconstructing state from WLED.
+- Added `/json/info` diagnostics for countdown, stopwatch, scoreboard, and their active content modes.
+- Added host regression coverage for command parsing/ACKs, asynchronous completion status, timer pause/resume across WLED takeover, `MM:SS` rendering, scoreboard colours, and logical scaling.
+- No changes were made to the 0.7.1 GIF/compact12/cache memory architecture or to the dev.10 light-effect engine.
+
+## 0.8.0-dev.10 - 2026-09-05 - Smooth one-pixel band scrolling and Usermod inheritance
+
+- Fixed standalone light effects 3, 4 and 5 after the first hardware pass showed visible multi-pixel jumps.
+- Scrolling effects now advance by exactly one physical canvas pixel for each accepted render; app speed controls only the frame interval, so a delayed WLED loop iteration can slow motion temporarily but cannot skip columns/diagonals.
+- Added host regression coverage that verifies no motion before the frame interval and exactly one-pixel motion even after a deliberately late render call.
+- Updated the normal 16x16, 32x32, 64x64 and HUB75 PlatformIO overrides to inherit `${env:esp32dev.custom_usermods}` before adding the external iDotMatrix Usermod, preserving WLED's existing/default Usermods.
+- Kept `platformio_override.ini.64x64-lite` intentionally isolated from inherited Usermods because the classic-ESP32/no-PSRAM compact12 cache path depends on maximum internal-RAM margin. The inheritance line is included but commented so advanced users can re-enable it explicitly and hardware-test the resulting RAM pressure.
+- No changes were made to the 0.7.1 GIF decoder, compact12 cache, RAM guards, BLE transport, or app/WLED source-isolation model.
+
+## 0.8.0-dev.9 - 2026-09-05 - Seven standalone light effects and source-isolated app rendering
+
+- Resumed the 0.8.0 prerelease sequence after the earlier dev.2..dev.8 larger-profile experiments, whose stable memory/media architecture was ultimately released as 0.7.1.
+- Added the confirmed FA02 light-effect command `03 02 EFFECT SPEED COUNT [R G B]...`, including the app's 0..127 palette-channel expansion and 16-colour bound.
+- Ported all seven standalone light-effect renderers (effect ids 0..6) from the standalone ESP32 emulator into `IDotMatrixRenderer`.
+- All app-originated light effects render into the existing bounded RGB canvas and are published only through the single WLED `iDotMatrix Display` effect; no native WLED effect mapping or effect-specific heap allocation is used.
+- Changed app-originated full-screen RGB to the same framebuffer model: iDotMatrix Solid no longer rewrites WLED's native `Solid` effect or primary colour. This avoids presenting two unsynchronized apps as if they shared one effect/colour state.
+- A WLED-side effect selection remains an explicit source takeover; the next supported iDotMatrix content command reclaims `iDotMatrix Display`. No hybrid iDot/WLED effect state is synthesized.
+- Added `content=solid`, `content=light`, and `lightEffect=<id> speed=<n> colors=<n>` runtime diagnostics.
+- Added host regressions for protocol parsing/channel scaling, all seven renderers, Solid framebuffer publication, WLED takeover, and iDotMatrix reclaim.
+- Kept the complete 0.7.1 GIF/compact12/frame-cache architecture and memory thresholds unchanged. The new effect state is bounded to a 16-colour palette plus small metadata/timestamps and introduces no second framebuffer.
+
 ## 0.7.1 - 2026-09-05 - Larger logical profiles and low-memory 64x64 media
 
 - Promoted the final dev.14 behavior to stable 0.7.1; runtime behavior is unchanged apart from the release/build version string.
@@ -103,8 +261,6 @@
 - `/json/info` reports both `profile=...` and `canvas=...` so low-memory rescale is visible during testing.
 - Added host regression coverage for 64x64 logical -> 16x16 storage, including RAW chunks split at 509 bytes and sampled animation pixels.
 
-# History
-
 ## 0.7.1-dev.2
 
 - Fixed the AnimatedGIF profile patch migration from the compact 11-bit/32x32 profile (`IDOT_LZW11C`) to the 12-bit/64x64 profile.
@@ -184,8 +340,6 @@ The `0.8.0-dev.2` through `0.8.0-dev.8` entries below were internal development 
 - Added a larger-profile regression plan using `rescale` so 32x32/64x64 logical
   behavior can be exercised on a physical 16x16 matrix before larger hardware
   is connected.
-
-# Release history
 
 ## 0.7.0 - 2026-09-04 - Stable media release
 
@@ -671,4 +825,3 @@ rediscovered later.
 - Added registration, enable setting, configuration persistence, loop hook, and
   WLED status output.
 - Confirmed the symlinked Usermod compiled, registered, and appeared in WLED.
-

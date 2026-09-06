@@ -1,26 +1,160 @@
+; WLED iDotMatrix Usermod - standard 16x16 / LZW10 profile
+; Target baseline: WLED v16.0.1.
+;
+; DISPLAY PROFILE and HARDWARE TARGET are independent choices:
+;   - this file selects the standard 10-bit / 16x16 decoder;
+;   - the environment name selects classic ESP32 4/8/16 MB, ESP32-WROVER/PSRAM, or an ESP32-S3
+;     8/16 MB PSRAM target already defined by WLED v16.0.1.
+;
+; All iDotMatrix environments deliberately use Espressif Arduino 2.0.17 /
+; ESP-IDF 4.4.7 (espressif32 ~6.13.0). WLED's default Tasmota framework does
+; not expose the complete BLE GATT server required by this Usermod.
+;
+; OTA is intentionally disabled in the supplied profiles. The custom partition
+; tables merge WLED's application slots into one large factory slot while
+; preserving the corresponding filesystem region. Flash over USB/serial.
+; See BUILD_PROFILES.md for the target matrix and OTA policy.
+
+; The settings page exposes only ScreenType 16x16 and hides Rescale.
+
 [env:esp32dev_idotmatrix]
 extends = env:esp32dev
-
-; WLED's Tasmota framework omits the complete BLE GATT server.
-; Use the official Espressif Arduino 2.0.17 / IDF 4.4.7 platform.
 platform = espressif32@~6.13.0
 platform_packages =
-
-; A complete BLE server does not fit in either OTA slot on a 4 MB ESP32.
-; This module-owned layout provides one 3.08 MB app slot and 960 KB LittleFS.
-; Uploads must be performed over USB/serial; WLED OTA is intentionally disabled.
 board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
 
 build_flags =
   ${env:esp32dev.build_flags}
   -D WLED_DISABLE_OTA
 
-; Required explicitly: dependencies declared by a symlinked custom Usermod are
-; not reliably propagated by WLED's build script.
 lib_deps =
   ${env:esp32dev.lib_deps}
   h2zero/NimBLE-Arduino@1.4.3
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
+  ${env:esp32dev.custom_usermods}
   wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+[env:esp32dev_8M_idotmatrix]
+extends = env:esp32dev_8M
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_8MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32dev_8M.build_flags}
+  -D WLED_DISABLE_OTA
+
+lib_deps =
+  ${env:esp32dev_8M.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32dev_8M.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+[env:esp32dev_16M_idotmatrix]
+extends = env:esp32dev_16M
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_16MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32dev_16M.build_flags}
+  -D WLED_DISABLE_OTA
+
+lib_deps =
+  ${env:esp32dev_16M.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32dev_16M.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; Classic ESP32-WROVER / PSRAM target from WLED.
+[env:esp32_wrover_idotmatrix]
+extends = env:esp32_wrover
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32_wrover.build_flags}
+  -D WLED_DISABLE_OTA
+
+lib_deps =
+  ${env:esp32_wrover.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32_wrover.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; PSRAM support and the cache workaround are inherited from WLED.
+
+[env:esp32s3dev_8MB_opi_idotmatrix]
+extends = env:esp32s3dev_8MB_opi
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_8MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32s3dev_8MB_opi.build_flags}
+  -D WLED_DISABLE_OTA
+
+lib_deps =
+  ${env:esp32s3dev_8MB_opi.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32s3dev_8MB_opi.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; PSRAM setup, memory type, flash mode and USB flags are inherited from WLED.
+
+[env:esp32s3dev_8MB_qspi_idotmatrix]
+extends = env:esp32s3dev_8MB_qspi
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_8MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32s3dev_8MB_qspi.build_flags}
+  -D WLED_DISABLE_OTA
+
+lib_deps =
+  ${env:esp32s3dev_8MB_qspi.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32s3dev_8MB_qspi.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; PSRAM setup, memory type, flash mode and USB flags are inherited from WLED.
+
+[env:esp32s3dev_16MB_opi_idotmatrix]
+extends = env:esp32s3dev_16MB_opi
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_16MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32s3dev_16MB_opi.build_flags}
+  -D WLED_DISABLE_OTA
+
+lib_deps =
+  ${env:esp32s3dev_16MB_opi.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${env:esp32s3dev_16MB_opi.custom_usermods}
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+; PSRAM setup, memory type, flash mode and USB flags are inherited from WLED.

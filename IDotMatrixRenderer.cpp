@@ -78,6 +78,12 @@ void IDotMatrixRenderer::clear() {
   memset(pixels_, 0, pixelCount_ * sizeof(Pixel));
 }
 
+void IDotMatrixRenderer::fill(uint8_t red, uint8_t green, uint8_t blue) {
+  if (pixels_ == nullptr) return;
+  const Pixel value{red, green, blue};
+  for (size_t i = 0; i < pixelCount_; ++i) pixels_[i] = value;
+}
+
 bool IDotMatrixRenderer::beginAnimation() {
   if (pixels_ == nullptr || pixelCount_ == 0) return false;
   clearAnimation();
@@ -373,6 +379,519 @@ void drawHourglass(Pixel* canvas) {
   for (uint8_t x = 1; x <= 3; ++x) putPixel(canvas, x, 12, white);
   for (uint8_t x = 0; x <= 4; ++x) putPixel(canvas, x, 13, sand);
 }
+}
+
+bool IDotMatrixRenderer::beginLightEffect(
+  uint8_t effect,
+  uint8_t speed,
+  uint8_t colorCount,
+  const Pixel* colors,
+  uint32_t now
+) {
+  if (pixels_ == nullptr) return false;
+
+  lightEffectId_ = effect;
+  lightEffectSpeed_ = speed;
+  lightEffectColorCount_ = colorCount < MAX_LIGHT_EFFECT_COLORS
+    ? colorCount
+    : MAX_LIGHT_EFFECT_COLORS;
+  for (uint8_t i = 0; i < lightEffectColorCount_; ++i) {
+    lightEffectColors_[i] = colors != nullptr ? colors[i] : Pixel{255, 255, 255};
+  }
+  lightEffectStartMillis_ = now;
+  lightEffectLastFrameMillis_ = now;
+  lightEffectScrollOffset_ = 0;
+  lightEffectFrameRendered_ = false;
+  lightEffectValid_ = true;
+  visible_ = true;
+  renderLightEffect(now);
+  return true;
+}
+
+void IDotMatrixRenderer::renderLightEffect(uint32_t now) {
+  if (!lightEffectValid_ || pixels_ == nullptr || width_ == 0 || height_ == 0) return;
+
+  const uint8_t boundedSpeed = lightEffectSpeed_ > 100 ? 100 : lightEffectSpeed_;
+  const uint16_t frameInterval = lightEffectId_ == 6
+    ? 40u
+    : uint16_t(360u - (uint16_t(boundedSpeed) * 290u) / 100u);
+  const bool firstFrame = !lightEffectFrameRendered_;
+  if (!firstFrame && uint32_t(now - lightEffectLastFrameMillis_) < frameInterval) return;
+
+  // Scrolling-band effects deliberately advance exactly one physical pixel per
+  // accepted render. Speed controls only the interval between renders. This
+  // prevents a delayed WLED loop iteration from turning elapsed time into a
+  // multi-pixel jump and keeps motion visually uniform.
+  if (!firstFrame && lightEffectId_ >= 3 && lightEffectId_ <= 5) {
+    ++lightEffectScrollOffset_;
+  }
+
+  lightEffectLastFrameMillis_ = now;
+  lightEffectFrameRendered_ = true;
+
+  auto effectHash = [](uint32_t value) -> uint32_t {
+    value ^= value >> 16;
+    value *= 0x7FEB352DUL;
+    value ^= value >> 15;
+    value *= 0x846CA68BUL;
+    value ^= value >> 16;
+    return value;
+  };
+
+  auto effectColor = [this](uint8_t index) -> Pixel {
+    if (lightEffectColorCount_ == 0) return Pixel{255, 255, 255};
+    return lightEffectColors_[index % lightEffectColorCount_];
+  };
+
+  auto blendPixel = [](const Pixel& a, const Pixel& b, uint8_t fraction) -> Pixel {
+    const uint16_t inverse = uint16_t(255u - fraction);
+    return Pixel{
+      uint8_t((uint16_t(a.red) * inverse + uint16_t(b.red) * fraction + 127u) / 255u),
+      uint8_t((uint16_t(a.green) * inverse + uint16_t(b.green) * fraction + 127u) / 255u),
+      uint8_t((uint16_t(a.blue) * inverse + uint16_t(b.blue) * fraction + 127u) / 255u)
+    };
+  };
+
+  auto paletteGradient = [this, &blendPixel](uint8_t position) -> Pixel {
+    if (lightEffectColorCount_ == 0) return Pixel{0, 0, 0};
+    if (lightEffectColorCount_ == 1) return lightEffectColors_[0];
+    const uint16_t scaled = uint16_t(position) * lightEffectColorCount_;
+    const uint8_t index = uint8_t(scaled >> 8);
+    const uint8_t fraction = uint8_t(scaled & 0xFFu);
+    return blendPixel(
+      lightEffectColors_[index % lightEffectColorCount_],
+      lightEffectColors_[(index + 1u) % lightEffectColorCount_],
+      fraction
+    );
+  };
+
+  auto scaleVideo = [](const Pixel& value, uint8_t scale) -> Pixel {
+    auto channel = [scale](uint8_t input) -> uint8_t {
+      if (input == 0 || scale == 0) return 0;
+      return uint8_t((uint16_t(input) * scale) / 256u + 1u);
+    };
+    return Pixel{channel(value.red), channel(value.green), channel(value.blue)};
+  };
+
+  auto easeCubic = [](uint8_t input) -> uint8_t {
+    const uint32_t x2 = (uint32_t(input) * input + 127u) / 255u;
+    const uint32_t x3 = (x2 * input + 127u) / 255u;
+    const int32_t eased = int32_t(3u * x2) - int32_t(2u * x3);
+    return eased < 0 ? 0 : eased > 255 ? 255 : uint8_t(eased);
+  };
+
+  const uint16_t multiplier = uint16_t(4u + lightEffectSpeed_ / 3u);
+  const uint32_t phase = (uint32_t(now - lightEffectStartMillis_) * multiplier) / 100u;
+
+  switch (lightEffectId_) {
+    case 0: {
+      for (uint16_t y = 0; y < height_; ++y) {
+        for (uint16_t x = 0; x < width_; ++x) {
+          const uint8_t position = uint8_t((uint32_t(y) * 5u + x + phase / 4u) / 3u);
+          pixels_[size_t(y) * width_ + x] = paletteGradient(position);
+        }
+      }
+      break;
+    }
+
+    case 1: {
+      clear();
+      const uint32_t frame = phase / 8u;
+      for (uint8_t i = 0; i < 22; ++i) {
+        const uint32_t hash = effectHash(uint32_t(i) * 173u + frame * 31u);
+        const uint8_t x = uint8_t(hash % width_);
+        const uint8_t y = uint8_t((hash >> 8) % height_);
+        Pixel value = effectColor(uint8_t((hash >> 8) %
+          (lightEffectColorCount_ == 0 ? 1u : lightEffectColorCount_)));
+        value = scaleVideo(value, uint8_t(100u + ((hash >> 16) & 0x9Fu)));
+        setPixel(x, y, value.red, value.green, value.blue);
+      }
+      break;
+    }
+
+    case 2: {
+      const uint32_t localPhase = phase / 3u;
+      for (uint16_t y = 0; y < height_; ++y) {
+        for (uint16_t x = 0; x < width_; ++x) {
+          const uint8_t position = uint8_t(localPhase + x * 2u + y * 2u);
+          pixels_[size_t(y) * width_ + x] = scaleVideo(paletteGradient(position), 190);
+        }
+      }
+      const uint32_t frame = localPhase / 4u;
+      for (uint8_t i = 0; i < 18; ++i) {
+        const uint32_t hash = effectHash(uint32_t(i) * 223u + frame * 19u);
+        setPixel(uint8_t(hash % width_), uint8_t((hash >> 8) % height_), 255, 255, 255);
+      }
+      break;
+    }
+
+    case 3: {
+      const uint32_t localPhase = lightEffectScrollOffset_;
+      const uint8_t count = lightEffectColorCount_ == 0 ? 1 : lightEffectColorCount_;
+      constexpr uint8_t stripeWidth = 4;
+      for (uint16_t y = 0; y < height_; ++y) {
+        for (uint16_t x = 0; x < width_; ++x) {
+          pixels_[size_t(y) * width_ + x] = effectColor(
+            uint8_t(((x + localPhase) / stripeWidth) % count)
+          );
+        }
+      }
+      break;
+    }
+
+    case 4: {
+      const uint32_t localPhase = lightEffectScrollOffset_;
+      const uint8_t count = lightEffectColorCount_ == 0 ? 1 : lightEffectColorCount_;
+      constexpr uint8_t stripeWidth = 4;
+      for (uint16_t y = 0; y < height_; ++y) {
+        for (uint16_t x = 0; x < width_; ++x) {
+          pixels_[size_t(y) * width_ + x] = effectColor(
+            uint8_t(((x + y + localPhase) / stripeWidth) % count)
+          );
+        }
+      }
+      break;
+    }
+
+    case 5: {
+      clear();
+      const uint32_t localPhase = lightEffectScrollOffset_;
+      const uint8_t count = lightEffectColorCount_ == 0 ? 1 : lightEffectColorCount_;
+      constexpr uint8_t colorWidth = 5;
+      constexpr uint8_t blackWidth = 4;
+      constexpr uint8_t blockWidth = colorWidth + blackWidth;
+      for (uint16_t y = 0; y < height_; ++y) {
+        for (uint16_t x = 0; x < width_; ++x) {
+          const uint32_t distance = x + y + localPhase;
+          const uint8_t within = uint8_t(distance % blockWidth);
+          if (within < colorWidth) {
+            const Pixel value = effectColor(uint8_t((distance / blockWidth) % count));
+            setPixel(uint8_t(x), uint8_t(y), value.red, value.green, value.blue);
+          }
+        }
+      }
+      break;
+    }
+
+    case 6: {
+      const uint8_t count = lightEffectColorCount_ == 0 ? 1 : lightEffectColorCount_;
+      if (count == 1) {
+        const Pixel value = effectColor(0);
+        fill(value.red, value.green, value.blue);
+        break;
+      }
+
+      const uint32_t fadeMillis = 6000u - (uint32_t(boundedSpeed) * 5300u) / 100u;
+      const uint32_t elapsed = now - lightEffectStartMillis_;
+      const uint32_t cycleMillis = fadeMillis * count;
+      for (uint16_t y = 0; y < height_; ++y) {
+        for (uint16_t x = 0; x < width_; ++x) {
+          const uint32_t index = uint32_t(y) * width_ + x;
+          const uint32_t seed = effectHash(index * 977u + 0x51EDu);
+          const uint32_t local = (elapsed + seed % cycleMillis) % cycleMillis;
+          const uint8_t a = uint8_t(local / fadeMillis);
+          const uint8_t b = uint8_t((a + 1u) % count);
+          const uint32_t within = local % fadeMillis;
+          const uint8_t linear = uint8_t((within * 255u) / (fadeMillis - 1u));
+          pixels_[size_t(y) * width_ + x] = blendPixel(
+            effectColor(a), effectColor(b), easeCubic(linear)
+          );
+        }
+      }
+      break;
+    }
+
+    default:
+      clear();
+      break;
+  }
+
+  visible_ = true;
+}
+
+namespace {
+void drawTimerIcon(Pixel* canvas, uint8_t phase) {
+  const Pixel rim = color(255, 145, 0);
+  const Pixel hand = color(255, 45, 20);
+  const Pixel center = color(255, 220, 120);
+  constexpr int8_t cx = 7;
+  constexpr int8_t cy = 4;
+
+  // 9x9 pixel-art timer from the latest standalone emulator (BUILD80).
+  putPixel(canvas, 6, 0, rim); putPixel(canvas, 7, 0, rim); putPixel(canvas, 8, 0, rim);
+  putPixel(canvas, 7, 1, rim);
+  putPixel(canvas, 4, 1, rim); putPixel(canvas, 10, 1, rim);
+  putPixel(canvas, 3, 2, rim); putPixel(canvas, 11, 2, rim);
+  putPixel(canvas, 2, 3, rim); putPixel(canvas, 12, 3, rim);
+  putPixel(canvas, 2, 4, rim); putPixel(canvas, 12, 4, rim);
+  putPixel(canvas, 2, 5, rim); putPixel(canvas, 12, 5, rim);
+  putPixel(canvas, 3, 6, rim); putPixel(canvas, 11, 6, rim);
+  putPixel(canvas, 4, 7, rim); putPixel(canvas, 10, 7, rim);
+  putPixel(canvas, 5, 8, rim); putPixel(canvas, 6, 8, rim); putPixel(canvas, 7, 8, rim);
+  putPixel(canvas, 8, 8, rim); putPixel(canvas, 9, 8, rim);
+
+  static const int8_t handX[8] = {7, 10, 11, 10, 7, 4, 3, 4};
+  static const int8_t handY[8] = {1, 2, 4, 6, 7, 6, 4, 2};
+  const int8_t endX = handX[phase & 7u];
+  const int8_t endY = handY[phase & 7u];
+  putPixel(canvas, cx, cy, center);
+  putPixel(canvas, (cx + endX) / 2, (cy + endY) / 2, hand);
+  putPixel(canvas, endX, endY, hand);
+}
+
+void scaleLegacyCanvas(
+  const Pixel* base,
+  Pixel* destination,
+  uint8_t width,
+  uint8_t height
+) {
+  for (uint16_t y = 0; y < height; ++y) {
+    const uint8_t sourceY = uint16_t(y) * 16u / height;
+    for (uint16_t x = 0; x < width; ++x) {
+      const uint8_t sourceX = uint16_t(x) * 16u / width;
+      destination[size_t(y) * width + x] = base[size_t(sourceY) * 16u + sourceX];
+    }
+  }
+}
+
+Pixel audioRainbow(uint8_t hue) {
+  const uint8_t region = hue / 43u;
+  const uint8_t remainder = uint8_t((hue - region * 43u) * 6u);
+  const uint8_t q = uint8_t(255u - remainder);
+  const uint8_t t = remainder;
+  switch (region) {
+    case 0: return color(255, t, 0);
+    case 1: return color(q, 255, 0);
+    case 2: return color(0, 255, t);
+    case 3: return color(0, q, 255);
+    case 4: return color(t, 0, 255);
+    default: return color(255, 0, q);
+  }
+}
+
+void audioLine(Pixel* base, int x0, int y0, int x1, int y1, const Pixel& value) {
+  const int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  const int dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  int error = dx + dy;
+  while (true) {
+    putPixel(base, x0, y0, value);
+    if (x0 == x1 && y0 == y1) break;
+    const int twice = 2 * error;
+    if (twice >= dy) { error += dy; x0 += sx; }
+    if (twice <= dx) { error += dx; y0 += sy; }
+  }
+}
+
+void audioHeart(Pixel* base, int16_t ox, int16_t oy, bool pulse,
+                const Pixel& outline, const Pixel& fillValue) {
+  static const uint16_t rows[8] = {
+    0x06Cu, 0x0FEu, 0x1FFu, 0x1FFu, 0x0FEu, 0x07Cu, 0x038u, 0x010u
+  };
+  for (uint8_t y = 0; y < 8; ++y) for (uint8_t x = 0; x < 9; ++x) {
+    if ((rows[y] & (1u << (8u - x))) == 0) continue;
+    bool edge = x == 0 || x == 8 || y == 0 || y == 7;
+    if (!edge) {
+      const bool left = rows[y] & (1u << (9u - x));
+      const bool right = rows[y] & (1u << (7u - x));
+      const bool up = rows[y - 1] & (1u << (8u - x));
+      const bool down = rows[y + 1] & (1u << (8u - x));
+      edge = !(left && right && up && down);
+    }
+    Pixel value = edge ? outline : fillValue;
+    if (pulse && !edge && x > 1 && x < 7 && y > 1 && y < 6) {
+      value.red = uint8_t(value.red > 215 ? 255 : value.red + 40);
+      value.green = uint8_t(value.green > 215 ? 255 : value.green + 40);
+      value.blue = uint8_t(value.blue > 215 ? 255 : value.blue + 40);
+    }
+    putPixel(base, ox + x, oy + y, value);
+  }
+}
+
+uint8_t audioBand(uint8_t value) { return value > 12 ? 12 : value; }
+}
+
+void IDotMatrixRenderer::renderAudio(
+  bool fft, uint8_t mode, uint8_t level, const uint8_t bands[8], uint32_t now
+) {
+  if (pixels_ == nullptr) return;
+  Pixel base[16 * 16]{};
+  const Pixel white = color(255, 255, 255);
+  level = audioBand(level);
+
+  if (!fft) switch (mode > 4 ? 4 : mode) {
+    case 0: {
+      const uint8_t pose = uint8_t((now / 150u + level) % 6u);
+      const Pixel green = color(45,255,25), green2 = color(15,150,15);
+      for (int x=0;x<16;x++) if (((x+pose)&1)==0) { putPixel(base,x,0,green); putPixel(base,x,1,green2); }
+      struct Pose { int hx,hy,sx,sy,px,py,lx,ly,rx,ry,lfx,lfy,rfx,rfy; };
+      static const Pose poses[6] = {
+        {8,3,8,6,8,10,4,7,12,8,5,14,11,14}, {7,3,8,6,8,10,3,9,12,5,4,13,12,14},
+        {9,4,8,7,7,10,3,5,13,10,2,14,10,13}, {5,7,7,8,9,10,3,11,10,5,4,14,13,12},
+        {8,11,8,9,8,7,4,12,12,12,5,4,11,4}, {10,3,9,6,8,10,5,5,13,7,4,14,10,13}
+      };
+      const Pose& p = poses[pose];
+      for (int yy=-1;yy<=1;yy++) for (int xx=-1;xx<=1;xx++) putPixel(base,p.hx+xx,p.hy+yy,white);
+      audioLine(base,p.sx,p.sy,p.px,p.py,white); audioLine(base,p.sx,p.sy,p.lx,p.ly,white);
+      audioLine(base,p.sx,p.sy,p.rx,p.ry,white); audioLine(base,p.px,p.py,p.lfx,p.lfy,white);
+      audioLine(base,p.px,p.py,p.rfx,p.rfy,white);
+      break;
+    }
+    case 1: {
+      const uint16_t hotValue = 80u + uint16_t(level) * 24u;
+      audioHeart(base,3,4,level>=5,white,color(uint8_t(hotValue>255?255:hotValue),0,20));
+      if (level>=6) { putPixel(base,1,7,color(255,0,30)); putPixel(base,14,7,color(255,0,30)); }
+      break;
+    }
+    case 2: {
+      const Pixel frame=color(0,235,255);
+      for(int x=1;x<15;x+=2){putPixel(base,x,0,frame);putPixel(base,x,15,frame);}
+      for(int y=1;y<15;y+=2){putPixel(base,0,y,frame);putPixel(base,15,y,frame);}
+      const uint8_t strength = level < 1 ? 1 : level > 7 ? 7 : level;
+      const uint32_t tick=now/95u;
+      for(int x=2;x<=13;x++) {
+        const int boost=6-std::abs(x-7); const uint8_t wobble=uint8_t((x*7+tick*3+(x&1)*5)%5);
+        int height=int(strength)+boost/2+int(wobble)-1; if(height<2)height=2;if(height>13)height=13;
+        for(int n=0;n<height;n++) putPixel(base,x,14-n,audioRainbow(uint8_t(185+x*10+n*7+tick*2)));
+      }
+      break;
+    }
+    case 3: {
+      const Pixel purple=color(125,20,225), purple2=color(82,8,165), skin=color(248,235,210);
+      for(int y=1;y<=13;y++) for(int x=1;x<=14;x++) {
+        if((y==1&&(x<4||x>11))||(y==2&&(x<2||x>13))||((x==1||x==14)&&(y<4||y>11))) continue;
+        putPixel(base,x,y,((x+y)&1)?purple:purple2);
+      }
+      for(int y=5;y<=8;y++){for(int x=3;x<=6;x++)putPixel(base,x,y,skin);for(int x=9;x<=12;x++)putPixel(base,x,y,skin);}
+      const int shift=int((now/180u+level)%3u)-1; putPixel(base,5+shift,7,color(30,25,65));putPixel(base,10+shift,7,color(30,25,65));
+      const int opening=level<1?1:level>7?7:level, half=2+opening/2;
+      for(int dx=-half;dx<=half;dx++){const int taper=std::abs(dx);putPixel(base,8+dx,10+(taper>half-2),color(255,115,125));putPixel(base,8+dx,12-(taper>half-2),color(255,35,55));}
+      for(int x=9-half;x<=7+half;x++)putPixel(base,x,11,color(35,0,25));
+      break;
+    }
+    default: {
+      const Pixel red=color(255,20,25), cyan=color(0,235,255), blue=color(15,55,255), dark=color(4,15,90);
+      for(int y=3;y<=7;y++){for(int x=1;x<=5;x++)putPixel(base,x,y,red);for(int x=10;x<=14;x++)putPixel(base,x,y,red);}
+      for(int y=4;y<=6;y++){for(int x=2;x<=3;x++)putPixel(base,x,y,cyan);for(int x=12;x<=13;x++)putPixel(base,x,y,cyan);}
+      const int drift=level>=5?1:0;putPixel(base,3+drift,5,white);putPixel(base,12+drift,5,white);
+      for(int x=3;x<=12;x++) putPixel(base,x,11,blue);
+      for(int x=4;x<=11;x++) putPixel(base,x,12,level>=5?blue:dark);
+      if(level>=7)for(int x=5;x<=10;x++)putPixel(base,x,13,blue);
+      break;
+    }
+  } else switch (mode > 4 ? 4 : mode) {
+    case 0: case 1: {
+      static const Pixel rows[8]={{255,20,20},{255,185,0},{235,255,0},{30,255,40},{0,245,220},{0,120,255},{120,40,255},{255,30,210}};
+      for(uint8_t x=0;x<16;x++){const uint8_t v=audioBand(bands[x<8?x:15-x]);uint8_t half=uint8_t((v+1)/2);if(mode==1&&half<1)half=1;
+        for(uint8_t n=0;n<half&&n<8;n++){const Pixel c=mode==0?audioRainbow(uint8_t(x*15+n*8)):rows[n];putPixel(base,x,7-n,c);putPixel(base,x,8+n,c);}}
+      break;
+    }
+    case 2: {
+      uint16_t sum=0;for(uint8_t i=0;i<8;i++)sum+=audioBand(bands[i]);const uint8_t avg=uint8_t(sum/8);
+      static const int8_t left[13]={3,1,0,0,0,1,1,2,3,4,5,6,7};
+      static const int8_t right[13]={6,7,7,7,7,7,6,6,5,4,3,2,1};
+      const uint32_t phase=now/45u;
+      for(uint8_t y=0;y<13;y++){int squeeze=audioBand(bands[y/2>7?7:y/2])>=8?2:audioBand(bands[y/2>7?7:y/2])>=4?1:0;if(avg<=2)squeeze=0;
+        if(y<=4){const int hw=3-squeeze/2;for(int x=4-hw;x<=4+hw;x++)putPixel(base,x,y+1,audioRainbow(uint8_t(x*13+y*12+phase)));for(int x=11-hw;x<=11+hw;x++)putPixel(base,x,y+1,audioRainbow(uint8_t(x*13+y*12+phase)));if(y>=2)for(int x=5+squeeze;x<=10-squeeze;x++)putPixel(base,x,y+1,audioRainbow(uint8_t(x*13+y*12+phase)));}
+        else {int half=(left[y]>right[y]?left[y]:right[y])-squeeze;if(half<1)half=1;for(int x=7-half;x<=8+half;x++)putPixel(base,x,y+1,audioRainbow(uint8_t(x*13+y*12+phase)));}}
+      break;
+    }
+    case 3: {
+      for(int y=0;y<16;y++){putPixel(base,7,y,color(40,140,255));putPixel(base,8,y,color(40,140,255));const uint8_t v=audioBand(bands[y<8?y:15-y]);const uint8_t width=uint8_t((v+1)/2>7?7:(v+1)/2);for(uint8_t n=1;n<=width;n++){const Pixel c=audioRainbow(uint8_t(y*14+n*9));putPixel(base,7-n,y,c);putPixel(base,8+n,y,c);}}
+      break;
+    }
+    default: {
+      for(uint8_t x=0;x<16;x++){const uint8_t v=audioBand(bands[x<8?x:15-x]);const uint8_t height=uint8_t((v+1)/2>7?7:(v+1)/2);for(uint8_t n=0;n<height;n++){const Pixel c=audioRainbow(uint8_t(150+x*11+n*7));putPixel(base,x,n,c);putPixel(base,x,15-n,c);}}
+      break;
+    }
+  }
+  scaleLegacyCanvas(base, pixels_, width_, height_);
+  visible_ = true;
+}
+
+void IDotMatrixRenderer::renderMMSS(
+  uint32_t seconds,
+  uint8_t red,
+  uint8_t green,
+  uint8_t blue
+) {
+  if (pixels_ == nullptr) return;
+
+  Pixel base[16 * 16]{};
+  const Pixel value = color(red, green, blue);
+  const uint8_t minutes = uint8_t((seconds / 60u) % 100u);
+  const uint8_t secs = uint8_t(seconds % 60u);
+  drawDigit(base, minutes / 10u, 0, 5, value);
+  drawDigit(base, minutes % 10u, 3, 5, value);
+  drawSeparator(base, 7, 5, value, false);
+  drawDigit(base, secs / 10u, 9, 5, value);
+  drawDigit(base, secs % 10u, 12, 5, value);
+
+  scaleLegacyCanvas(base, pixels_, width_, height_);
+  visible_ = true;
+}
+
+void IDotMatrixRenderer::renderCountdown(uint32_t remainingMillis) {
+  if (pixels_ == nullptr) return;
+
+  Pixel base[16 * 16]{};
+  const uint32_t remainingSeconds = (remainingMillis + 999u) / 1000u;
+  const Pixel digits = remainingSeconds <= 5u
+    ? color(255, 0, 0)
+    : color(255, 255, 255);
+  const uint8_t minutes = uint8_t((remainingSeconds / 60u) % 100u);
+  const uint8_t seconds = uint8_t(remainingSeconds % 60u);
+
+  // Remaining time decreases.  Inverting the 125 ms phase reproduces the
+  // standalone emulator's timer-hand progression.
+  const uint8_t phase = uint8_t((8u - ((remainingMillis / 125u) & 7u)) & 7u);
+  drawTimerIcon(base, phase);
+  drawDigit(base, minutes / 10u, 0, 10, digits);
+  drawDigit(base, minutes % 10u, 3, 10, digits);
+  drawSeparator(base, 7, 10, digits, false);
+  drawDigit(base, seconds / 10u, 9, 10, digits);
+  drawDigit(base, seconds % 10u, 12, 10, digits);
+
+  scaleLegacyCanvas(base, pixels_, width_, height_);
+  visible_ = true;
+}
+
+void IDotMatrixRenderer::renderStopwatch(uint32_t elapsedMillis) {
+  if (pixels_ == nullptr) return;
+
+  Pixel base[16 * 16]{};
+  const uint32_t elapsedSeconds = elapsedMillis / 1000u;
+  const uint8_t minutes = uint8_t((elapsedSeconds / 60u) % 100u);
+  const uint8_t seconds = uint8_t(elapsedSeconds % 60u);
+  const Pixel digits = color(255, 255, 255);
+
+  const uint8_t phase = uint8_t((elapsedMillis / 125u) & 7u);
+  drawTimerIcon(base, phase);
+  drawDigit(base, minutes / 10u, 0, 10, digits);
+  drawDigit(base, minutes % 10u, 3, 10, digits);
+  drawSeparator(base, 7, 10, digits, false);
+  drawDigit(base, seconds / 10u, 9, 10, digits);
+  drawDigit(base, seconds % 10u, 12, 10, digits);
+
+  scaleLegacyCanvas(base, pixels_, width_, height_);
+  visible_ = true;
+}
+
+void IDotMatrixRenderer::renderScoreboard(uint16_t scoreA, uint16_t scoreB) {
+  if (pixels_ == nullptr) return;
+
+  Pixel base[16 * 16]{};
+  auto drawScore = [&base](uint16_t score, int16_t x, const Pixel& value) {
+    score %= 100u;
+    if (score >= 10u) drawDigit(base, uint8_t(score / 10u), x, 5, value);
+    drawDigit(base, uint8_t(score % 10u), x + 3, 5, value);
+  };
+
+  drawScore(scoreA, 0, color(0, 0, 255));
+  drawSeparator(base, 7, 5, color(255, 255, 255), false);
+  drawScore(scoreB, 9, color(255, 0, 0));
+
+  scaleLegacyCanvas(base, pixels_, width_, height_);
+  visible_ = true;
 }
 
 void IDotMatrixRenderer::renderClock(

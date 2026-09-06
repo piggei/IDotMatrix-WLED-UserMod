@@ -4,13 +4,16 @@
 #include "IDotMatrixRenderer.h"
 #include "IDotMatrixMedia.h"
 #include "IDotMatrixWLEDAdapter.h"
+#include "IDotMatrixBuzzer.h"
+#include "IDotMatrixAutomation.h"
+#include "IDotMatrixBuildProfile.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp_system.h>
 #include <esp_heap_caps.h>
 #endif
 
-static constexpr const char* IDOTMATRIX_BUILD = "0.7.1";
+static constexpr const char* IDOTMATRIX_BUILD = "0.8.0";
 
 namespace {
 const char USERMOD_NAME[] PROGMEM = "iDotMatrix";
@@ -18,6 +21,8 @@ const char CFG_ENABLED[] PROGMEM = "enabled";
 const char CFG_SCREEN_TYPE[] PROGMEM = "screenType";
 const char CFG_DEVICE_NAME[] PROGMEM = "deviceName";
 const char CFG_RESCALE[] PROGMEM = "rescale";
+const char CFG_BUZZER_PIN[] PROGMEM = "buzzer-pin";
+const char CFG_BUZZER_ACTIVE_HIGH[] PROGMEM = "buzzerActiveHigh";
 
 #if defined(ARDUINO_ARCH_ESP32)
 struct CrashSnapshot {
@@ -56,10 +61,17 @@ private:
   uint8_t screenType_ = 0x01;
   String deviceName_ = "IDM-858931";
   bool rescale_ = false;
+  int8_t buzzerPin_ = -1;
+  bool buzzerActiveHigh_ = true;
+  bool buzzerHardwareReady_ = false;
+  bool buzzerPinUnavailable_ = false;
+  bool setupComplete_ = false;
+  IDotMatrixBuzzer buzzer_;
   IDotMatrixRenderer renderer_;
   IDotMatrixMedia media_{renderer_};
   IDotMatrixWLEDAdapter adapter_{renderer_, &media_};
   IDotMatrixProtocol protocol_{adapter_};
+  IDotMatrixAutomation automation_{renderer_, adapter_, media_, buzzer_};
   IDotMatrixBLEServer ble_{protocol_};
   bool blockedByRmt_ = false;
   bool startPending_ = false;
@@ -115,6 +127,93 @@ private:
     return false;
   }
 
+
+  static void buzzerOutputThunk(void* context, bool on) {
+    static_cast<IDotMatrixUsermod*>(context)->writeBuzzerOutput(on);
+  }
+
+  void writeBuzzerOutput(bool on) {
+    if (!buzzerHardwareReady_ || buzzerPin_ < 0) return;
+    digitalWrite(
+      buzzerPin_,
+      on ? (buzzerActiveHigh_ ? HIGH : LOW)
+         : (buzzerActiveHigh_ ? LOW : HIGH)
+    );
+  }
+
+  void teardownBuzzerHardware() {
+    buzzer_.stop();
+    if (buzzerHardwareReady_ && buzzerPin_ >= 0) {
+      writeBuzzerOutput(false);
+      pinMode(buzzerPin_, INPUT);
+    }
+    buzzerHardwareReady_ = false;
+    buzzerPinUnavailable_ = false;
+  }
+
+  void setupBuzzerHardware() {
+    buzzer_.stop();
+    buzzerHardwareReady_ = false;
+    buzzerPinUnavailable_ = false;
+    if (!enabled_ || buzzerPin_ < 0) return;
+
+    // WLED 0.16.x does not provide a collision-safe PinOwner for out-of-tree
+    // usermods.  The config key deliberately ends in "pin", so WLED's Usermod
+    // settings page advertises it as reserved.  At runtime we additionally
+    // refuse pins already owned by the core or another registered component.
+    // Do not borrow another usermod's PinOwner: that would make deallocation
+    // ambiguous.  If upstream gains external PinOwner registration this check
+    // can become a real allocatePin()/deallocatePin() pair without changing the
+    // user-facing configuration.
+    if (!PinManager::isPinOk(buzzerPin_, true) || PinManager::isPinAllocated(buzzerPin_)) {
+      buzzerPinUnavailable_ = true;
+      DEBUG_PRINTF_P(PSTR("[iDotMatrix] buzzer GPIO %d unavailable\n"), buzzerPin_);
+      return;
+    }
+
+    pinMode(buzzerPin_, OUTPUT);
+    buzzerHardwareReady_ = true;
+    writeBuzzerOutput(false);
+    DEBUG_PRINTF_P(
+      PSTR("[iDotMatrix] active buzzer ready on GPIO %d (%s)\n"),
+      buzzerPin_, buzzerActiveHigh_ ? "active-high" : "active-low"
+    );
+  }
+
+  void registerBuzzerTestEndpoint() {
+    server.on(F("/idotmatrix/buzzer-test"), HTTP_POST, [this](AsyncWebServerRequest* request) {
+      if (strlen(settingsPIN) > 0 && !correctPIN) {
+        request->send(403, FPSTR(CONTENT_TYPE_PLAIN), F("Unlock WLED settings before testing the buzzer."));
+        return;
+      }
+      if (!enabled_) {
+        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("iDotMatrix usermod is disabled."));
+        return;
+      }
+      if (buzzerPin_ < 0) {
+        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("Configure the buzzer GPIO and save first."));
+        return;
+      }
+      if (buzzerPinUnavailable_) {
+        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("The configured buzzer GPIO is unavailable."));
+        return;
+      }
+      if (!buzzerHardwareReady_) {
+        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("Buzzer hardware is not ready."));
+        return;
+      }
+      if (buzzer_.isPlaying()) {
+        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("Buzzer is already active."));
+        return;
+      }
+
+      // One finite three-beep trill is enough to validate wiring and polarity.
+      // Alarms use the repeating pattern; schedules use a finite activation alert.
+      buzzer_.startTest(millis());
+      request->send(200, FPSTR(CONTENT_TYPE_PLAIN), F("ok"));
+    });
+  }
+
 public:
   void setup() override {
 #if defined(ARDUINO_ARCH_ESP32)
@@ -126,7 +225,12 @@ public:
     rtcSnapshot = CrashSnapshot{};
     rtcSnapshot.magic = SNAPSHOT_MAGIC;
 #endif
-    if (!enabled_) return;
+    buzzer_.attach(&IDotMatrixUsermod::buzzerOutputThunk, this);
+    protocol_.setAutomationEvents(&automation_);
+    automation_.attachProtocol(&protocol_);
+    registerBuzzerTestEndpoint();
+    setupBuzzerHardware();
+    if (!enabled_) { setupComplete_ = true; return; }
 
     // WLED's ESP32 RMT-HI LED driver shares a high-level interrupt with the
     // Bluetooth controller. With this framework they are assigned to
@@ -135,6 +239,7 @@ public:
     blockedByRmt_ = hasDigitalRmtBus();
     if (blockedByRmt_) {
       DEBUG_PRINTLN(F("[iDotMatrix] BLE blocked: select I2S for every digital LED output"));
+      setupComplete_ = true;
       return;
     }
 
@@ -170,14 +275,22 @@ public:
       DEBUG_PRINTLN(F("[iDotMatrix] display effect registration failed"));
     }
 
+    automation_.begin();
+
     // Let WLED complete its first Wi-Fi initialization pass before starting
     // the lower-memory NimBLE host.
     startPending_ = true;
     startAt_ = millis() + 5000;
+    setupComplete_ = true;
   }
 
   void loop() override {
-    if (!enabled_ || blockedByRmt_) return;
+    if (!enabled_) return;
+
+    // The optional buzzer is independent of BLE/display rendering. Keep its
+    // non-blocking pattern engine alive even when BLE is blocked by an RMT bus.
+    buzzer_.loop(millis());
+    if (blockedByRmt_) return;
 
     if (startPending_ && int32_t(millis() - startAt_) >= 0) {
       startPending_ = false;
@@ -190,6 +303,8 @@ public:
     }
 
     ble_.loop();
+    automation_.loop(millis());
+    adapter_.loop(millis());
 
     // WLED effects can be selected directly from the Web UI/API while an
     // iDotMatrix GIF or other media mode is active. Detect that ownership
@@ -212,7 +327,10 @@ public:
       rtcSnapshot.uptimeMs = now;
       rtcSnapshot.content = adapter_.isClockActive() ? 1 :
         adapter_.isTextActive() ? 2 : adapter_.isGifActive() ? 3 :
-        adapter_.isRawImageActive() ? 4 : renderer_.isVisible() ? 5 : 0;
+        adapter_.isRawImageActive() ? 4 : adapter_.isLightEffectActive() ? 6 :
+        adapter_.isSolidActive() ? 7 : adapter_.isCountdownActive() ? 8 :
+        adapter_.isStopwatchActive() ? 9 : adapter_.isScoreboardActive() ? 10 :
+        renderer_.isVisible() ? 5 : 0;
     }
 #endif
   }
@@ -247,6 +365,52 @@ public:
         F(" largest=") + media_.gifProbeLargest() +
         F(" reserve=") + media_.gifDramReserve());
     }
+    if (adapter_.isLightEffectActive()) {
+      info.add(String(F("lightEffect=")) + adapter_.lightEffectId() +
+        F(" speed=") + adapter_.lightEffectSpeed() +
+        F(" colors=") + adapter_.lightEffectColorCount());
+    }
+    if (adapter_.isCountdownActive()) {
+      const uint32_t remaining = adapter_.countdownRemainingSeconds(millis());
+      info.add(String(F("countdown=")) +
+        (adapter_.isCountdownRunning() ? F("run") :
+          adapter_.isCountdownPaused() ? F("pause") : F("stop")) +
+        F(" remain=") + remaining + F("s"));
+    }
+    if (adapter_.isStopwatchActive()) {
+      info.add(String(F("stopwatch=")) +
+        (adapter_.isStopwatchRunning() ? F("run") : F("stop")) +
+        F(" elapsed=") + adapter_.stopwatchElapsedSeconds(millis()) + F("s"));
+    }
+    if (adapter_.isScoreboardActive()) {
+      info.add(String(F("score=")) + adapter_.scoreA() + ':' + adapter_.scoreB());
+    }
+    if (buzzerPin_ < 0) {
+      info.add(F("buzzer=disabled"));
+    } else if (buzzerPinUnavailable_) {
+      info.add(String(F("buzzer=gpio ")) + String(buzzerPin_) + F(" unavailable"));
+    } else if (buzzerHardwareReady_) {
+      info.add(String(F("buzzer=active gpio=")) + String(buzzerPin_) +
+        F(" polarity=") + (buzzerActiveHigh_ ? F("high ") : F("low ")) +
+        (buzzer_.isPlaying() ? F("playing") : F("idle")));
+    } else {
+      info.add(String(F("buzzer=gpio ")) + String(buzzerPin_) + F(" not-ready"));
+    }
+    info.add(String(F("alarms=")) + automation_.configuredAlarmCount() +
+      (automation_.alarmActive()
+        ? String(F(" active=")) + automation_.activeAlarmSlot()
+        : String()));
+    info.add(String(F("schedule=")) +
+      (automation_.scheduleEnabled() ? F("on") : F("off")) +
+      F(" activities=") + automation_.configuredScheduleCount() +
+      (automation_.activeScheduleIndex() >= 0
+        ? String(F(" active=")) + automation_.activeScheduleIndex()
+        : String()) +
+      (automation_.scheduleSoundEnabled() ? F(" sound=1") : F(" sound=0")));
+    if (automation_.scheduleUploadOpen()) info.add(F("scheduleUpload=staging"));
+    if (strcmp(automation_.lastErrorText(), "none") != 0) {
+      info.add(String(F("automationError=")) + automation_.lastErrorText());
+    }
     if (adapter_.isGifPending()) info.add(F("gifPending=1"));
     if (media_.gifCaching()) {
       info.add(String(F("gifCache=building frames=")) + media_.gifCachedFrames());
@@ -275,36 +439,78 @@ public:
         F(" content=") + previousSnapshot_.content);
     }
 #endif
-    info.add(adapter_.isClockActive() ? F("content=clock") :
-      adapter_.isTextActive() ? F("content=text") :
-      adapter_.isGifActive() ? F("content=gif") :
-      adapter_.isRawImageActive() ? F("content=image") :
-      renderer_.isVisible() ? F("content=graffiti") : F("content=WLED"));
+    if (adapter_.isAudioActive()) {
+      info.add(String(adapter_.audioUsesFFT() ? F("content=audio FFT mode=") :
+        F("content=audio LEVEL mode=")) + String(adapter_.audioMode() + 1));
+    } else {
+      info.add(adapter_.isClockActive() ? F("content=clock") :
+        adapter_.isCountdownActive() ? F("content=countdown") :
+        adapter_.isStopwatchActive() ? F("content=stopwatch") :
+        adapter_.isScoreboardActive() ? F("content=scoreboard") :
+        adapter_.isTextActive() ? F("content=text") :
+        adapter_.isGifActive() ? F("content=gif") :
+        adapter_.isRawImageActive() ? F("content=image") :
+        adapter_.isLightEffectActive() ? F("content=light") :
+        adapter_.isSolidActive() ? F("content=solid") :
+        renderer_.isVisible() ? F("content=graffiti") : F("content=WLED"));
+    }
   }
 
   void addToConfig(JsonObject& root) override {
     JsonObject config = root.createNestedObject(FPSTR(USERMOD_NAME));
     config[FPSTR(CFG_ENABLED)] = enabled_;
     config[FPSTR(CFG_SCREEN_TYPE)] = screenType_;
-    config[FPSTR(CFG_DEVICE_NAME)] = deviceName_;
+    // The settings page renders the fixed IDM- prefix outside the input. Store
+    // only the editable suffix in the form/config; readFromConfig() accepts
+    // both this format and legacy full names for backward compatibility.
+    config[FPSTR(CFG_DEVICE_NAME)] = deviceName_.startsWith("IDM-")
+      ? deviceName_.substring(4)
+      : deviceName_;
+#if IDOT_GIF_MAX_DIM > 16
     config[FPSTR(CFG_RESCALE)] = rescale_;
+#endif
+    config[FPSTR(CFG_BUZZER_PIN)] = buzzerPin_;
+    config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)] = buzzerActiveHigh_;
   }
 
   bool readFromConfig(JsonObject& root) override {
     JsonObject config = root[FPSTR(USERMOD_NAME)];
     if (config.isNull()) return false;
 
+    const int8_t previousBuzzerPin = buzzerPin_;
+    const bool previousBuzzerActiveHigh = buzzerActiveHigh_;
+    const bool previousEnabled = enabled_;
+
     bool complete = true;
     complete &= getJsonValue(config[FPSTR(CFG_ENABLED)], enabled_, true);
     complete &= getJsonValue(config[FPSTR(CFG_SCREEN_TYPE)], screenType_, uint8_t(0x01));
     complete &= getJsonValue(config[FPSTR(CFG_DEVICE_NAME)], deviceName_, String("IDM-858931"));
+#if IDOT_GIF_MAX_DIM > 16
     complete &= getJsonValue(config[FPSTR(CFG_RESCALE)], rescale_, false);
+#else
+    // A 16x16-only build has no alternative logical profile. Ignore and
+    // remove any stale rescale setting inherited from a larger firmware.
+    rescale_ = false;
+#endif
+    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_PIN)], buzzerPin_, int8_t(-1));
+    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)], buzzerActiveHigh_, true);
 
-    if (screenType_ != 0x01 && screenType_ != 0x03 && screenType_ != 0x04) {
-      screenType_ = 0x01;
-    }
+    screenType_ = IDotMatrixBuildProfile::normalizeScreenType(screenType_);
     deviceName_ = normalizedDeviceName(deviceName_);
     adapter_.setRescaleEnabled(rescale_);
+    if (setupComplete_ &&
+        (previousBuzzerPin != buzzerPin_ ||
+         previousBuzzerActiveHigh != buzzerActiveHigh_ ||
+         previousEnabled != enabled_)) {
+      const int8_t requestedPin = buzzerPin_;
+      const bool requestedActiveHigh = buzzerActiveHigh_;
+      buzzerPin_ = previousBuzzerPin;
+      buzzerActiveHigh_ = previousBuzzerActiveHigh;
+      teardownBuzzerHardware();
+      buzzerPin_ = requestedPin;
+      buzzerActiveHigh_ = requestedActiveHigh;
+      setupBuzzerHardware();
+    }
     // Derive this status from the configuration currently active in the BLE
     // stack. Comparing with the value held before readFromConfig() made the
     // flag sticky and could report a restart even after a successful boot.
@@ -316,11 +522,19 @@ public:
   void appendConfigData() override {
     oappend(F("dd=addDropdown('iDotMatrix','screenType');"));
     oappend(F("addOption(dd,'16 x 16',1);"));
+#if IDOT_GIF_MAX_DIM >= 32
     oappend(F("addOption(dd,'32 x 32',3);"));
+#endif
+#if IDOT_GIF_MAX_DIM >= 64
     oappend(F("addOption(dd,'64 x 64',4);"));
-    oappend(F("addInfo('iDotMatrix:screenType',1,'BLE logical profile; changing it requires reboot.');"));
-    oappend(F("addInfo('iDotMatrix:deviceName',1,'IDM- is added automatically; changing it requires reboot.');"));
-    oappend(F("addInfo('iDotMatrix:rescale',1,'Scale the logical profile to the selected WLED 2D segment.');"));
+#endif
+    oappend(F("(()=>{const s=(k,o,n)=>{let e=document.querySelector('[name=\"iDotMatrix:'+k+'\"]');if(!e)return;if(e.id){let l=document.querySelector('label[for=\"'+e.id+'\"]');if(l){l.textContent=n;return;}}for(let p=e.parentElement,d=0;p&&d<5;p=p.parentElement,d++){for(let x of p.childNodes)if(x.nodeType===3&&x.nodeValue.trim()===o){x.nodeValue=x.nodeValue.replace(o,n);return;}for(let l of p.querySelectorAll('label,span,td'))if(l.children.length===0&&l.textContent.trim()===o){l.textContent=n;return;}}};s('enabled','Enabled','Enabled:');s('screenType','ScreenType','ScreenType:');s('deviceName','DeviceName','DeviceName:');s('rescale','Rescale','Scale the logical profile to the selected WLED 2D segment:');s('buzzer-pin','Buzzer Pin','Buzzer Pin:');s('buzzerActiveHigh','BuzzerActiveHigh','BuzzerActiveHigh:');})();"));
+#if IDOT_GIF_MAX_DIM > 16
+    oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
+#endif
+    oappend(F("(()=>{let e=document.querySelector('[name=\"iDotMatrix:deviceName\"]');if(!e){let r=[...document.querySelectorAll('tr')].find(x=>x.cells&&x.cells[0]&&x.cells[0].textContent.trim()==='DeviceName');e=r&&r.querySelector('input');}if(e&&!document.getElementById('idotmatrix-prefix'))e.insertAdjacentHTML('beforebegin','<span id=\"idotmatrix-prefix\">IDM-</span>');})();"));
+    oappend(F("addInfo('iDotMatrix:deviceName',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
+    oappend(F("addInfo('iDotMatrix:buzzerActiveHigh',1,'<button type=\"button\" onclick=\"fetch(&quot;/idotmatrix/buzzer-test&quot;,{method:&quot;POST&quot;}).then(async r=>{if(!r.ok)alert(await r.text())}).catch(()=>alert(&quot;Buzzer test failed&quot;))\">Test buzzer</button><div style=\"color:#fa0;font-style:italic;margin-top:8px\">Save before testing.</div>');"));
   }
 };
 

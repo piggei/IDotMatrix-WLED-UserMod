@@ -1,10 +1,30 @@
-; iDotMatrix 64x64 low-RAM profile for classic ESP32 without PSRAM.
-; This is the hardware-validated 0.7.1 configuration for 64x64 logical ->
-; smaller physical rescale. It removes optional WLED integrations to increase
-; the internal-RAM margin available during compact12 frame-cache preparation.
+; WLED iDotMatrix Usermod - 64x64 / LZW12 low-RAM classic-ESP32 profile
+; Target baseline: WLED v16.0.1.
+;
+; DISPLAY PROFILE and HARDWARE TARGET are independent choices:
+;   - this file selects the complete 12-bit / max 64x64 decoder with reduced optional WLED integrations;
+;   - the environment name selects a classic ESP32 4/8/16 MB target
+;     already defined by WLED v16.0.1.
+;
+; All iDotMatrix environments deliberately use Espressif Arduino 2.0.17 /
+; ESP-IDF 4.4.7 (espressif32 ~6.13.0). WLED's default Tasmota framework does
+; not expose the complete BLE GATT server required by this Usermod.
+;
+; OTA is intentionally disabled in the supplied profiles. The custom partition
+; tables merge WLED's application slots into one large factory slot while
+; preserving the corresponding filesystem region. Flash over USB/serial.
+; See BUILD_PROFILES.md for the target matrix and OTA policy.
+
+; Hardware-validated baseline: classic ESP32 4 MB, no PSRAM, logical 64x64
+; rescaled to a physical 16x16 WLED matrix. The 8/16 MB variants below change
+; flash capacity only; they do not add internal RAM and remain hardware-unvalidated.
+;
+; WebSockets, JSON API, 2D engine, presets, playlists, UDP realtime/DDP/E1.31
+; and normal WLED effects remain enabled. Inherited/default custom Usermods are
+; intentionally omitted to protect contiguous internal-DRAM margin.
+
 [env:esp32dev_idotmatrix]
 extends = env:esp32dev
-
 platform = espressif32@~6.13.0
 platform_packages =
 board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
@@ -21,13 +41,65 @@ build_flags =
   -D WLED_DISABLE_ESPNOW
   -D WLED_DISABLE_LOXONE
 
-; WebSockets, JSON API, 2D engine, presets, playlists, UDP realtime/DDP/E1.31
-; and normal WLED effects remain enabled. This profile is for measurement;
-; features should only be removed permanently after hardware validation.
 lib_deps =
   ${env:esp32dev.lib_deps}
   h2zero/NimBLE-Arduino@1.4.3
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
+  ; Intentionally do NOT inherit ${env:esp32dev.custom_usermods}.
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+[env:esp32dev_8M_idotmatrix]
+extends = env:esp32dev_8M
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_8MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32dev_8M.build_flags}
+  -D WLED_DISABLE_OTA
+  -D IDOT_GIF_LZW12
+  -D WLED_DISABLE_ALEXA
+  -D WLED_DISABLE_HUESYNC
+  -D WLED_DISABLE_MQTT
+  -D WLED_DISABLE_INFRARED
+  -D WLED_DISABLE_ADALIGHT
+  -D WLED_DISABLE_ESPNOW
+  -D WLED_DISABLE_LOXONE
+
+lib_deps =
+  ${env:esp32dev_8M.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ; Intentionally do NOT inherit ${env:esp32dev_8M.custom_usermods}.
+  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+
+[env:esp32dev_16M_idotmatrix]
+extends = env:esp32dev_16M
+platform = espressif32@~6.13.0
+platform_packages =
+board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_16MB_IDOT_NO_OTA.csv
+
+build_flags =
+  ${env:esp32dev_16M.build_flags}
+  -D WLED_DISABLE_OTA
+  -D IDOT_GIF_LZW12
+  -D WLED_DISABLE_ALEXA
+  -D WLED_DISABLE_HUESYNC
+  -D WLED_DISABLE_MQTT
+  -D WLED_DISABLE_INFRARED
+  -D WLED_DISABLE_ADALIGHT
+  -D WLED_DISABLE_ESPNOW
+  -D WLED_DISABLE_LOXONE
+
+lib_deps =
+  ${env:esp32dev_16M.lib_deps}
+  h2zero/NimBLE-Arduino@1.4.3
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ; Intentionally do NOT inherit ${env:esp32dev_16M.custom_usermods}.
   wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
