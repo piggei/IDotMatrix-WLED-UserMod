@@ -76,13 +76,15 @@ Expected facts for every successful build:
 
 A PlatformIO compile proves **build compatibility**, not hardware compatibility.
 ESP32-S3, PSRAM/direct 64x64, native physical 64x64, and HUB75 remain pending
-physical validation.
+physical validation. ESP32-C3 is not a supported 0.8.0 target: physical testing
+showed visible RMT LED flicker/spikes with the BLE-capable framework, while stock
+WLED on the same board/matrix was stable.
 
 ## Build profiles
 
 | Logical GIF profile | Override | Hardware target set | Expected runtime decoder |
 |---|---|---|---|
-| 16x16 | `platformio_override.ini.example` | classic 4/8/16 MB + WROVER PSRAM + S3 8/16 MB PSRAM | `animatedgif10` |
+| 16x16 | `platformio_override.ini.example` | classic 4/8/16 MB + WROVER PSRAM + S3 8/16 MB PSRAM | `compact12/cache` without PSRAM; LZW12 decoder with UI capped to 16x16 |
 | 32x32 | `platformio_override.ini.32x32` | classic 4/8/16 MB + WROVER PSRAM + S3 8/16 MB PSRAM | `animatedgif11` |
 | 64x64, normal WLED feature set | `platformio_override.ini.64x64` | classic 4/8/16 MB + WROVER PSRAM + S3 8/16 MB PSRAM | PSRAM direct or no-PSRAM cache depending hardware |
 | 64x64, classic low-RAM | `platformio_override.ini.64x64-lite` | classic 4/8/16 MB only | `compact12/cache` without PSRAM |

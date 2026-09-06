@@ -44,8 +44,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32dev.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; classic ESP32, SmartMatrix/forum pinout
 [env:esp32dev_hub75_forum_pinout_idotmatrix]
@@ -65,8 +64,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32dev.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; Huidu HD-WF2; no PSRAM in WLED profile
 [env:esp32s3dev_4MB_qspi_hub75_idotmatrix]
@@ -86,8 +84,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32s3dev_8MB_qspi.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; Adafruit MatrixPortal ESP32-S3, 8 MB flash / 2 MB PSRAM
 [env:adafruit_matrixportal_esp32s3_idotmatrix]
@@ -107,8 +104,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32s3dev_8MB_qspi.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; MOONHUB / LilyGo T7-S3, 16 MB flash / octal PSRAM
 [env:esp32s3dev_16MB_opi_hub75_idotmatrix]
@@ -128,8 +124,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32s3dev_8MB_opi.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; Waveshare ESP32-S3-RGB-Matrix, 32 MB flash / PSRAM
 [env:waveshare_esp32s3_32MB_hub75_idotmatrix]
@@ -149,5 +144,4 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:waveshare_esp32s3_32MB_hub75.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix

@@ -82,7 +82,7 @@ private:
   volatile bool restartAdvertising_ = false;
   uint32_t restartAdvertisingAt_ = 0;
   uint8_t screenType_ = 0x01;
-  char deviceName_[32] = "IDM-858931";
+  char deviceName_[32] = "IDM-000000";
 
   NimBLEServer* server_ = nullptr;
   NimBLECharacteristic* fa02_ = nullptr;

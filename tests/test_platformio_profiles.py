@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 PLATFORM = "espressif32@~6.13.0"
-USERMOD = "wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix"
+USERMOD = "symlink://../wled-usermod-idotmatrix"
 NIMBLE = "h2zero/NimBLE-Arduino@1.4.3"
 GIF = "bitbank2/AnimatedGIF@1.4.7"
 
@@ -23,6 +23,8 @@ NORMAL_TARGETS = {
     "esp32s3dev_8MB_qspi_idotmatrix": ("env:esp32s3dev_8MB_qspi", "esp32s3dev_8MB_qspi", "8MB"),
     "esp32s3dev_16MB_opi_idotmatrix": ("env:esp32s3dev_16MB_opi", "esp32s3dev_16MB_opi", "16MB"),
 }
+
+STANDARD_16_TARGETS = dict(NORMAL_TARGETS)
 
 PROFILE_SUFFIX = {
     "platformio_override.ini.example": "16x16",
@@ -73,11 +75,22 @@ def partition_path(flash: str) -> str:
 def check_normal_profile(name: str, profile_define: str | None) -> None:
     parser = read_ini(name)
     suffix = PROFILE_SUFFIX[name]
+    targets = STANDARD_16_TARGETS if name == "platformio_override.ini.example" else NORMAL_TARGETS
     sections = {section for section in parser.sections() if section.startswith("env:")}
-    expected = {f"env:{stem}_{suffix}" for stem in NORMAL_TARGETS}
+    expected = {f"env:{stem}_{suffix}" for stem in targets}
     assert sections == expected, f"{name}: unexpected environment set: {sections ^ expected}"
 
-    for stem, (extends, base, flash) in NORMAL_TARGETS.items():
+    disabled = {
+        "WLED_DISABLE_ALEXA",
+        "WLED_DISABLE_HUESYNC",
+        "WLED_DISABLE_MQTT",
+        "WLED_DISABLE_INFRARED",
+        "WLED_DISABLE_ADALIGHT",
+        "WLED_DISABLE_ESPNOW",
+        "WLED_DISABLE_LOXONE",
+    }
+
+    for stem, (extends, base, flash) in targets.items():
         section = f"env:{stem}_{suffix}"
         assert value(parser, section, "extends") == extends
         assert value(parser, section, "platform") == PLATFORM
@@ -87,9 +100,16 @@ def check_normal_profile(name: str, profile_define: str | None) -> None:
         flags = value(parser, section, "build_flags")
         assert f"${{env:{base}.build_flags}}" in flags
         assert "-D WLED_DISABLE_OTA" in flags
-        assert ("IDOT_GIF_LZW11" in flags) == (profile_define == "IDOT_GIF_LZW11")
-        assert ("IDOT_GIF_LZW12" in flags) == (profile_define == "IDOT_GIF_LZW12")
-        assert not ("IDOT_GIF_LZW11" in flags and "IDOT_GIF_LZW12" in flags)
+        if name == "platformio_override.ini.example":
+            assert "-D IDOT_GIF_LZW12" in flags
+            assert "-D IDOT_SCREEN_MAX_DIM=16" in flags
+            assert "IDOT_GIF_LZW11" not in flags
+            for define in disabled:
+                assert f"-D {define}" in flags
+        else:
+            assert ("IDOT_GIF_LZW11" in flags) == (profile_define == "IDOT_GIF_LZW11")
+            assert ("IDOT_GIF_LZW12" in flags) == (profile_define == "IDOT_GIF_LZW12")
+            assert not ("IDOT_GIF_LZW11" in flags and "IDOT_GIF_LZW12" in flags)
 
         deps = value(parser, section, "lib_deps")
         assert f"${{env:{base}.lib_deps}}" in deps
@@ -97,8 +117,8 @@ def check_normal_profile(name: str, profile_define: str | None) -> None:
         assert GIF in deps
 
         usermods = value(parser, section, "custom_usermods")
-        assert f"${{env:{base}.custom_usermods}}" in usermods
-        assert USERMOD in usermods
+        assert "custom_usermods}" not in usermods
+        assert usermods == USERMOD
 
 
 def check_lite_profile() -> None:
@@ -154,7 +174,9 @@ def check_hub75_profile() -> None:
         deps = value(parser, section, "lib_deps")
         assert f"${{env:{upstream}.lib_deps}}" in deps
         assert NIMBLE in deps and GIF in deps
-        assert USERMOD in value(parser, section, "custom_usermods")
+        usermods = value(parser, section, "custom_usermods")
+        assert "custom_usermods}" not in usermods
+        assert usermods == USERMOD
 
 
 
@@ -213,7 +235,7 @@ def check_partitions() -> None:
 
 
 def main() -> None:
-    check_normal_profile("platformio_override.ini.example", None)
+    check_normal_profile("platformio_override.ini.example", "IDOT_GIF_LZW12")
     check_normal_profile("platformio_override.ini.32x32", "IDOT_GIF_LZW11")
     check_normal_profile("platformio_override.ini.64x64", "IDOT_GIF_LZW12")
     check_lite_profile()

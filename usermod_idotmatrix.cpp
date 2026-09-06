@@ -59,7 +59,7 @@ class IDotMatrixUsermod final : public Usermod {
 private:
   bool enabled_ = true;
   uint8_t screenType_ = 0x01;
-  String deviceName_ = "IDM-858931";
+  String deviceName_;
   bool rescale_ = false;
   int8_t buzzerPin_ = -1;
   bool buzzerActiveHigh_ = true;
@@ -90,6 +90,18 @@ private:
     return 16;
   }
 
+  static String defaultDeviceName() {
+#if defined(ARDUINO_ARCH_ESP32)
+    const uint64_t mac = ESP.getEfuseMac();
+    const uint32_t suffix = static_cast<uint32_t>(mac % 1000000ULL);
+    char name[11];
+    snprintf(name, sizeof(name), "IDM-%06u", static_cast<unsigned>(suffix));
+    return String(name);
+#else
+    return String(F("IDM-000000"));
+#endif
+  }
+
   static String normalizedDeviceName(String value) {
     value.trim();
     String suffix = value;
@@ -114,7 +126,10 @@ private:
       if (valid) clean += c;
       else if (c == ' ' && !clean.isEmpty() && clean[clean.length() - 1] != '-') clean += '-';
     }
-    if (clean.isEmpty()) clean = F("858931");
+    if (clean.isEmpty()) {
+      const String generated = defaultDeviceName();
+      return generated;
+    }
     return String(F("IDM-")) + clean;
   }
 
@@ -230,12 +245,14 @@ public:
     automation_.attachProtocol(&protocol_);
     registerBuzzerTestEndpoint();
     setupBuzzerHardware();
+    if (deviceName_.isEmpty()) deviceName_ = defaultDeviceName();
     if (!enabled_) { setupComplete_ = true; return; }
 
-    // WLED's ESP32 RMT-HI LED driver shares a high-level interrupt with the
-    // Bluetooth controller. With this framework they are assigned to
-    // different CPU cores, which causes an immediate boot loop. I2S is the
-    // supported LED backend for this BLE build.
+    // WLED's ESP32 RMT-HI LED driver can conflict with the Bluetooth controller.
+    // Keep BLE disabled whenever a digital RMT bus is active. The stable 0.8.0
+    // hardware baseline is classic ESP32 with I2S LED output. ESP32-C3 support
+    // remains under investigation because its RMT output showed visible LED
+    // flicker/spikes with the BLE-capable framework, even before BLE was enabled.
     blockedByRmt_ = hasDigitalRmtBus();
     if (blockedByRmt_) {
       DEBUG_PRINTLN(F("[iDotMatrix] BLE blocked: select I2S for every digital LED output"));
@@ -466,7 +483,7 @@ public:
     config[FPSTR(CFG_DEVICE_NAME)] = deviceName_.startsWith("IDM-")
       ? deviceName_.substring(4)
       : deviceName_;
-#if IDOT_GIF_MAX_DIM > 16
+#if IDOT_SCREEN_MAX_DIM > 16
     config[FPSTR(CFG_RESCALE)] = rescale_;
 #endif
     config[FPSTR(CFG_BUZZER_PIN)] = buzzerPin_;
@@ -484,8 +501,8 @@ public:
     bool complete = true;
     complete &= getJsonValue(config[FPSTR(CFG_ENABLED)], enabled_, true);
     complete &= getJsonValue(config[FPSTR(CFG_SCREEN_TYPE)], screenType_, uint8_t(0x01));
-    complete &= getJsonValue(config[FPSTR(CFG_DEVICE_NAME)], deviceName_, String("IDM-858931"));
-#if IDOT_GIF_MAX_DIM > 16
+    complete &= getJsonValue(config[FPSTR(CFG_DEVICE_NAME)], deviceName_, defaultDeviceName());
+#if IDOT_SCREEN_MAX_DIM > 16
     complete &= getJsonValue(config[FPSTR(CFG_RESCALE)], rescale_, false);
 #else
     // A 16x16-only build has no alternative logical profile. Ignore and
@@ -522,14 +539,14 @@ public:
   void appendConfigData() override {
     oappend(F("dd=addDropdown('iDotMatrix','screenType');"));
     oappend(F("addOption(dd,'16 x 16',1);"));
-#if IDOT_GIF_MAX_DIM >= 32
+#if IDOT_SCREEN_MAX_DIM >= 32
     oappend(F("addOption(dd,'32 x 32',3);"));
 #endif
-#if IDOT_GIF_MAX_DIM >= 64
+#if IDOT_SCREEN_MAX_DIM >= 64
     oappend(F("addOption(dd,'64 x 64',4);"));
 #endif
     oappend(F("(()=>{const s=(k,o,n)=>{let e=document.querySelector('[name=\"iDotMatrix:'+k+'\"]');if(!e)return;if(e.id){let l=document.querySelector('label[for=\"'+e.id+'\"]');if(l){l.textContent=n;return;}}for(let p=e.parentElement,d=0;p&&d<5;p=p.parentElement,d++){for(let x of p.childNodes)if(x.nodeType===3&&x.nodeValue.trim()===o){x.nodeValue=x.nodeValue.replace(o,n);return;}for(let l of p.querySelectorAll('label,span,td'))if(l.children.length===0&&l.textContent.trim()===o){l.textContent=n;return;}}};s('enabled','Enabled','Enabled:');s('screenType','ScreenType','ScreenType:');s('deviceName','DeviceName','DeviceName:');s('rescale','Rescale','Scale the logical profile to the selected WLED 2D segment:');s('buzzer-pin','Buzzer Pin','Buzzer Pin:');s('buzzerActiveHigh','BuzzerActiveHigh','BuzzerActiveHigh:');})();"));
-#if IDOT_GIF_MAX_DIM > 16
+#if IDOT_SCREEN_MAX_DIM > 16
     oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
 #endif
     oappend(F("(()=>{let e=document.querySelector('[name=\"iDotMatrix:deviceName\"]');if(!e){let r=[...document.querySelectorAll('tr')].find(x=>x.cells&&x.cells[0]&&x.cells[0].textContent.trim()==='DeviceName');e=r&&r.querySelector('input');}if(e&&!document.getElementById('idotmatrix-prefix'))e.insertAdjacentHTML('beforebegin','<span id=\"idotmatrix-prefix\">IDM-</span>');})();"));

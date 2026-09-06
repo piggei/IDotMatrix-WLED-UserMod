@@ -34,8 +34,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32dev.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 [env:esp32dev_8M_idotmatrix_32x32]
 extends = env:esp32dev_8M
@@ -54,8 +53,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32dev_8M.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 [env:esp32dev_16M_idotmatrix_32x32]
 extends = env:esp32dev_16M
@@ -74,8 +72,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32dev_16M.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; Classic ESP32-WROVER / PSRAM target from WLED.
 [env:esp32_wrover_idotmatrix_32x32]
@@ -95,8 +92,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32_wrover.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; PSRAM support and the cache workaround are inherited from WLED.
 
@@ -117,8 +113,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32s3dev_8MB_opi.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; PSRAM setup, memory type, flash mode and USB flags are inherited from WLED.
 
@@ -139,8 +134,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32s3dev_8MB_qspi.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; PSRAM setup, memory type, flash mode and USB flags are inherited from WLED.
 
@@ -161,7 +155,6 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ${env:esp32s3dev_16MB_opi.custom_usermods}
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 ; PSRAM setup, memory type, flash mode and USB flags are inherited from WLED.

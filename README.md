@@ -3,15 +3,15 @@
 > **Stable 0.8.0:** adds seven standalone light effects, countdown, stopwatch,
 > scoreboard, persistent alarms and programs/schedules, optional active-buzzer
 > support, and five LEVEL plus five FFT Audio/Rhythm visualizers. It retains the
-> validated 0.7.1 media/memory architecture and makes the settings page follow
-> the decoder capacity compiled by each build profile.
+> validated 0.7.1 media/memory architecture and separates decoder capacity from
+> the ScreenType choices exposed by each build profile.
 >
-> **Validation boundary:** classic-ESP32 16x16, 32x32 logical-to-16x16, and the
-> no-PSRAM 64x64 logical-to-16x16 compact-cache path are validated. The release
-> now also supplies WLED 16.0.1 build profiles for classic ESP32 8/16 MB,
-> ESP32-WROVER/PSRAM, ESP32-S3 8/16 MB PSRAM targets, and WLED's native HUB75
-> environments; those
-> additional hardware combinations remain pending physical validation.
+> **Validation boundary:** the stable 0.8.0 hardware baseline is classic ESP32
+> (`esp32dev`) with I2S LED output. The 16x16 path, 32x32 logical-to-16x16, and
+> no-PSRAM 64x64 logical-to-16x16 compact-cache path are validated there.
+> ESP32-C3 is under investigation after visible RMT LED flicker/spikes were
+> observed with the BLE-capable framework. WROVER/PSRAM, ESP32-S3 and HUB75
+> combinations remain pending hardware tests.
 
 WLED Usermod for the ESP32 family that emulates an iDotMatrix BLE peripheral
 and lets the official iDotMatrix app drive a WLED 2D matrix. The stable hardware
@@ -27,9 +27,9 @@ bulk transfers, and renders supported content through one WLED effect named
 
 Version **0.8.0** is the current stable release.
 
-It keeps the Usermod runtime behavior validated through `0.8.0-dev.20` while
-finalizing release metadata, documentation, tests, partitions, and the expanded
-PlatformIO hardware-target matrix.
+It keeps the feature behavior validated through `0.8.0-dev.20` while adding the
+final compact12/16x16 memory profile, per-board BLE default name,
+and corrected PlatformIO/user-mod isolation. ESP32-C3 work remains experimental and is not shipped as a stable target.
 The release combines the proven 0.7.1 media/memory architecture with the complete
 feature layer: source-isolated app rendering, seven light effects, timers and
 scoreboard, persistent alarms and schedules, active-buzzer integration, ten
@@ -43,7 +43,7 @@ engineering history.
 
 | Configuration | GIF backend | Status |
 |---|---|---|
-| 16x16 logical / 16x16 physical, classic ESP32 | `animatedgif10` | Hardware-validated stable path, including the 0.8.0 feature set |
+| 16x16 logical / 16x16 physical, classic ESP32 | `compact12/cache` | Hardware-validated stable path, including repeated GIF playback and return to WLED |
 | 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | Hardware-validated: clock/text and repeated GIF playback |
 | 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` build | `compact12/cache` | Hardware-validated: static images, clocks, large/100-frame GIFs, repeated GIF replacement, WLED/clock/image transitions, responsive Web UI |
 | 64x64 with PSRAM | `animatedgif12/psram` | Implemented; hardware validation still pending |
@@ -56,7 +56,7 @@ firmware. The settings page never offers a profile larger than that capacity:
 
 | Override / decoder | Available `ScreenType` values | `Rescale` |
 |---|---|---|
-| `platformio_override.ini.example` / LZW10 | 16x16 | hidden and forced off |
+| `platformio_override.ini.example` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
 | `platformio_override.ini.32x32` / LZW11 | 16x16, 32x32 | available for tests |
 | `.64x64` or `.64x64-lite` / LZW12 | 16x16, 32x32, 64x64 | available for tests |
 
@@ -215,14 +215,15 @@ overrides. If you use another directory name, update their paths accordingly.
 
 The override file selects the **media/decoder profile**:
 
-- `platformio_override.ini.example` — standard 16x16 / LZW10;
+- `platformio_override.ini.example` — stable 16x16 UI with compact12/cache decoder;
 - `platformio_override.ini.32x32` — maximum 32x32 / compact LZW11;
 - `platformio_override.ini.64x64` — maximum 64x64 / complete LZW12, normal WLED feature set;
 - `platformio_override.ini.64x64-lite` — complete LZW12 with selected optional WLED integrations removed to preserve classic-ESP32 internal RAM; the 4 MB target is the **hardware-validated no-PSRAM 64->16 configuration**;
 - `platformio_override.ini.hub75` — wrappers around WLED 16.0.1's native HUB75 environments, with complete LZW12 support; experimental in this project.
 
-The normal `example`, `32x32`, and `64x64` files each expose the same seven
-hardware targets, with a media-profile suffix added to the environment name:
+The 16x16, 32x32, and 64x64 files expose the same established classic/WROVER/S3
+hardware target set. ESP32-C3 is intentionally not shipped as a stable target in
+0.8.0 while its RMT output behavior is under investigation.
 
 - `_16x16` for `platformio_override.ini.example`;
 - `_32x32` for `platformio_override.ini.32x32`;
@@ -239,10 +240,10 @@ HUB75 file instead wraps board/pinout-specific WLED environments; do not select
 one solely by flash size. See [`BUILD_PROFILES.md`](BUILD_PROFILES.md) for the
 complete target/HUB75 matrix, partition layout, PSRAM notes, and validation status.
 
-The normal profiles preserve the custom Usermods inherited from the selected
-WLED base environment before adding `wled-usermod-idotmatrix`. The `64x64-lite`
-profile deliberately omits inherited Usermods to protect the contiguous
-internal-DRAM margin used by the no-PSRAM compact12 GIF cache path.
+All supplied iDotMatrix profiles deliberately avoid inheriting the base WLED
+`custom_usermods` list and add only `symlink://../wled-usermod-idotmatrix`.
+This prevents AudioReactive or another default Usermod from being pulled in
+implicitly and consuming the contiguous heap needed by NimBLE/media.
 
 Copy the appropriate file to WLED's `platformio_override.ini`, then build the
 environment matching the actual controller.
@@ -291,12 +292,12 @@ pio device monitor -e esp32dev_idotmatrix_16x16
 For the validated physical 16x16 setup:
 
 1. configure the panel as a **16x16 2D matrix**;
-2. use an **I2S** digital LED output, not RMT;
+2. on the stable classic ESP32 baseline, use an **I2S** digital LED output, not RMT;
 3. configure Wi-Fi, timezone, and NTP if you want the clock to be correct;
 4. choose an available Usermod `screenType`, normally matching the physical
    matrix; the compiled override determines whether 16x16, 32x32, and/or 64x64
    are offered. `ScreenType` does not change the compiled GIF decoder, so use the
-   16x16/LZW10 override for minimum RAM use on a 16x16 display;
+   standard 16x16 override for the validated compact12/cache path;
 5. enable `rescale` only for a deliberate profile/matrix test;
 6. optionally edit the `deviceName` suffix shown after the fixed `IDM-` prefix;
 7. reboot and reconnect the iDotMatrix app after changing the BLE device name or logical profile;
@@ -316,6 +317,8 @@ A successful connection should let the app control the WLED matrix directly.
 - `enabled`: enables the BLE emulator;
 - `screenType`: logical profile (`16x16`, `32x32`, `64x64`);
 - `deviceName`: editable BLE-name suffix shown after the fixed `IDM-` prefix;
+  when no name is saved, a stable six-digit default (`IDM-xxxxxx`) is derived
+  from the ESP32 eFuse MAC;
 - `rescale`: test-only nearest-neighbour mapping from a deliberately mismatched logical profile to the selected WLED 2D segment/storage canvas; hidden and forced off in the standard 16x16 build;
 - `buzzer-pin`: optional GPIO for an active buzzer; leave unassigned to disable it;
 - `buzzerActiveHigh`: selects active-high or active-low buzzer polarity.

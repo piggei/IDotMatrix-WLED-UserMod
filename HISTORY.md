@@ -1,10 +1,20 @@
 # History
 
-## 0.8.0 - 2026-09-06 - Stable feature release
+## 0.8.0 - 2026-09-07 - Stable feature release
 
-- Promoted the behavior validated through `0.8.0-dev.20` to stable 0.8.0. The
-  Usermod runtime code remains unchanged; finalization adds release metadata,
-  documentation, tests, partitions, and the expanded PlatformIO target matrix.
+- Kept ESP32-C3 out of the stable target matrix after physical testing exposed
+  visible RMT LED flicker/spikes with the BLE-capable framework. C3 support remains
+  under investigation for a later development/maintenance release.
+- Replaced the fixed default BLE suffix with a stable six-digit value derived
+  from the ESP32 eFuse MAC (`IDM-xxxxxx`). User-saved names remain unchanged.
+- Decoupled UI/profile capacity (`IDOT_SCREEN_MAX_DIM`) from GIF decoder
+  capacity, allowing the validated compact12/cache decoder to serve a 16x16-only
+  UI with Rescale hidden.
+- Corrected all supplied PlatformIO `custom_usermods` entries to use only the
+  external iDotMatrix symlink, preventing accidental AudioReactive inheritance.
+- Promoted the behavior validated through `0.8.0-dev.20` to stable 0.8.0 and
+  incorporated the final memory-profile, BLE-name, PlatformIO, test,
+  partition, release-metadata, and documentation corrections.
 - Added seven source-isolated standalone light effects, including deterministic
   one-pixel movement for effects 3, 4, and 5.
 - Added countdown, stopwatch, scoreboard, BUILD80 timer artwork, and the

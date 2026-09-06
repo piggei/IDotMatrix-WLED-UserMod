@@ -16,7 +16,7 @@ pinouts instead of duplicating them in this repository.
 
 | Override file | Decoder | Maximum logical profile | Normal purpose |
 |---|---|---:|---|
-| `platformio_override.ini.example` | LZW10 | 16x16 | smallest stable baseline |
+| `platformio_override.ini.example` | complete LZW12, UI capped by `IDOT_SCREEN_MAX_DIM=16` | 16x16 | stable low-feature baseline |
 | `platformio_override.ini.32x32` | compact LZW11 | 32x32 | 16x16/32x32 protocol and media |
 | `platformio_override.ini.64x64` | complete LZW12 | 64x64 | normal 64x64-capable build; PSRAM direct path or no-PSRAM cache selected at runtime |
 | `platformio_override.ini.64x64-lite` | complete LZW12 | 64x64 | classic ESP32 low-internal-RAM build with optional WLED integrations removed |
@@ -25,16 +25,18 @@ pinouts instead of duplicating them in this repository.
 The compiled maximum controls what the Usermod settings page exposes. The
 hardware target does not change the protocol profile by itself. Changing
 `ScreenType` at runtime also does **not** downgrade the compiled GIF decoder: a
-64x64/LZW12 firmware set to `16x16` still uses the LZW12 backend. For the lowest
-RAM use on a 16x16 display, build the dedicated 16x16/LZW10 override.
+64x64/LZW12 firmware set to `16x16` still uses the LZW12 backend. The standard
+16x16 build intentionally also uses LZW12 because the compact12/cache runtime
+proved more stable on the validated classic ESP32 than the smaller LZW10 path;
+`IDOT_SCREEN_MAX_DIM=16` keeps the UI/profile constrained to 16x16.
 
 ## Standard hardware targets
 
-The normal `example`, `32x32`, and `64x64` override files contain the same seven
-hardware bases, but **each media profile has a unique PlatformIO environment
-name**. This deliberately gives every decoder profile its own `.pio/build` and
-`.pio/libdeps` namespace, preventing a previously patched AnimatedGIF LZW12
-dependency from being reused by an LZW10/LZW11 build.
+The 32x32 and 64x64 override files contain the same seven established hardware
+bases. **Each media
+profile has a unique PlatformIO environment name**, giving every decoder profile
+its own `.pio/build` and `.pio/libdeps` namespace and preventing a previously
+patched AnimatedGIF profile from being reused by another build.
 
 Environment naming is:
 
@@ -53,6 +55,17 @@ where `<media-profile>` is `16x16`, `32x32`, or `64x64`.
 | `esp32s3dev_8MB_opi_idotmatrix` | `esp32s3dev_8MB_opi` | 8 MB | OPI, >= 8 MB in WLED profile | pending |
 | `esp32s3dev_8MB_qspi_idotmatrix` | `esp32s3dev_8MB_qspi` | 8 MB | QSPI | pending |
 | `esp32s3dev_16MB_opi_idotmatrix` | `esp32s3dev_16MB_opi` | 16 MB | OPI, >= 8 MB in WLED profile | pending |
+
+
+
+### ESP32-C3 status
+
+ESP32-C3 is **not a supported 0.8.0 target** and is intentionally absent from the
+shipped stable overrides. Preliminary builds compile and run NimBLE, but the
+BLE-capable Arduino/ESP-IDF framework produced visible RMT LED flicker/spikes on
+a physical matrix. The effect was reduced, but not eliminated, with the Usermod
+disabled and BLE never initialized; stock WLED on the same hardware was stable.
+C3 support therefore remains under investigation for a later maintenance/dev release.
 
 Examples: `esp32dev_8M_idotmatrix_16x16`,
 `esp32dev_8M_idotmatrix_32x32`, and `esp32dev_8M_idotmatrix_64x64` all target the
@@ -91,6 +104,19 @@ pinout and merge the same iDotMatrix additions.
 The `IDOT_GIF_LZW12` flag is used for all supplied HUB75 wrappers so the Usermod
 can accept all current iDotMatrix logical profiles up to 64x64. The physical
 HUB75 geometry remains WLED's responsibility.
+
+## Usermod inheritance policy
+
+Every supplied override sets `custom_usermods` to only:
+
+```ini
+custom_usermods =
+  symlink://../wled-usermod-idotmatrix
+```
+
+Do not inherit `${env:<base>.custom_usermods}` here. WLED base environments can
+include AudioReactive; inheriting it changed the memory budget and was the cause
+of misleading low-heap behavior during 0.8.0 validation.
 
 ## Framework pinning
 

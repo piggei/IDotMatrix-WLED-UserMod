@@ -47,8 +47,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ; Intentionally do NOT inherit ${env:esp32dev.custom_usermods}.
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 [env:esp32dev_8M_idotmatrix_64x64_lite]
 extends = env:esp32dev_8M
@@ -74,8 +73,7 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ; Intentionally do NOT inherit ${env:esp32dev_8M.custom_usermods}.
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
 
 [env:esp32dev_16M_idotmatrix_64x64_lite]
 extends = env:esp32dev_16M
@@ -101,5 +99,4 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
-  ; Intentionally do NOT inherit ${env:esp32dev_16M.custom_usermods}.
-  wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
+  symlink://../wled-usermod-idotmatrix
