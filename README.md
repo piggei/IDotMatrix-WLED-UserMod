@@ -152,7 +152,7 @@ required for Wi-Fi/Bluetooth coexistence with the pinned ESP-IDF generation.
 | Component | Version / setting |
 |---|---|
 | WLED | 16.0.1 |
-| PlatformIO environment | validated: `esp32dev_idotmatrix`; additional targets in `BUILD_PROFILES.md` |
+| PlatformIO environment | validated baseline: `esp32dev_idotmatrix_16x16`; additional targets in `BUILD_PROFILES.md` |
 | Platform | `espressif32@~6.13.0` |
 | Arduino-ESP32 | 2.0.17 |
 | ESP-IDF | 4.4.7 |
@@ -221,15 +221,18 @@ The override file selects the **media/decoder profile**:
 - `platformio_override.ini.64x64-lite` — complete LZW12 with selected optional WLED integrations removed to preserve classic-ESP32 internal RAM; the 4 MB target is the **hardware-validated no-PSRAM 64->16 configuration**;
 - `platformio_override.ini.hub75` — wrappers around WLED 16.0.1's native HUB75 environments, with complete LZW12 support; experimental in this project.
 
-The normal `example`, `32x32`, and `64x64` files each expose seven hardware targets:
+The normal `example`, `32x32`, and `64x64` files each expose the same seven
+hardware targets, with a media-profile suffix added to the environment name:
 
-- `esp32dev_idotmatrix` — classic ESP32, 4 MB;
-- `esp32dev_8M_idotmatrix` — classic ESP32, 8 MB;
-- `esp32dev_16M_idotmatrix` — classic ESP32, 16 MB;
-- `esp32_wrover_idotmatrix` — classic ESP32-WROVER, 4 MB flash + PSRAM;
-- `esp32s3dev_8MB_opi_idotmatrix` — ESP32-S3, 8 MB flash, OPI PSRAM;
-- `esp32s3dev_8MB_qspi_idotmatrix` — ESP32-S3, 8 MB flash, QSPI PSRAM;
-- `esp32s3dev_16MB_opi_idotmatrix` — ESP32-S3, 16 MB flash, OPI PSRAM.
+- `_16x16` for `platformio_override.ini.example`;
+- `_32x32` for `platformio_override.ini.32x32`;
+- `_64x64` for `platformio_override.ini.64x64`.
+
+For example, the classic 8 MB target is respectively
+`esp32dev_8M_idotmatrix_16x16`, `esp32dev_8M_idotmatrix_32x32`, or
+`esp32dev_8M_idotmatrix_64x64`. The unique names intentionally isolate
+PlatformIO build/libdeps caches between decoder profiles. `64x64-lite` uses the
+`_64x64_lite` suffix.
 
 `64x64-lite` intentionally contains only the three classic-ESP32 targets. The
 HUB75 file instead wraps board/pinout-specific WLED environments; do not select
@@ -252,16 +255,16 @@ Do **not** add `esp-nimble-cpp` or the registry package `ESP32 BLE Arduino`.
 From the WLED source directory, for the validated classic 4 MB baseline:
 
 ```powershell
-pio run -e esp32dev_idotmatrix -t clean
-pio run -e esp32dev_idotmatrix
+pio run -e esp32dev_idotmatrix_16x16 -t clean
+pio run -e esp32dev_idotmatrix_16x16
 ```
 
 For example, after copying `platformio_override.ini.64x64`, an ESP32-S3 with
 16 MB flash and OPI PSRAM is built with:
 
 ```powershell
-pio run -e esp32s3dev_16MB_opi_idotmatrix -t clean
-pio run -e esp32s3dev_16MB_opi_idotmatrix
+pio run -e esp32s3dev_16MB_opi_idotmatrix_64x64 -t clean
+pio run -e esp32s3dev_16MB_opi_idotmatrix_64x64
 ```
 
 The AnimatedGIF patch banner should match the selected build profile, for
@@ -274,13 +277,13 @@ example:
 ### 4. Upload
 
 ```powershell
-pio run -e esp32dev_idotmatrix -t upload
+pio run -e esp32dev_idotmatrix_16x16 -t upload
 ```
 
 Optional serial monitor:
 
 ```powershell
-pio device monitor -e esp32dev_idotmatrix
+pio device monitor -e esp32dev_idotmatrix_16x16
 ```
 
 ### 5. Configure WLED
@@ -292,7 +295,8 @@ For the validated physical 16x16 setup:
 3. configure Wi-Fi, timezone, and NTP if you want the clock to be correct;
 4. choose an available Usermod `screenType`, normally matching the physical
    matrix; the compiled override determines whether 16x16, 32x32, and/or 64x64
-   are offered;
+   are offered. `ScreenType` does not change the compiled GIF decoder, so use the
+   16x16/LZW10 override for minimum RAM use on a 16x16 display;
 5. enable `rescale` only for a deliberate profile/matrix test;
 6. optionally edit the `deviceName` suffix shown after the fixed `IDM-` prefix;
 7. reboot and reconnect the iDotMatrix app after changing the BLE device name or logical profile;

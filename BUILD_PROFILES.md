@@ -1,7 +1,7 @@
 # Build profiles and hardware targets
 
 Version 0.8.0 separates two independent build choices that were previously
-combined in the single `esp32dev_idotmatrix` example:
+combined in the old single `esp32dev_idotmatrix` example:
 
 1. **iDotMatrix media profile** — the largest logical GIF/protocol resolution
    compiled into the Usermod (`16x16`, `32x32`, or `64x64`);
@@ -23,14 +23,28 @@ pinouts instead of duplicating them in this repository.
 | `platformio_override.ini.hub75` | complete LZW12 | 64x64 | WLED HUB75 output plus iDotMatrix BLE/media; experimental in this project |
 
 The compiled maximum controls what the Usermod settings page exposes. The
-hardware target does not change the protocol profile by itself.
+hardware target does not change the protocol profile by itself. Changing
+`ScreenType` at runtime also does **not** downgrade the compiled GIF decoder: a
+64x64/LZW12 firmware set to `16x16` still uses the LZW12 backend. For the lowest
+RAM use on a 16x16 display, build the dedicated 16x16/LZW10 override.
 
 ## Standard hardware targets
 
 The normal `example`, `32x32`, and `64x64` override files contain the same seven
-environments:
+hardware bases, but **each media profile has a unique PlatformIO environment
+name**. This deliberately gives every decoder profile its own `.pio/build` and
+`.pio/libdeps` namespace, preventing a previously patched AnimatedGIF LZW12
+dependency from being reused by an LZW10/LZW11 build.
 
-| iDotMatrix environment | WLED v16.0.1 base environment | Flash | PSRAM | Project hardware validation |
+Environment naming is:
+
+```text
+<hardware-stem>_<media-profile>
+```
+
+where `<media-profile>` is `16x16`, `32x32`, or `64x64`.
+
+| Hardware stem | WLED v16.0.1 base environment | Flash | PSRAM | Project hardware validation |
 |---|---|---:|---|---|
 | `esp32dev_idotmatrix` | `esp32dev` | 4 MB | no | **validated baseline** |
 | `esp32dev_8M_idotmatrix` | `esp32dev_8M` | 8 MB | no in the generic WLED target | pending |
@@ -40,14 +54,19 @@ environments:
 | `esp32s3dev_8MB_qspi_idotmatrix` | `esp32s3dev_8MB_qspi` | 8 MB | QSPI | pending |
 | `esp32s3dev_16MB_opi_idotmatrix` | `esp32s3dev_16MB_opi` | 16 MB | OPI, >= 8 MB in WLED profile | pending |
 
+Examples: `esp32dev_8M_idotmatrix_16x16`,
+`esp32dev_8M_idotmatrix_32x32`, and `esp32dev_8M_idotmatrix_64x64` all target the
+same 8 MB ESP32 hardware but compile different decoder/media profiles.
+
 Use the OPI or QSPI S3 target that matches the actual module. A successful flash
 configuration for one PSRAM wiring mode is not interchangeable with the other.
 
 `platformio_override.ini.64x64-lite` intentionally supplies only the three
-classic-ESP32 targets. More flash does not create more internal DRAM, so the
-same low-RAM feature reductions are retained on the 8 MB and 16 MB variants.
-The 4 MB version is the hardware-validated `64x64 logical -> 16x16 physical`
-configuration; the larger-flash variants remain pending hardware validation.
+classic-ESP32 targets and uses the suffix `_64x64_lite`. More flash does not
+create more internal DRAM, so the same low-RAM feature reductions are retained
+on the 8 MB and 16 MB variants. The 4 MB version is the hardware-validated
+`64x64 logical -> 16x16 physical` configuration; the larger-flash variants
+remain pending hardware validation.
 
 ## HUB75 targets
 
@@ -132,16 +151,16 @@ Example: 64x64-capable build for an ESP32-S3 with 16 MB flash and OPI PSRAM:
 
 ```sh
 cp ../wled-usermod-idotmatrix/platformio_override.ini.64x64 platformio_override.ini
-pio run -e esp32s3dev_16MB_opi_idotmatrix -t clean
-pio run -e esp32s3dev_16MB_opi_idotmatrix
+pio run -e esp32s3dev_16MB_opi_idotmatrix_64x64 -t clean
+pio run -e esp32s3dev_16MB_opi_idotmatrix_64x64
 ```
 
 Example: standard 16x16 build on a classic 8 MB ESP32 target:
 
 ```sh
 cp ../wled-usermod-idotmatrix/platformio_override.ini.example platformio_override.ini
-pio run -e esp32dev_8M_idotmatrix -t clean
-pio run -e esp32dev_8M_idotmatrix
+pio run -e esp32dev_8M_idotmatrix_16x16 -t clean
+pio run -e esp32dev_8M_idotmatrix_16x16
 ```
 
 Example: WLED's MOONHUB/LilyGo T7-S3 HUB75 target plus iDotMatrix:
@@ -152,9 +171,12 @@ pio run -e esp32s3dev_16MB_opi_hub75_idotmatrix -t clean
 pio run -e esp32s3dev_16MB_opi_hub75_idotmatrix
 ```
 
-A clean build is required whenever the decoder profile changes because
-`patch_animatedgif_profiles.py` rewrites the selected AnimatedGIF dependency for
-that PlatformIO environment.
+The shipped media profiles use different environment names, so switching between
+16x16/32x32/64x64 no longer shares the same PlatformIO build or dependency
+cache. A clean build is still recommended after changing framework/dependency
+versions or editing an override in place. If upgrading from a pre-release 0.8.0
+layout that used unsuffixed names, remove the old `.pio` directory once before
+building the new environments.
 
 ## Validation terminology
 

@@ -17,7 +17,7 @@
 
 ; The settings page exposes only ScreenType 16x16 and hides Rescale.
 
-[env:esp32dev_idotmatrix]
+[env:esp32dev_idotmatrix_16x16]
 extends = env:esp32dev
 platform = espressif32@~6.13.0
 platform_packages =
@@ -36,7 +36,7 @@ custom_usermods =
   ${env:esp32dev.custom_usermods}
   wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
 
-[env:esp32dev_8M_idotmatrix]
+[env:esp32dev_8M_idotmatrix_16x16]
 extends = env:esp32dev_8M
 platform = espressif32@~6.13.0
 platform_packages =
@@ -55,7 +55,7 @@ custom_usermods =
   ${env:esp32dev_8M.custom_usermods}
   wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
 
-[env:esp32dev_16M_idotmatrix]
+[env:esp32dev_16M_idotmatrix_16x16]
 extends = env:esp32dev_16M
 platform = espressif32@~6.13.0
 platform_packages =
@@ -75,7 +75,7 @@ custom_usermods =
   wled-usermod-idotmatrix = symlink://../wled-usermod-idotmatrix
 
 ; Classic ESP32-WROVER / PSRAM target from WLED.
-[env:esp32_wrover_idotmatrix]
+[env:esp32_wrover_idotmatrix_16x16]
 extends = env:esp32_wrover
 platform = espressif32@~6.13.0
 platform_packages =
@@ -96,7 +96,7 @@ custom_usermods =
 
 ; PSRAM support and the cache workaround are inherited from WLED.
 
-[env:esp32s3dev_8MB_opi_idotmatrix]
+[env:esp32s3dev_8MB_opi_idotmatrix_16x16]
 extends = env:esp32s3dev_8MB_opi
 platform = espressif32@~6.13.0
 platform_packages =
@@ -117,7 +117,7 @@ custom_usermods =
 
 ; PSRAM setup, memory type, flash mode and USB flags are inherited from WLED.
 
-[env:esp32s3dev_8MB_qspi_idotmatrix]
+[env:esp32s3dev_8MB_qspi_idotmatrix_16x16]
 extends = env:esp32s3dev_8MB_qspi
 platform = espressif32@~6.13.0
 platform_packages =
@@ -138,7 +138,7 @@ custom_usermods =
 
 ; PSRAM setup, memory type, flash mode and USB flags are inherited from WLED.
 
-[env:esp32s3dev_16MB_opi_idotmatrix]
+[env:esp32s3dev_16MB_opi_idotmatrix_16x16]
 extends = env:esp32s3dev_16MB_opi
 platform = espressif32@~6.13.0
 platform_packages =

@@ -20,6 +20,9 @@
 - Split media profile from hardware target in the supplied WLED 16.0.1
   PlatformIO overrides: normal LZW10/LZW11/LZW12 profiles now include classic
   ESP32 4/8/16 MB, ESP32-WROVER/PSRAM, and ESP32-S3 8/16 MB PSRAM environments.
+- Gave every media profile a unique PlatformIO environment suffix
+  (`_16x16`, `_32x32`, `_64x64`, `_64x64_lite`) so decoder-profile changes cannot
+  reuse the same `.pio/build` or patched AnimatedGIF `.pio/libdeps` namespace.
 - Replaced the old HUB75 merge sketch with wrappers around WLED 16.0.1's native
   HUB75 controller/pinout environments, preserving upstream DMA/PSRAM/pin rules.
 - Added matching 8/16/32 MB single-app/no-OTA partition tables and static host

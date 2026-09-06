@@ -31,23 +31,30 @@ media profile to `platformio_override.ini` in the WLED source directory.
 For the validated classic 4 MB baseline:
 
 ```powershell
-pio run -e esp32dev_idotmatrix -t clean
-pio run -e esp32dev_idotmatrix
+pio run -e esp32dev_idotmatrix_16x16 -t clean
+pio run -e esp32dev_idotmatrix_16x16
 ```
 
 The normal `example`, `32x32`, and `64x64` overrides should also be compiled for
 each newly supported hardware target when release/build infrastructure is
 available:
 
+Each hardware stem is compiled with the media suffix belonging to the copied
+override (`_16x16`, `_32x32`, or `_64x64`). For example:
+
 ```text
-esp32dev_idotmatrix
-esp32dev_8M_idotmatrix
-esp32dev_16M_idotmatrix
-esp32_wrover_idotmatrix
-esp32s3dev_8MB_opi_idotmatrix
-esp32s3dev_8MB_qspi_idotmatrix
-esp32s3dev_16MB_opi_idotmatrix
+esp32dev_idotmatrix_16x16
+esp32dev_8M_idotmatrix_16x16
+esp32dev_8M_idotmatrix_32x32
+esp32dev_8M_idotmatrix_64x64
+esp32_wrover_idotmatrix_64x64
+esp32s3dev_8MB_opi_idotmatrix_64x64
+esp32s3dev_8MB_qspi_idotmatrix_64x64
+esp32s3dev_16MB_opi_idotmatrix_64x64
 ```
+
+The suffixes are intentionally distinct so different AnimatedGIF decoder
+profiles never share the same PlatformIO `.pio/build` or `.pio/libdeps` cache.
 
 `64x64-lite` intentionally applies only to the three classic-ESP32 targets.
 `platformio_override.ini.hub75` has its own board/pinout-specific environments;

@@ -24,6 +24,12 @@ NORMAL_TARGETS = {
     "esp32s3dev_16MB_opi_idotmatrix": ("env:esp32s3dev_16MB_opi", "esp32s3dev_16MB_opi", "16MB"),
 }
 
+PROFILE_SUFFIX = {
+    "platformio_override.ini.example": "16x16",
+    "platformio_override.ini.32x32": "32x32",
+    "platformio_override.ini.64x64": "64x64",
+}
+
 HUB_TARGETS = {
     "esp32dev_hub75_idotmatrix": ("env:esp32dev_hub75", "4MB"),
     "esp32dev_hub75_forum_pinout_idotmatrix": ("env:esp32dev_hub75_forum_pinout", "4MB"),
@@ -66,12 +72,13 @@ def partition_path(flash: str) -> str:
 
 def check_normal_profile(name: str, profile_define: str | None) -> None:
     parser = read_ini(name)
+    suffix = PROFILE_SUFFIX[name]
     sections = {section for section in parser.sections() if section.startswith("env:")}
-    expected = {f"env:{name}" for name in NORMAL_TARGETS}
+    expected = {f"env:{stem}_{suffix}" for stem in NORMAL_TARGETS}
     assert sections == expected, f"{name}: unexpected environment set: {sections ^ expected}"
 
-    for env_name, (extends, base, flash) in NORMAL_TARGETS.items():
-        section = f"env:{env_name}"
+    for stem, (extends, base, flash) in NORMAL_TARGETS.items():
+        section = f"env:{stem}_{suffix}"
         assert value(parser, section, "extends") == extends
         assert value(parser, section, "platform") == PLATFORM
         assert value(parser, section, "platform_packages") == ""
@@ -99,7 +106,7 @@ def check_lite_profile() -> None:
     lite_names = {"esp32dev_idotmatrix", "esp32dev_8M_idotmatrix", "esp32dev_16M_idotmatrix"}
     lite_targets = {key: target for key, target in NORMAL_TARGETS.items() if key in lite_names}
     sections = {section for section in parser.sections() if section.startswith("env:")}
-    expected = {f"env:{name}" for name in lite_targets}
+    expected = {f"env:{stem}_64x64_lite" for stem in lite_targets}
     assert sections == expected
 
     disabled = {
@@ -111,8 +118,8 @@ def check_lite_profile() -> None:
         "WLED_DISABLE_ESPNOW",
         "WLED_DISABLE_LOXONE",
     }
-    for env_name, (extends, base, flash) in lite_targets.items():
-        section = f"env:{env_name}"
+    for stem, (extends, base, flash) in lite_targets.items():
+        section = f"env:{stem}_64x64_lite"
         assert value(parser, section, "extends") == extends
         assert value(parser, section, "platform") == PLATFORM
         assert value(parser, section, "board_build.partitions") == partition_path(flash)
@@ -148,6 +155,30 @@ def check_hub75_profile() -> None:
         assert f"${{env:{upstream}.lib_deps}}" in deps
         assert NIMBLE in deps and GIF in deps
         assert USERMOD in value(parser, section, "custom_usermods")
+
+
+
+def check_profile_environment_isolation() -> None:
+    """Every media profile gets its own PIOENV/build/libdeps namespace."""
+    files = [
+        "platformio_override.ini.example",
+        "platformio_override.ini.32x32",
+        "platformio_override.ini.64x64",
+        "platformio_override.ini.64x64-lite",
+        "platformio_override.ini.hub75",
+    ]
+    owners: dict[str, str] = {}
+    for filename in files:
+        parser = read_ini(filename)
+        for section in parser.sections():
+            if not section.startswith("env:"):
+                continue
+            env_name = section.removeprefix("env:")
+            previous = owners.setdefault(env_name, filename)
+            assert previous == filename, (
+                f"PlatformIO environment {env_name!r} is shared by {previous} and {filename}; "
+                "decoder-profile switches must never reuse the same .pio/build or .pio/libdeps namespace"
+            )
 
 
 def parse_int(text: str) -> int:
@@ -187,6 +218,7 @@ def main() -> None:
     check_normal_profile("platformio_override.ini.64x64", "IDOT_GIF_LZW12")
     check_lite_profile()
     check_hub75_profile()
+    check_profile_environment_isolation()
     check_partitions()
     print("PlatformIO profile tests passed.")
 
