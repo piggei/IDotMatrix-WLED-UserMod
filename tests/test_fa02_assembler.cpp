@@ -1,6 +1,7 @@
 #include "../IDotMatrixFA02Assembler.h"
 
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -50,6 +51,9 @@ int main() {
     IDotMatrixFA02Assembler::Result::Complete);
   assert(assembler.expected() == largeSize && assembler.received() == largeSize);
   assert(memcmp(assembler.data(), large.data(), large.size()) == 0);
-  assembler.reset();
+  uint8_t* detached = assembler.resetAndDetachDynamic();
+  assert(detached != nullptr);
   assert(!assembler.usesDynamicBuffer());
+  assert(!assembler.complete() && assembler.expected() == 0);
+  free(detached);
 }

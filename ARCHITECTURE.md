@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the **stable 0.8.0 architecture**. It combines the
+This document describes the **stable 0.8.1 architecture**. It combines the
 validated 0.7.1 memory/media design with the feature layer added for light
 effects, timers, automation, active-buzzer support, Audio/Rhythm rendering, and
 build-aware resolution settings. Special attention remains on the RAM constraints
@@ -31,11 +31,14 @@ It does not render pixels or directly change WLED state.
 
 ### `IDotMatrixFA02Assembler`
 
-Owns one bounded 4112-byte logical-packet buffer. The first two little-endian
-bytes define the complete FA02 packet length. ATT fragments are appended until
-the logical packet is complete. No protocol ACK is emitted for an ATT fragment.
-An abandoned partial transfer is cleared after five seconds so later commands
-cannot be poisoned by stale reassembly state.
+Owns one bounded FA02 logical-packet assembler with **4112 bytes of permanent
+inline storage** (`4096 + 16`) and a maximum logical packet size of **8192
+bytes**. Packets above the inline capacity use temporary dynamic storage only for
+the lifetime of that reassembly. The first two little-endian bytes define the
+complete FA02 packet length. ATT fragments are appended until the logical packet
+is complete. No protocol ACK is emitted for an ATT fragment. An abandoned
+partial transfer is cleared after five seconds so later commands cannot be
+poisoned by stale reassembly state.
 
 ### `IDotMatrixBulkTransfer`
 
@@ -80,11 +83,13 @@ Large pixel allocations prefer PSRAM when it is present.
 Owns compact PNG decoding, GIF RX/PLAY files, decoder lifetime, and the optional
 LittleFS frame cache.
 
-The GIF build profile is selected at compile time:
+The GIF build profile is selected at compile time. In Release 0.8.1 the
+**supported 16x16 profiles compile `IDOT_GIF_LZW12`** and independently cap the
+visible protocol/UI profile with `IDOT_SCREEN_MAX_DIM=16`:
 
-- default: 10-bit/16x16 AnimatedGIF profile;
-- `IDOT_GIF_LZW11`: compact 11-bit/32x32 AnimatedGIF profile;
-- `IDOT_GIF_LZW12`: 12-bit/64x64 capability.
+- supported 16x16: LZW12 capability + 16x16 screen cap; on no-PSRAM targets the runtime backend is `compact12/cache`;
+- `IDOT_GIF_LZW11`: compact 11-bit/32x32 AnimatedGIF profile used by the supplied 32x32 test profile;
+- `IDOT_GIF_LZW12`: complete 12-bit/64x64 decoder capability used by 16x16 and 64x64 profiles, with the allowed screen size controlled separately.
 
 For `IDOT_GIF_LZW12`, the final backend is selected at runtime:
 
@@ -123,15 +128,19 @@ compact runtime status under `/json/info`.
 1. WLED initializes LEDs and Wi-Fi.
 2. The Usermod allocates the renderer storage canvas and waits five seconds.
 3. NimBLE starts and advertises the iDotMatrix-compatible GATT database.
-4. BLE callbacks only copy bounded writes or append FA02 fragments.
-5. The WLED loop processes complete packets and sends replies.
-6. Protocol events are applied through the WLED adapter.
-7. `iDotMatrix Display` renders app-owned content from WLED effect context.
-8. GIF filesystem/decoder/cache work runs in normal loop context, never a BLE callback.
 
-For cached 64x64 GIFs without PSRAM, cache construction decodes **at most one
-frame per WLED loop turn**. This deliberately yields between frames so Wi-Fi,
-BLE, WebSocket, WLED, and LittleFS can continue servicing transient work.
+### ESP32-C3 supported backend split
+
+Release 0.8.1 maintains the WLED 16.0.1/NimBLE 1.x path for classic ESP32 and
+adds a separate supported C3 path on pinned WLED commit `d55037f...`. Legacy
+IDF4 RMT builds produced physical LED spikes both with and without BLE, with BLE
+advertising making the fault much more visible. The IDF5 WLED backend uses
+`WLED_USE_SHARED_RMT`; on the tested C3 this eliminated the spikes through BLE
+advertising/connection, images, GIF playback and sustained WLED/media switching.
+
+NimBLE-Arduino 2.x changes callback signatures and GATT start semantics, so the
+BLE server contains a compile-time API bridge. Classic profiles remain on
+NimBLE 1.4.3; the C3 profile pins 2.5.1. Protocol parsing and rendering are shared.
 
 ## State ownership
 
@@ -158,7 +167,7 @@ misleading UI. For example, the app could still show a red strobe after the user
 changed the WLED strobe to blue. Both programs would be internally consistent,
 but the combined user experience would look desynchronized.
 
-In stable 0.8.0, **all app-originated visual content stays under one
+In stable 0.8.1, **all app-originated visual content stays under one
 WLED effect: `iDotMatrix Display`**. That includes Solid colour and the seven
 standalone light effects in addition to graffiti, clock, text, images and GIFs.
 The WLED effect is only a framebuffer publisher; it does not expose the app
@@ -236,23 +245,23 @@ iDotMatrix decoder profile. `platformio_override.ini.hub75` instead wraps WLED's
 board/pinout-specific HUB75 environments. See `BUILD_PROFILES.md` for the full
 matrix and validation status.
 
-Each normal/HUB75 wrapper preserves the selected WLED base environment's
-`custom_usermods` list before adding the external iDotMatrix entry. This avoids
-an external Usermod override unintentionally replacing Usermods already selected
-by WLED and avoids hard-coding one `${env:esp32dev.custom_usermods}` source for
-all boards.
+Every supplied override intentionally **replaces** the base environment's
+`custom_usermods` list with only:
 
-`platformio_override.ini.64x64-lite` is intentionally different. It is the
-classic-ESP32/no-PSRAM low-memory profile family, derived from the
-hardware-validated 4 MB baseline. Inherited Usermods are omitted by default to
-protect free and contiguous internal RAM during compact12 GIF precache. Users
-may opt back into base-environment Usermods, but that combination must be
-revalidated for internal-RAM pressure.
+```ini
+custom_usermods =
+  symlink://../wled-usermod-idotmatrix
+```
+
+The profiles do not inherit `${env:<base>.custom_usermods}`. This prevents WLED
+base environments from silently pulling additional Usermods such as
+AudioReactive into memory-sensitive BLE/media builds. Any extra Usermod must be
+added deliberately and the resulting heap pressure must be revalidated.
 
 ## Current memory rules
 
 - four 64-byte queue slots for complete short commands;
-- one 4112-byte FA02 reassembly buffer for fragmented/large packets;
+- one 4112-byte inline FA02 reassembly buffer, with temporary dynamic storage for logical packets above 4112 bytes and an 8192-byte hard maximum;
 - one persistent RGB renderer canvas, sized to storage dimensions rather than automatically to logical dimensions;
 - standalone light effects reuse that canvas and add only a bounded 16-colour palette plus small timing/state fields;
 - countdown, stopwatch, and scoreboard reuse the same canvas and add only scalar timer/score state;
@@ -260,7 +269,7 @@ revalidated for internal-RAM pressure.
 - RAW prefers a temporary atomic-publication buffer but can receive in-place/hidden if a second canvas cannot be allocated;
 - TEXT storage is bounded and allocated outside BLE callbacks;
 - compressed GIF bytes are streamed to LittleFS instead of being buffered in RAM;
-- default 16x16 keeps the proven low-RAM 10-bit decoder in fixed DRAM;
+- supported 16x16 profiles compile LZW12 while `IDOT_SCREEN_MAX_DIM=16` limits the visible logical profile; on no-PSRAM hardware the runtime backend is compact12/cache;
 - the 11-bit/32x32 decoder is allocated on demand and released when WLED retakes display ownership;
 - the validated compact 11-bit profile uses a 1282-entry physical dictionary and measured `gifDecoderBytes=9372` on the tested classic ESP32;
 - 64x64 semantics always retain all 4096 legal LZW codes;
@@ -292,8 +301,11 @@ not protocol semantics or LZW code validity.
 
 ### 16x16
 
-The 0.7.0-derived 10-bit decoder remains the default. Keeping this path small and
-fixed avoids making every build pay for larger-profile memory.
+Release 0.8.1 no longer uses the old 10-bit decoder as the standard 16x16
+profile. The supported classic-ESP32 and ESP32-C3 16x16 overrides compile
+`IDOT_GIF_LZW12` and set `IDOT_SCREEN_MAX_DIM=16`. Decoder capability and
+advertised screen size are therefore separate: the logical/UI profile remains
+16x16 while no-PSRAM playback uses the validated `compact12/cache` backend.
 
 ### 32x32
 
@@ -436,7 +448,7 @@ optimizations were unsafe or simply moved the failure elsewhere.
 | Experiment / symptom | Root cause | Final lesson / fix |
 |---|---|---|
 | Stock/full AnimatedGIF allocated late failed despite reasonable total heap | heap fragmentation; largest contiguous block was too small | track both total heap and largest block; reduce decoder footprint |
-| Full decoder placed permanently in static DRAM overflowed `.dram0.bss` | too much permanent internal RAM removed from WLED/network | keep only the small 16x16 decoder fixed; allocate larger decoders on demand or in PSRAM |
+| Full decoder placed permanently in static DRAM overflowed `.dram0.bss` | too much permanent internal RAM removed from WLED/network | historically keep only the small decoder fixed; the current LZW12 standard instead allocates compact/full decoder workspace lazily |
 | Reserving the full large decoder too early caused reset loops | WLED/Wi-Fi/BLE lost working RAM before they initialized normally | allocate media resources lazily, only after a valid transfer needs them |
 | 11-bit decoder remained allocated after returning to normal WLED effects, causing WLED Error 8 | display ownership changed but dynamic decoder lifetime did not | release media/decoder immediately when WLED retakes the segment |
 | 64x64 logical framebuffer plus animation buffering consumed too much RAM | 12,288 B per RGB64 canvas, duplicated by naive animation buffering | reuse one canvas and, with rescale, store only the physical canvas |
@@ -479,7 +491,7 @@ heap because predecode intentionally creates the highest transient pressure.
 Current `heap`/`largest` during cached playback are more useful for judging
 whether WLED/network headroom has recovered.
 
-## Compile-time resolution capability (0.8.0)
+## Compile-time resolution capability (0.8.1)
 
 `patch_animatedgif_profiles.py` exports `IDOT_GIF_MAX_DIM` together with the
 selected LZW profile. `IDotMatrixBuildProfile.h` is the single C++ policy layer
@@ -494,9 +506,10 @@ stored configuration and runtime behavior governed by the same capability.
 
 ## Validation boundaries and future work
 
-The 0.8.0 hardware matrix covers the classic-ESP32 no-PSRAM 64x64
-**logical** profile when rescaled to a physical 16x16 WLED matrix, together with
-the complete feature set on the validated 16x16 platform. It does not yet prove:
+The 0.8.1 hardware matrix covers the classic-ESP32 no-PSRAM 64x64 **logical**
+profile when rescaled to a physical 16x16 matrix, the complete feature set on
+the classic 16x16 platform, and the supported ESP32-C3 16x16 IDF5/shared-RMT
+path with BLE active. It does not yet prove:
 
 - the automatic PSRAM/direct path on real PSRAM hardware;
 - a native physical 64x64 RGB canvas;
@@ -512,7 +525,7 @@ The optional buzzer is owned by the iDotMatrix usermod rather than the WLED effe
 
 The Usermod settings page can request a **one-shot test trill** through a small same-origin POST endpoint. The endpoint never changes persistent configuration and only operates on the GPIO/polarity already applied by WLED, so testing cannot silently drive an unsaved or conflicting pin. The one-shot path stops after three beeps; alarms use the repeating pattern, while programs use a finite multi-group activation notice.
 
-The active pattern matches the standalone emulator: three 90 ms pulses, 70 ms gaps, then a 550 ms pause. No `delay()` is used.
+The active pattern matches the standalone emulator: three 90 ms pulses, 70 ms gaps, then a 550 ms pause. No `delay()` is used. Direct GPIO drive of a particular buzzer is an electrical hardware property rather than a target-support requirement; the C3 release validation does not claim a specific 5 V buzzer can be driven directly from a 3.3 V GPIO.
 
 WLED 0.16.x requires a compile-time `PinOwner` enum value for true PinManager ownership, which an out-of-tree library cannot add safely. The module therefore does not borrow another usermod's owner. The configuration key ends in `pin` so WLED's Usermods settings page includes it in its pin-use scan, and runtime setup rejects GPIOs already allocated by WLED. If WLED later adds external PinOwner registration, only the hardware setup/teardown boundary needs to change.
 
@@ -521,7 +534,7 @@ WLED 0.16.x requires a compile-time `PinOwner` enum value for true PinManager ow
 The countdown and stopwatch use the 16x16 artwork recovered from standalone emulator BUILD80: a 9x9 orange timer in rows 0..8 and full-width MM:SS in rows 10..14. The red hand uses an eight-position, 125 ms phase; countdown derives phase from remaining milliseconds while stopwatch derives it from elapsed milliseconds. Rendering remains capped at 200 ms to match the validated standalone implementation and avoid unnecessary WLED effect work.
 
 
-## Alarm and program buzzer semantics (0.8.0)
+## Alarm and program buzzer semantics
 
 The buzzer has two deliberately different automation semantics:
 
@@ -530,7 +543,7 @@ The buzzer has two deliberately different automation semantics:
 
 Program sound is started only by a real `startScheduleActivity()` transition. The normal automation loop never restarts the finite notice simply because the schedule remains active. If an alarm fires while the finite program notice is still playing, the alarm takes priority and switches the buzzer to its repeating pattern. The implementation remains non-blocking and does not change display ownership.
 
-## Audio/Rhythm stream and rendering (0.8.0)
+## Audio/Rhythm stream and rendering
 
 Audio FA02 traffic bypasses the ordinary length-prefixed command assembler.
 LEVEL frames are six bytes; FFT uses a continuous sequence of 21-byte logical

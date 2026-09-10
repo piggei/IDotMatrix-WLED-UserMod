@@ -118,7 +118,7 @@ private:
   void loadPersistence();
   void saveAlarmMeta(uint8_t slot);
   void saveScheduleGlobal();
-  void saveScheduleMeta(uint8_t index);
+  bool saveScheduleMeta(uint8_t index);
   void clearScheduleMeta(uint8_t index);
 
   bool ensureScheduleStaging();

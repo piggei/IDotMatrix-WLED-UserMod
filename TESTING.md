@@ -1,8 +1,8 @@
 # Testing
 
-This file defines the **0.8.0 stable regression procedure** and records the
-hardware configurations used to validate the release. The 0.7.1 media/memory
-regressions remain mandatory because 0.8.0 builds directly on that baseline.
+This file defines the **0.8.1 stable regression procedure**. The classic ESP32
+0.8.0/0.7.1 regressions remain mandatory, and 0.8.1 adds a separate physical
+ESP32-C3 IDF5/shared-RMT validation line.
 
 ## Host regression tests
 
@@ -14,77 +14,75 @@ From the repository root with a C++11 compiler and zlib development files:
 
 The suite covers protocol framing/ACKs, power/brightness/RGB, DIY/graffiti,
 clock/text rendering, all seven light effects, countdown, stopwatch, scoreboard,
-Audio/Rhythm framing/rendering, alarm/program parsing, buzzer timing, 2D mapping,
-bulk CRC32, RAW publication, FA02 fragmentation, compact PNG decode, GIF
-RX/promotion/playback, WLED ownership, repeat-GIF replacement, build-profile
-normalization, the compact 64x64 decoder/cache path, and the complete static
-PlatformIO target/partition matrix shipped with the repository.
+Audio/Rhythm framing/rendering, buzzer timing, 2D mapping, bulk CRC32, RAW
+publication, FA02 fragmentation, compact PNG decode, GIF RX/promotion/playback,
+WLED ownership, repeat-GIF replacement, build-profile normalization, compact
+LZW12/cache behavior, partition geometry, the NimBLE 1.x/2.x source bridge and
+the supported C3 profile contract.
 
-The compact-GIF tests include real 64x64 fixtures and stress the 4096-code
-LZW12 implementation without using a truncated dictionary.
+Release build `0.8.1-audit-fix1` also adds behavioural `IDotMatrixAutomation`
+coverage and explicit failure injection. The host tests verify:
+
+- GIF promotion by direct rename;
+- rename failure with successful streamed-copy fallback;
+- rename plus copy failure publishing `gif-cache-io`;
+- successful GIF playback after a failed promotion;
+- schedule create/replace persistence;
+- temporary-file write failure;
+- replacement rename failure with rollback to the previous valid program;
+- rollback failure converging to an empty metadata/media state;
+- NVS write failure rolling media back to the previous program;
+- NVS rollback-metadata failure converging to an empty safe state;
+- reboot/loadPersistence after failed replacement;
+- missing media and corrupt metadata recovery;
+- alarm metadata persistence;
+- WLED-time authority, app-time fallback, weekday matching, and midnight-spanning schedules.
+
+Where supported by the host compiler, run the sanitizer subset too:
+
+```sh
+./run_host_sanitizers.sh
+```
+
+It builds the protocol, renderer, bulk transfer, FA02 assembler, automation and
+media regressions with AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## WLED build validation
 
-The supplied PlatformIO files target **WLED v16.0.1**. Before building, copy one
-media profile to `platformio_override.ini` in the WLED source directory.
+0.8.1 has two release build families:
 
-For the validated classic 4 MB baseline:
+**Classic ESP32** — WLED 16.0.1, supplied legacy overrides, NimBLE 1.4.3.
 
-```powershell
+```sh
+cp ../wled-usermod-idotmatrix/platformio_override.ini.example platformio_override.ini
 pio run -e esp32dev_idotmatrix_16x16 -t clean
 pio run -e esp32dev_idotmatrix_16x16
 ```
 
-The normal `example`, `32x32`, and `64x64` overrides should also be compiled for
-each newly supported hardware target when release/build infrastructure is
-available:
+**ESP32-C3** — pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a`,
+IDF5/shared-RMT, NimBLE 2.5.1.
 
-Each hardware stem is compiled with the media suffix belonging to the copied
-override (`_16x16`, `_32x32`, or `_64x64`). For example:
-
-```text
-esp32dev_idotmatrix_16x16
-esp32dev_8M_idotmatrix_16x16
-esp32dev_8M_idotmatrix_32x32
-esp32dev_8M_idotmatrix_64x64
-esp32_wrover_idotmatrix_64x64
-esp32s3dev_8MB_opi_idotmatrix_64x64
-esp32s3dev_8MB_qspi_idotmatrix_64x64
-esp32s3dev_16MB_opi_idotmatrix_64x64
+```sh
+cp ../wled-usermod-idotmatrix/platformio_override.ini.c3 platformio_override.ini
+pio run -e esp32c3dev_idotmatrix_16x16 -t clean
+pio run -e esp32c3dev_idotmatrix_16x16
 ```
 
-The suffixes are intentionally distinct so different AnimatedGIF decoder
-profiles never share the same PlatformIO `.pio/build` or `.pio/libdeps` cache.
+Expected common facts: `release=0.8.1`, `build=0.8.1-audit-fix1`, AnimatedGIF 1.4.7, no-OTA partitioning,
+only the iDotMatrix custom Usermod, and no dependency on `esp-nimble-cpp` or
+`ESP32 BLE Arduino`. The C3 build must additionally prove ESP-IDF 5,
+`WLED_USE_SHARED_RMT`, NimBLE 2.x and the pinned WLED base marker.
 
-`64x64-lite` intentionally applies only to the three classic-ESP32 targets.
-`platformio_override.ini.hub75` has its own board/pinout-specific environments;
-see `BUILD_PROFILES.md` and compile only profiles matching real or intended
-hardware.
-
-Expected facts for every successful build:
-
-- repository/library version: `0.8.0`;
-- Espressif platform: `espressif32@~6.13.0`;
-- `NimBLE-Arduino @ 1.4.3`;
-- `AnimatedGIF @ 1.4.7`;
-- default build patch banner: 10-bit / max 16x16;
-- 32x32 build patch banner: 11-bit / max 32x32;
-- 64x64/HUB75 build patch banner: 12-bit / max 64x64 / dict=4096 / filebuf=1024;
-- `WLED_DISABLE_OTA` present and the matching single-app partition table selected;
-- no `.dram0.bss` overflow;
-- no dependency on `esp-nimble-cpp` or `ESP32 BLE Arduino`.
-
-A PlatformIO compile proves **build compatibility**, not hardware compatibility.
-ESP32-S3, PSRAM/direct 64x64, native physical 64x64, and HUB75 remain pending
-physical validation. ESP32-C3 is not a supported 0.8.0 target: physical testing
-showed visible RMT LED flicker/spikes with the BLE-capable framework, while stock
-WLED on the same board/matrix was stable.
+A successful compile proves build compatibility only. Physical support requires
+the hardware procedures below. ESP32-S3, PSRAM/direct native 64x64 and HUB75
+remain pending validation for the 0.9 line.
 
 ## Build profiles
 
 | Logical GIF profile | Override | Hardware target set | Expected runtime decoder |
 |---|---|---|---|
-| 16x16 | `platformio_override.ini.example` | classic 4/8/16 MB + WROVER PSRAM + S3 8/16 MB PSRAM | `compact12/cache` without PSRAM; LZW12 decoder with UI capped to 16x16 |
+| 16x16 classic | `platformio_override.ini.example` | classic 4/8/16 MB + WROVER/S3 wrappers | `compact12/cache` without PSRAM; LZW12 decoder with UI capped to 16x16 |
+| 16x16 C3 | `platformio_override.ini.c3` | supported ESP32-C3 4 MB | `compact12/cache`, IDF5/shared-RMT, NimBLE 2.x |
 | 32x32 | `platformio_override.ini.32x32` | classic 4/8/16 MB + WROVER PSRAM + S3 8/16 MB PSRAM | `animatedgif11` |
 | 64x64, normal WLED feature set | `platformio_override.ini.64x64` | classic 4/8/16 MB + WROVER PSRAM + S3 8/16 MB PSRAM | PSRAM direct or no-PSRAM cache depending hardware |
 | 64x64, classic low-RAM | `platformio_override.ini.64x64-lite` | classic 4/8/16 MB only | `compact12/cache` without PSRAM |
@@ -100,7 +98,7 @@ Use a classic ESP32, a WLED 16x16 2D matrix, and I2S LED output.
 
 1. Flash by USB/serial and reboot.
 2. Confirm WLED remains reachable over Wi-Fi for at least 15 seconds.
-3. Confirm `/json/info` reports `build=0.8.0` and BLE advertising.
+3. Confirm `/json/info` reports `release=0.8.1`, `build=0.8.1-audit-fix1`, and BLE advertising.
 4. Connect with the official iDotMatrix app.
 5. Verify power OFF/ON and brightness changes.
 6. Verify red, green, blue, white, and black full-screen colours.
@@ -133,7 +131,7 @@ Recorded hardware result during development:
 
 ## 64x64 logical / classic ESP32 no-PSRAM regression
 
-This remains the key larger-profile memory regression for 0.8.0.
+This remains the key larger-profile memory regression carried into 0.8.1.
 
 Use:
 
@@ -146,7 +144,8 @@ Use:
 After reboot, confirm:
 
 ```text
-build=0.8.0
+release=0.8.1
+build=0.8.1-audit-fix1
 profile=64x64
 canvas=16x16
 gifDecoder=compact12/cache
@@ -183,7 +182,7 @@ A cache exceeding 512 KiB must fail cleanly with `mediaError=gif-cache-full`.
 
 ### Release hardware result
 
-The validated compact-cache sequence retained by 0.8.0 passed:
+The compact-cache sequence first validated in 0.8.0 and retained by 0.8.1 passed:
 
 - 10+ A/B GIF replacements;
 - large and 100-frame animations;
@@ -208,12 +207,12 @@ content=gif
 The historical `min` heap is expected to be lower than current playback heap;
 cache predecode is the high-pressure phase.
 
-## Light-effect and Usermod-inheritance regression (0.8.0)
+## Light-effect and Usermod policy regression (carried forward from 0.8.0)
 
 The seven app light effects are intentionally rendered by the Usermod and must
 remain under `iDotMatrix Display`. For the stable hardware regression:
 
-1. start from a normal WLED effect and verify `/json/info` reports `build=0.8.0`;
+1. start from a normal WLED effect and verify `/json/info` reports `release=0.8.1` and `build=0.8.1-audit-fix1`;
 2. in the iDotMatrix app select Solid and verify WLED shows `iDotMatrix Display`,
    not native WLED `Solid`;
 3. select each of the seven light effects and compare motion, palette and speed
@@ -227,17 +226,16 @@ remain under `iDotMatrix Display`. For the stable hardware regression:
    `iDotMatrix Display` reclaims the matrix without reboot or stale WLED colour;
 7. finish with the existing GIF/clock/image replacement sequence to confirm the
    stable media lifecycle and memory behaviour are unchanged;
-8. with `platformio_override.ini.example`, `.32x32`, `.64x64`, or `.hub75`,
-   confirm the WLED default/inherited Usermods for the selected base environment
-   are still compiled alongside iDotMatrix;
-9. with `platformio_override.ini.64x64-lite`, confirm inherited Usermods remain
-   intentionally absent unless inheritance from the corresponding base WLED
-   environment is explicitly re-enabled.
+8. for every supplied override, confirm `custom_usermods` contains only the
+   external iDotMatrix symlink and does not inherit `${env:<base>.custom_usermods}`;
+9. if additional Usermods are added manually, repeat the memory/media stress test
+   because the distributed profiles intentionally avoid unvalidated heap pressure.
 
 Expected diagnostics while a light effect is active include:
 
 ```text
-build=0.8.0
+release=0.8.1
+build=0.8.1-audit-fix1
 lightEffect=<0..6> speed=<0..100> colors=<n>
 content=light
 ```
@@ -245,12 +243,12 @@ content=light
 The effect engine adds no new heap allocation, so free-heap behaviour should stay
 close to the established non-GIF baseline.
 
-## Countdown / stopwatch / scoreboard regression (0.8.0)
+## Countdown / stopwatch / scoreboard regression (carried forward from 0.8.0)
 
 After the light-effect test, verify the three app tools while WLED
 continues to show the single `iDotMatrix Display` effect:
 
-1. confirm `/json/info` reports `build=0.8.0`;
+1. confirm `/json/info` reports `release=0.8.1` and `build=0.8.1-audit-fix1`;
 2. start a countdown longer than five seconds and verify the orange timer icon above white `MM:SS`;
 3. let it enter the final five seconds and verify the digits/separator turn red;
 4. pause and resume the countdown and verify the remaining time is preserved;
@@ -280,7 +278,7 @@ content=scoreboard
 score=<a>:<b>
 ```
 
-## Buzzer / timer icon regression (0.8.0)
+## Buzzer / timer icon regression (carried forward from 0.8.0)
 
 1. In Config → Usermods → iDotMatrix verify the buzzer GPIO selector, `buzzerActiveHigh`, and the **Test buzzer** button are visible.
 2. Leave the buzzer GPIO unassigned and press **Test buzzer**; the page should report that the GPIO must be configured and saved.
@@ -293,7 +291,7 @@ score=<a>:<b>
 
 The audible button is also a direct hardware validation path independent of alarm/program triggers.
 
-## Program activation sound regression (0.8.0)
+## Program activation sound regression (carried forward from 0.8.0)
 
 1. Configure a valid active-buzzer GPIO and verify **Test buzzer** still emits one group of three short beeps.
 2. Create/enable a program whose global sound option is enabled and whose time window includes the current time.
@@ -303,7 +301,7 @@ The audible button is also a direct hardware validation path independent of alar
 6. Trigger an alarm with its buzzer option enabled while a program is active. The alarm must take priority and use the repeating trill for its configured alarm duration.
 7. After the alarm ends, a resumed program may emit its normal finite activation notice when the activity is actually started again; it must never become a continuous schedule buzzer.
 
-## Audio / Rhythm regression (0.8.0)
+## Audio / Rhythm regression (carried forward from 0.8.0)
 
 1. Start from the clock and select Audio/Rhythm effect 1. WLED must switch to
    `iDotMatrix Display`, the breakdancer must appear, and `/json/info` must show
@@ -319,7 +317,7 @@ The audible button is also a direct hardware validation path independent of alar
 6. Re-run a GIF from the stable regression set and both manual and scheduled
    buzzer tests to confirm that audio added no media or timing regression.
 
-## Usermod settings regression (0.8.0)
+## Usermod settings regression (carried forward from 0.8.0)
 
 1. Verify that `ScreenType` has no inline description and shows an orange
    reboot/app-reconnection warning on the following line.
@@ -331,12 +329,12 @@ The audible button is also a direct hardware validation path independent of alar
 4. Verify that **Test buzzer** remains functional and that `Save before testing.`
    appears below it in orange rather than beside the button.
 5. Load a legacy configuration containing a full `IDM-...` value and confirm
-   that 0.8.0 displays only its suffix without duplicating the prefix.
+   that 0.8.1 displays only its suffix without duplicating the prefix.
 6. Verify that every visible field label ends with `:` and that the rescale row
    reads `Scale the logical profile to the selected WLED 2D segment:` instead
    of `Rescale`.
 
-## Build-aware resolution regression (0.8.0)
+## Build-aware resolution regression (carried forward from 0.8.0)
 
 1. Compile `platformio_override.ini.example`: the dropdown must contain only
    16x16, and the Rescale row must not exist.
@@ -374,30 +372,55 @@ For 64x64 no-PSRAM testing:
 
 The detailed rationale and failed experiments are in `ARCHITECTURE.md`.
 
-## Pending validation after 0.8.0
+## ESP32-C3 0.8.1 release validation
 
-- automatic PSRAM/full-AnimatedGIF 64x64 direct path on real hardware;
-- native physical 64x64 output;
-- HUB75 DMA + BLE/media coexistence;
-- 24-hour Wi-Fi/BLE/content soak.
+Supported C3 release profile:
 
-## Historical development notes
+```sh
+git clone https://github.com/wled/WLED.git WLED-idot-c3
+cd WLED-idot-c3
+git checkout d55037f7510541eddc390c8f3d01afc5787aa44a
+cp ../wled-usermod-idotmatrix/platformio_override.ini.c3 platformio_override.ini
+pio run -e esp32c3dev_idotmatrix_16x16 -t clean
+pio run -e esp32c3dev_idotmatrix_16x16
+```
 
-The `RELEASE_NOTES_0.7.1-dev.*.md` files preserve the individual experiments,
-including the unsafe truncated-LZW12 branches. They are retained for engineering
-history, not as recommended build targets. In particular, dev.4/dev.5 must not
-be used as a model for future memory optimization because their physical LZW12
-dictionaries were smaller than the legal 4096-code space.
+The release hardware test used a 4 MB ESP32-C3, a physical 16x16 matrix on
+GPIO4, Wi-Fi, BLE, and the standard compact12/cache 16x16 profile. Required
+`/json/info` markers:
 
-## Final 0.8.0 packaging check
+```text
+release=0.8.1
+build=0.8.1-audit-fix1
+RMT+BLE=ESP32-C3 shared-RMT
+framework=WLED IDF5/shared-RMT
+wledBase=d55037f
+nimble=2.x API
+```
 
-Before creating the release archive:
+Recorded release-line evidence from the dev.3 hardware run:
+
+- BLE advertising: stable, no LED spikes;
+- BLE connected: stable, no LED spikes;
+- static images and animated GIFs: working;
+- roughly 100 media/animation changes plus about 20 WLED effects: no pixel spikes or reboot;
+- WLED WebSocket remained active;
+- final snapshot: free heap ~74 KB, minimum observed ~37.5 KB, largest block 64 KB, `reset=poweron`;
+- a few transient red Web UI connection banners appeared during aggressive UI stress, while the requested WLED effect still started and the device remained responsive. Treat this as a Web UI/network observation, not an LED/BLE failure, unless it becomes reproducible outside stress.
+
+The earlier IDF4 dev.1/dev.2 A/B experiments are retained in `HISTORY.md`; they
+are intentionally absent from the stable package profiles.
+
+## 0.8.1 final packaging check
+
+Before tagging the release:
 
 1. run `./run_host_tests.sh`;
-2. verify `library.json` and `IDOTMATRIX_BUILD` both report `0.8.0`;
-3. validate all local Markdown links;
-4. confirm every text file ends with a newline and has no trailing whitespace;
-5. confirm the repository contains no `.pio`, build outputs, editor backups,
-   Python caches, core dumps, or other temporary artifacts;
-6. create the archive with one top-level `wled-usermod-idotmatrix/` directory and
-   inspect its file list before publishing.
+2. run `./run_host_sanitizers.sh` where ASan/UBSan are available;
+3. confirm `library.json` reports release `0.8.1` and runtime diagnostics report
+   `release=0.8.1` plus `build=0.8.1-audit-fix1`;
+4. confirm only `platformio_override.ini.c3` represents the supported C3 path;
+5. verify all local Markdown links;
+6. verify the archive contains one root directory named `wled-usermod-idotmatrix`;
+7. exclude `.pio`, build products, caches and editor temporaries;
+8. perform a short C3 smoke test after any release-only code change.

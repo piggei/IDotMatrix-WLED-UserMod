@@ -7,6 +7,12 @@ IDotMatrixFA02Assembler::~IDotMatrixFA02Assembler() {
   releaseDynamic();
 }
 
+void IDotMatrixFA02Assembler::resetState() {
+  expected_ = 0;
+  received_ = 0;
+  complete_ = false;
+}
+
 void IDotMatrixFA02Assembler::releaseDynamic() {
   if (dynamicPacket_ != nullptr) {
     free(dynamicPacket_);
@@ -45,7 +51,7 @@ IDotMatrixFA02Assembler::Result IDotMatrixFA02Assembler::append(
     if (expected_ == 0 || expected_ > MAX_PACKET_SIZE ||
         (expected_ > INLINE_PACKET_SIZE &&
          (dynamicPacket_ == nullptr || dynamicCapacity_ < expected_))) {
-      reset();
+      resetState();
       return Result::Invalid;
     }
   }
@@ -61,8 +67,14 @@ IDotMatrixFA02Assembler::Result IDotMatrixFA02Assembler::append(
 }
 
 void IDotMatrixFA02Assembler::reset() {
-  expected_ = 0;
-  received_ = 0;
-  complete_ = false;
+  resetState();
   releaseDynamic();
+}
+
+uint8_t* IDotMatrixFA02Assembler::resetAndDetachDynamic() {
+  resetState();
+  uint8_t* detached = dynamicPacket_;
+  dynamicPacket_ = nullptr;
+  dynamicCapacity_ = 0;
+  return detached;
 }

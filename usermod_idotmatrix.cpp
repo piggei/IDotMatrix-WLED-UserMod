@@ -13,7 +13,24 @@
 #include <esp_heap_caps.h>
 #endif
 
-static constexpr const char* IDOTMATRIX_BUILD = "0.8.0";
+#if defined(IDOT_C3_WLED_IDF5) && !defined(CONFIG_IDF_TARGET_ESP32C3)
+#error "IDOT_C3_WLED_IDF5 is only valid for ESP32-C3 builds"
+#endif
+#if defined(IDOT_C3_WLED_IDF5) && !defined(WLED_USE_SHARED_RMT)
+#error "0.8.1 ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT"
+#endif
+#if defined(IDOT_C3_WLED_IDF5) && !defined(IDOT_NIMBLE_V2_API)
+#error "0.8.1 ESP32-C3 requires NimBLE-Arduino 2.x"
+#endif
+#if defined(IDOT_C3_WLED_IDF5)
+#include <esp_idf_version.h>
+#if ESP_IDF_VERSION_MAJOR < 5
+#error "0.8.1 ESP32-C3 requires ESP-IDF 5.x or newer"
+#endif
+#endif
+
+static constexpr const char* IDOTMATRIX_RELEASE = "0.8.1";
+static constexpr const char* IDOTMATRIX_BUILD = "0.8.1-audit-fix1";
 
 namespace {
 const char USERMOD_NAME[] PROGMEM = "iDotMatrix";
@@ -73,6 +90,7 @@ private:
   IDotMatrixProtocol protocol_{adapter_};
   IDotMatrixAutomation automation_{renderer_, adapter_, media_, buzzer_};
   IDotMatrixBLEServer ble_{protocol_};
+  bool rmtBusActive_ = false;
   bool blockedByRmt_ = false;
   bool startPending_ = false;
   uint32_t startAt_ = 0;
@@ -140,6 +158,22 @@ private:
       }
     }
     return false;
+  }
+
+  static constexpr bool isEsp32C3Build() {
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+    return true;
+#else
+    return false;
+#endif
+  }
+
+  static constexpr bool c3SharedRmtBleEnabled() {
+#if defined(IDOT_C3_WLED_IDF5)
+    return true;
+#else
+    return false;
+#endif
   }
 
 
@@ -248,16 +282,22 @@ public:
     if (deviceName_.isEmpty()) deviceName_ = defaultDeviceName();
     if (!enabled_) { setupComplete_ = true; return; }
 
-    // WLED's ESP32 RMT-HI LED driver can conflict with the Bluetooth controller.
-    // Keep BLE disabled whenever a digital RMT bus is active. The stable 0.8.0
-    // hardware baseline is classic ESP32 with I2S LED output. ESP32-C3 support
-    // remains under investigation because its RMT output showed visible LED
-    // flicker/spikes with the BLE-capable framework, even before BLE was enabled.
-    blockedByRmt_ = hasDigitalRmtBus();
+    // WLED's classic-ESP32 RMT-HI LED driver can conflict with the Bluetooth
+    // controller, so the stable policy remains "RMT => block BLE" there. The
+    // supported ESP32-C3 profile is the narrow exception: it is compiled only
+    // against WLED's IDF5/shared-RMT backend, which was hardware-validated with
+    // BLE active and is guarded at compile time above.
+    rmtBusActive_ = hasDigitalRmtBus();
+    blockedByRmt_ = IDotMatrixBuildProfile::shouldBlockBleForRmt(
+      rmtBusActive_, isEsp32C3Build(), c3SharedRmtBleEnabled()
+    );
     if (blockedByRmt_) {
       DEBUG_PRINTLN(F("[iDotMatrix] BLE blocked: select I2S for every digital LED output"));
       setupComplete_ = true;
       return;
+    }
+    if (rmtBusActive_ && c3SharedRmtBleEnabled()) {
+      DEBUG_PRINTLN(F("[iDotMatrix] ESP32-C3 shared-RMT + BLE coexistence enabled"));
     }
 
     // ESP-IDF requires Wi-Fi modem sleep while Wi-Fi and Bluetooth coexist.
@@ -371,9 +411,22 @@ public:
       ? (ble_.isConnected() ? F("BLE connected") : ble_.isAdvertising()
         ? F("BLE advertising") : F("BLE ready"))
       : F("BLE init failed"));
+    if (rmtBusActive_ && c3SharedRmtBleEnabled()) {
+      info.add(F("RMT+BLE=ESP32-C3 shared-RMT"));
+    }
+#if defined(IDOT_C3_WLED_IDF5)
+    info.add(F("framework=WLED IDF5/shared-RMT"));
+    info.add(F("wledBase=d55037f"));
+#if defined(IDOT_NIMBLE_V2_API)
+    info.add(F("nimble=2.x API"));
+#else
+    info.add(F("nimble=1.x API"));
+#endif
+#endif
     info.add(String(F("profile=")) + String(renderer_.logicalWidth()) + 'x' + String(renderer_.logicalHeight()));
     info.add(String(F("canvas=")) + String(renderer_.width()) + 'x' + String(renderer_.height()));
     info.add(String(F("name=")) + deviceName_);
+    info.add(String(F("release=")) + IDOTMATRIX_RELEASE);
     info.add(String(F("build=")) + IDOTMATRIX_BUILD);
     info.add(String(F("gifDecoder=")) + media_.gifDecoderModeText());
     info.add(String(F("gifDecoderBytes=")) + media_.gifDecoderBytes());

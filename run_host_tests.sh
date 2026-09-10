@@ -22,7 +22,12 @@ $CXX $FLAGS IDotMatrixRenderer.cpp tests/test_renderer.cpp -o "$TMP/idotmatrix_r
 $CXX $FLAGS IDotMatrixBuzzer.cpp tests/test_buzzer.cpp -o "$TMP/idotmatrix_buzzer_test"
 "$TMP/idotmatrix_buzzer_test"
 
+# Keep a syntax-only pass through the production include path in addition to
+# the behavioral host harness below.
 $CXX $FLAGS -Itests/automation_stub -fsyntax-only IDotMatrixAutomation.cpp
+
+$CXX $FLAGS -DIDOT_AUTOMATION_HOST_TEST -Itests/automation_stub IDotMatrixProtocol.cpp IDotMatrixAutomation.cpp tests/test_automation.cpp -o "$TMP/idotmatrix_automation_test"
+"$TMP/idotmatrix_automation_test"
 
 $CXX $FLAGS -Itests/wled_stub IDotMatrixRenderer.cpp IDotMatrixWLEDAdapter.cpp tests/test_wled_adapter.cpp -o "$TMP/idotmatrix_adapter_test"
 "$TMP/idotmatrix_adapter_test"
@@ -47,5 +52,6 @@ $CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatr
 
 python3 tests/test_patch_profiles.py
 python3 tests/test_platformio_profiles.py
+python3 tests/test_release_package.py
 
 echo "All iDotMatrix host tests passed."

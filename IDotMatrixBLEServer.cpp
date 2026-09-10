@@ -1,5 +1,6 @@
 #include "IDotMatrixBLEServer.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -50,14 +51,24 @@ bool IDotMatrixBLEServer::begin(const char* deviceName, uint8_t screenType) {
   screenType_ = screenType;
   protocol_.setScreenType(screenType_);
 
+#if defined(IDOT_NIMBLE_V2_API)
+  if (!NimBLEDevice::init(deviceName_)) return false;
+#else
   NimBLEDevice::init(deviceName_);
+#endif
   // Match the standalone emulator as closely as NimBLE allows.  The peer still
   // chooses the final negotiated MTU, but advertising the maximum local MTU
   // prevents an unnecessarily small server-side ceiling.
   NimBLEDevice::setMTU(517);
   server_ = NimBLEDevice::createServer();
   if (server_ == nullptr) return false;
+#if defined(IDOT_NIMBLE_V2_API)
+  // NimBLE 2.x owns callbacks by default. These callback objects are members,
+  // so explicitly disable ownership/deletion.
+  server_->setCallbacks(&serverCallbacks_, false);
+#else
   server_->setCallbacks(&serverCallbacks_);
+#endif
 
   NimBLEService* faService = server_->createService(FA_SERVICE_UUID);
   NimBLEService* aeService = server_->createService(AE_SERVICE_UUID);
@@ -86,8 +97,14 @@ bool IDotMatrixBLEServer::begin(const char* deviceName, uint8_t screenType) {
 
   fa02_->setCallbacks(&writeCallbacks_);
   ae01_->setCallbacks(&writeCallbacks_);
+#if defined(IDOT_NIMBLE_V2_API)
+  // NimBLE 2.x starts the complete GATT database from the server. Individual
+  // NimBLEService::start() calls are deprecated/no-ops there.
+  if (!server_->start()) return false;
+#else
   faService->start();
   aeService->start();
+#endif
 
   initialized_ = true;
   startAdvertising();
@@ -111,10 +128,11 @@ void IDotMatrixBLEServer::loop() {
       rawTransferReady_ = false;
       gifTransferReady_ = false;
       portENTER_CRITICAL(&queueMux_);
-      faAssembler_.reset();
+      uint8_t* detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
       audioStreamActive_ = false;
       protocol_.resetAudioStream();
       portEXIT_CRITICAL(&queueMux_);
+      free(detachedFaBuffer);
     }
   }
 
@@ -145,8 +163,9 @@ void IDotMatrixBLEServer::loop() {
   if (faAssembler_.expected() > 0 && !faAssembler_.complete() &&
       uint32_t(millis() - reassemblyLastWriteAt_) >= 5000u) {
     portENTER_CRITICAL(&queueMux_);
-    faAssembler_.reset();
+    uint8_t* detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
     portEXIT_CRITICAL(&queueMux_);
+    free(detachedFaBuffer);
     bulkTransfer_.reset();
     protocol_.completeRawImage(false);
     protocol_.completeGif(false);
@@ -162,8 +181,9 @@ void IDotMatrixBLEServer::loop() {
     IDotMatrixReply reply;
     processFA02Complete(faAssembler_.data(), faAssembler_.expected(), reply);
     portENTER_CRITICAL(&queueMux_);
-    faAssembler_.reset();
+    uint8_t* detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
     portEXIT_CRITICAL(&queueMux_);
+    free(detachedFaBuffer);
     if (reply.available()) sendFA03(reply.data, reply.length);
   }
 
@@ -176,6 +196,38 @@ void IDotMatrixBLEServer::loop() {
   }
 }
 
+#if defined(IDOT_NIMBLE_V2_API)
+void IDotMatrixBLEServer::ServerCallbacks::onConnect(
+  NimBLEServer* server, NimBLEConnInfo& connInfo
+) {
+  (void)server;
+  (void)connInfo;
+  owner_.onConnect();
+}
+
+void IDotMatrixBLEServer::ServerCallbacks::onDisconnect(
+  NimBLEServer* server, NimBLEConnInfo& connInfo, int reason
+) {
+  (void)server;
+  (void)connInfo;
+  (void)reason;
+  owner_.onDisconnect();
+}
+
+void IDotMatrixBLEServer::ServerCallbacks::onMTUChange(
+  uint16_t mtu, NimBLEConnInfo& connInfo
+) {
+  (void)connInfo;
+  owner_.onMTUChange(mtu);
+}
+
+void IDotMatrixBLEServer::WriteCallbacks::onWrite(
+  NimBLECharacteristic* characteristic, NimBLEConnInfo& connInfo
+) {
+  (void)connInfo;
+  owner_.enqueueFromCallback(characteristic);
+}
+#else
 void IDotMatrixBLEServer::ServerCallbacks::onConnect(NimBLEServer* server) {
   (void)server;
   owner_.onConnect();
@@ -196,6 +248,7 @@ void IDotMatrixBLEServer::ServerCallbacks::onMTUChange(
 void IDotMatrixBLEServer::WriteCallbacks::onWrite(NimBLECharacteristic* characteristic) {
   owner_.enqueueFromCallback(characteristic);
 }
+#endif
 
 void IDotMatrixBLEServer::onConnect() {
   connected_ = true;
@@ -278,10 +331,11 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
         memcpy(packet.data, value.data(), declaredLength);
         rxHead_ = (rxHead_ + 1) % RX_QUEUE_SIZE;
         ++rxCount_;
-        // A short command never uses the assembler; release any capacity that
-        // may have been prepared from its length prefix.
-        faAssembler_.reset();
+        // A short command never uses the assembler. Detach any prepared heap
+        // capacity while locked, then release it only after interrupts resume.
+        uint8_t* detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
         portEXIT_CRITICAL(&queueMux_);
+        free(detachedFaBuffer);
         return;
       }
 
@@ -291,15 +345,20 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
       reinterpret_cast<const uint8_t*>(value.data()),
       value.length()
     );
-    if (result == IDotMatrixFA02Assembler::Result::Invalid ||
-        result == IDotMatrixFA02Assembler::Result::Busy) {
-      // Malformed or overlapping fragments are discarded; the app can retry.
+    uint8_t* detachedFaBuffer = nullptr;
+    if (result == IDotMatrixFA02Assembler::Result::Invalid) {
+      // append() resets logical state without freeing. Detach heap storage while
+      // locked, then release it after the critical section.
+      detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
+    } else if (result == IDotMatrixFA02Assembler::Result::Busy) {
+      // Overlapping fragments are discarded; the app can retry.
     } else if (result == IDotMatrixFA02Assembler::Result::Accumulating) {
       reassemblyLastWriteAt_ = millis();
       // Do not emit a protocol ACK for an ATT fragment.  The verified standalone
       // emulator only ACKs after the complete logical FA02 packet is assembled.
     }
     portEXIT_CRITICAL(&queueMux_);
+    free(detachedFaBuffer);
     return;
   }
 
@@ -478,6 +537,13 @@ void IDotMatrixBLEServer::startAdvertising() {
   NimBLEAdvertisementData scanResponseData;
   scanResponseData.setCompleteServices(NimBLEUUID(uint16_t(0xAE00)));
   advertising->setScanResponseData(scanResponseData);
+#if defined(IDOT_NIMBLE_V2_API)
+  // NimBLE 2.x no longer enables scan responses implicitly. AE00 discovery
+  // therefore needs to be enabled explicitly.
+  advertising->enableScanResponse(true);
+  advertising_ = advertising->start();
+#else
   advertising->start();
   advertising_ = true;
+#endif
 }

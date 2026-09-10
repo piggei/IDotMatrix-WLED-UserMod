@@ -1,53 +1,58 @@
 # WLED iDotMatrix Usermod
 
-> **Stable 0.8.0:** adds seven standalone light effects, countdown, stopwatch,
-> scoreboard, persistent alarms and programs/schedules, optional active-buzzer
-> support, and five LEVEL plus five FFT Audio/Rhythm visualizers. It retains the
-> validated 0.7.1 media/memory architecture and separates decoder capacity from
-> the ScreenType choices exposed by each build profile.
->
-> **Validation boundary:** the stable 0.8.0 hardware baseline is classic ESP32
-> (`esp32dev`) with I2S LED output. The 16x16 path, 32x32 logical-to-16x16, and
-> no-PSRAM 64x64 logical-to-16x16 compact-cache path are validated there.
-> ESP32-C3 is under investigation after visible RMT LED flicker/spikes were
-> observed with the BLE-capable framework. WROVER/PSRAM, ESP32-S3 and HUB75
-> combinations remain pending hardware tests.
+> **Release 0.8.1 / build 0.8.1-audit-fix1:** final public source release.
+> This is the exact corrective build that completed the final ESP32-C3 hardware
+> qualification after the independent release audit. It keeps the validated
+> ESP32-C3 IDF5/shared-RMT path and the established classic-ESP32/WLED 16.0.1 path.
 
 WLED Usermod for the ESP32 family that emulates an iDotMatrix BLE peripheral
-and lets the official iDotMatrix app drive a WLED 2D matrix. The stable hardware
-baseline is classic ESP32; PSRAM-capable WROVER/ESP32-S3 and HUB75 targets are
-supplied for the next validation phase.
-
-The project implements the peripheral/server side of the protocol: WLED
-advertises the expected BLE services, accepts commands from the app, validates
-bulk transfers, and renders supported content through one WLED effect named
-`iDotMatrix Display`.
+and lets the official iDotMatrix app drive a WLED 2D matrix. WLED remains the
+owner of normal LED output, effects, 2D segments, presets, playlists, brightness,
+HTTP/JSON APIs, Home Assistant, mapping and network realtime protocols; the
+Usermod adds the iDotMatrix-compatible BLE peripheral and renders app content
+through the `iDotMatrix Display` WLED effect.
 
 ## Release status
 
-Version **0.8.0** is the current stable release.
+Release **0.8.1** is the current public release. The released source remains
+identified internally as build **0.8.1-audit-fix1**, because that is the exact
+corrective revision that passed the final hardware qualification. Keeping the
+validated build identifier makes the published source unambiguous without
+changing the public release number.
 
-It keeps the feature behavior validated through `0.8.0-dev.20` while adding the
-final compact12/16x16 memory profile, per-board BLE default name,
-and corrected PlatformIO/user-mod isolation. ESP32-C3 work remains experimental and is not shipped as a stable target.
-The release combines the proven 0.7.1 media/memory architecture with the complete
-feature layer: source-isolated app rendering, seven light effects, timers and
-scoreboard, persistent alarms and schedules, active-buzzer integration, ten
-Audio/Rhythm visualizers, and build-aware resolution settings.
+Two stable build families are intentionally maintained because the proven LED/BLE
+backend differs by MCU:
 
-The earlier `0.8.0-dev.2` through `dev.8` entries were experimental larger-profile
-work that ultimately became stable 0.7.1. They remain in `HISTORY.md` only as
-engineering history.
+| Target | WLED base | Arduino / ESP-IDF | LED/BLE path | NimBLE |
+|---|---|---|---|---|
+| classic ESP32 (`esp32dev`) | WLED 16.0.1 | Arduino 2.0.17 / IDF 4.4.7 in supplied overrides | I2S LED output + BLE | 1.4.3 |
+| ESP32-C3 4 MB | pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a` | Arduino 3.3.8 / IDF 5.5.4 | WLED shared-RMT + BLE | 2.5.1 |
+
+The C3 support decision is based on physical testing, not compilation alone. The
+legacy IDF4 RMT path reproduced visible LED spikes, strongly amplified by BLE.
+The pinned IDF5/shared-RMT path completed BLE advertising/connection, images,
+animated GIFs, WLED effects, WebSocket use, program/schedule operation and
+extended switching stress without reported LED instability or reboot. The final
+`0.8.1-audit-fix1` qualification performed about 50 WLED effect changes, 50
+iDotMatrix content/effect changes, and another 50 WLED effect changes. Its final
+`/json/info` reported 75,296 bytes free heap, a 65,536-byte largest contiguous
+block, `gifProbe=79444`, and a 69,632-byte probe largest block. The IDF5 reset
+reason diagnostic reported `unknown`; no reset was observed during the run.
+
+The C3 WLED base identifies itself as `17.0.0-devV5`, so WLED's Web UI displays
+its normal development-build warning. That warning is expected; 0.8.1 pins the
+exact tested WLED commit rather than an arbitrary nightly.
 
 ### Hardware validation scope
 
 | Configuration | GIF backend | Status |
 |---|---|---|
-| 16x16 logical / 16x16 physical, classic ESP32 | `compact12/cache` | Hardware-validated stable path, including repeated GIF playback and return to WLED |
-| 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | Hardware-validated: clock/text and repeated GIF playback |
-| 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` build | `compact12/cache` | Hardware-validated: static images, clocks, large/100-frame GIFs, repeated GIF replacement, WLED/clock/image transitions, responsive Web UI |
-| 64x64 with PSRAM | `animatedgif12/psram` | Implemented; hardware validation still pending |
-| Native physical 64x64 and HUB75 DMA | depends on build | Not yet release-validated |
+| 16x16 logical / 16x16 physical, classic ESP32 | `compact12/cache` | **supported and hardware-validated** |
+| 16x16 logical / 16x16 physical, ESP32-C3 4 MB | `compact12/cache` | **supported and hardware-validated on IDF5/shared-RMT** |
+| 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | hardware-validated |
+| 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` | `compact12/cache` | hardware-validated |
+| 64x64 with PSRAM | `animatedgif12/psram` | implemented; hardware validation pending |
+| ESP32-S3 / native physical 64x64 / HUB75 | depends on build | development work for the next release line |
 
 ### Compiled resolution and settings choices
 
@@ -57,21 +62,13 @@ firmware. The settings page never offers a profile larger than that capacity:
 | Override / decoder | Available `ScreenType` values | `Rescale` |
 |---|---|---|
 | `platformio_override.ini.example` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
+| `platformio_override.ini.c3` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
 | `platformio_override.ini.32x32` / LZW11 | 16x16, 32x32 | available for tests |
 | `.64x64` or `.64x64-lite` / LZW12 | 16x16, 32x32, 64x64 | available for tests |
 
-For normal use, select the `ScreenType` matching the physical WLED matrix.
-`Rescale` exists only to test a larger logical protocol/decoder profile on a
-smaller panel. It is not a way to retain 32x32 or 64x64 image detail on 16x16.
-
-When firmware with a smaller compiled maximum loads an older configuration,
-the profile is reduced to the nearest supported value: 64x64 becomes 32x32 in
-an LZW11 build, while 32x32 or 64x64 becomes 16x16 in the standard build.
-
-The final classic-ESP32 64x64 validation included more than ten consecutive GIF
-replacements, large animations, clock/date -> GIF, WLED effect -> GIF, static
-image -> GIF, return to normal WLED effects, and live `/json/info` access while
-media was active. No reboot, WLED Error 8/90, or manual Solid reset was required.
+For normal use select the `ScreenType` matching the physical WLED matrix.
+`Rescale` exists for deliberate larger-logical-profile tests, not to preserve
+32x32/64x64 detail on a 16x16 panel.
 
 ## Supported functionality
 
@@ -103,72 +100,71 @@ rather than duplicated in the BLE emulator.
 
 ## Hardware requirements
 
-### Validated classic-ESP32 target
+### Supported 16x16 targets
 
-The release was developed and tested with:
+**Classic ESP32**
 
-- **classic ESP32** compatible with PlatformIO `esp32dev`;
-- at least **4 MB flash**;
-- WLED **16.0.1**;
-- a WLED 2D matrix using a digital LED output supported by the **I2S** backend;
-- Wi-Fi for normal WLED operation;
-- BLE enabled by the ESP32 hardware;
-- USB/serial access for the supplied no-OTA build layout.
+- PlatformIO-compatible `esp32dev`, at least 4 MB flash;
+- WLED 16.0.1 source tree;
+- 16x16 WLED 2D matrix;
+- digital LED output using WLED's **I2S** backend; the Usermod deliberately blocks BLE when a classic-ESP32 digital RMT bus is detected;
+- NimBLE-Arduino 1.4.3 and AnimatedGIF 1.4.7 as pinned by the supplied override.
 
-PSRAM is **not required** for the validated 16x16 path, the 32->16 path, or the
-validated classic-ESP32 64->16 `compact12/cache` path.
+**ESP32-C3**
 
-PSRAM is still recommended for native large physical matrices, full 64x64
-framebuffers, HUB75 DMA, or builds that retain many additional WLED integrations.
-When `IDOT_GIF_LZW12` is compiled and PSRAM is detected at runtime, the Usermod
-selects the full AnimatedGIF direct-playback path automatically.
+- 4 MB ESP32-C3 compatible with WLED `esp32c3dev`;
+- the exact WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a`;
+- 16x16 WLED 2D matrix; the release hardware test used GPIO4;
+- WLED IDF5 `WLED_USE_SHARED_RMT` backend;
+- NimBLE-Arduino 2.5.1 and AnimatedGIF 1.4.7 as pinned by `platformio_override.ini.c3`.
+
+The direct active-buzzer output was not part of the successful C3 hardware qualification. The tested 5 V active buzzer was too weak when driven directly from C3 GPIO; use an external transistor/MOSFET driver if that buzzer hardware is required. This does not affect matrix/BLE support.
+
+PSRAM is not required for either supported 16x16 target.
 
 ### Important ESP32/WLED constraints
 
-The verified build uses WLED's I2S LED backend. **Do not use RMT** for a digital
-LED bus in this BLE build: on the tested classic ESP32/framework combination,
-RMT-HI conflicts with the Bluetooth controller and can cause a reboot loop. The
-Usermod detects this condition and refuses to start BLE.
+The classic ESP32 and C3 must not be treated as interchangeable build targets.
+On classic ESP32 the verified BLE build requires I2S LED output and retains the
+RMT safety block. On C3, legacy IDF4 RMT was experimentally shown to produce
+pixel spikes; the supported C3 profile is therefore compile-time guarded so it
+only builds on ESP-IDF 5 with `WLED_USE_SHARED_RMT` and NimBLE 2.x.
 
-The BLE-enabled firmware also exceeds the normal OTA application slot used by
-the tested 4 MB layout. All supplied iDotMatrix targets therefore use a
-single-application partition table and define `WLED_DISABLE_OTA`. Matching
-4/8/16 MB layouts are supplied for the standard targets, with a 32 MB layout
-used by the Waveshare HUB75 wrapper. This is also an intentional safety policy:
-an official WLED binary does not contain this Usermod and would replace the
-customized firmware. Flash the supplied environments over USB/serial.
+All supplied release profiles use a single-application no-OTA partition layout
+and define `WLED_DISABLE_OTA`. Flash them by USB/serial. An official WLED OTA
+image does not contain this out-of-tree Usermod and would replace the customized
+firmware.
 
-An advanced user may design an OTA-capable build, remove `WLED_DISABLE_OTA`, and
-update over the network, but both OTA slots must fit the customized firmware and
-the uploaded image must contain this Usermod and match the already-installed
-partition layout. OTA variants are not part of the release-validation matrix.
-See [`BUILD_PROFILES.md`](BUILD_PROFILES.md) for the partition and target policy.
-
-The Usermod forces Wi-Fi modem sleep on (`noWifiSleep = false`) because it is
-required for Wi-Fi/Bluetooth coexistence with the pinned ESP-IDF generation.
+The Usermod forces Wi-Fi modem sleep on (`noWifiSleep = false`) while BLE is
+active because Wi-Fi/Bluetooth coexistence requires it on the supported ESP32
+stacks.
 
 ## Software requirements
 
-| Component | Version / setting |
-|---|---|
-| WLED | 16.0.1 |
-| PlatformIO environment | validated baseline: `esp32dev_idotmatrix_16x16`; additional targets in `BUILD_PROFILES.md` |
-| Platform | `espressif32@~6.13.0` |
-| Arduino-ESP32 | 2.0.17 |
-| ESP-IDF | 4.4.7 |
-| BLE stack | `h2zero/NimBLE-Arduino@1.4.3` |
-| GIF library | `bitbank2/AnimatedGIF@1.4.7` |
-| LED driver | I2S |
+| Component | classic ESP32 | ESP32-C3 |
+|---|---|---|
+| WLED | 16.0.1 | commit `d55037f7510541eddc390c8f3d01afc5787aa44a` (`17.0.0-devV5`) |
+| PlatformIO environment | `esp32dev_idotmatrix_16x16` | `esp32c3dev_idotmatrix_16x16` |
+| Arduino-ESP32 | 2.0.17 | 3.3.8 |
+| ESP-IDF | 4.4.7 | 5.5.4 |
+| BLE | NimBLE-Arduino 1.4.3 | NimBLE-Arduino 2.5.1 |
+| GIF | AnimatedGIF 1.4.7 | AnimatedGIF 1.4.7 |
 
-Other WLED/framework/ESP32 variants may work, but they are not part of the
-0.8.0 release-validation scope.
+For the C3 build, Linux/WSL is recommended. The tested WLED IDF5 tree can exceed
+Windows process-command-line limits during PlatformIO compilation even from a
+very short source path. WLED's UI build also requires **Node.js 20 or newer**.
+
+`library.json` intentionally does not impose a single NimBLE version. The two
+supported build families require different major APIs, and the supplied
+PlatformIO profiles are authoritative: classic ESP32 pins NimBLE-Arduino 1.4.3
+while ESP32-C3 pins 2.5.1.
 
 ## GIF decoder profiles and memory model
 
 The maximum GIF profile is selected at build time because AnimatedGIF 1.4.7
 stores its LZW tables inside the decoder object:
 
-- default: **10-bit / 16x16** low-RAM decoder;
+- standard 16x16 profile: **12-bit / compact12/cache**, UI capped by `IDOT_SCREEN_MAX_DIM=16`;
 - `IDOT_GIF_LZW11`: **11-bit / 32x32** compact decoder;
 - `IDOT_GIF_LZW12`: **12-bit / 64x64** support.
 
@@ -201,111 +197,85 @@ documented in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ### 1. Place the Usermod beside WLED
 
-Clone or extract this repository beside the WLED source directory. For example:
+The directory name is significant because the supplied overrides use a relative
+symlink:
 
 ```text
-D:\WLED source\WLED-16.0.1
-D:\WLED source\wled-usermod-idotmatrix
+<workdir>/WLED/
+<workdir>/wled-usermod-idotmatrix/
 ```
 
-The directory name `wled-usermod-idotmatrix` is assumed by the supplied example
-overrides. If you use another directory name, update their paths accordingly.
+### 2. Choose the matching release profile
 
-### 2. Choose a media profile and hardware target
+- classic ESP32 16x16: `platformio_override.ini.example` with WLED 16.0.1;
+- ESP32-C3 16x16: `platformio_override.ini.c3` with the pinned WLED IDF5 commit;
+- larger logical classic/S3/HUB75 profiles remain in the repository for the
+  previously documented validation/development cases and are **not** newly
+  promoted by 0.8.1.
 
-The override file selects the **media/decoder profile**:
+Every supplied override sets `custom_usermods` to only
+`symlink://../wled-usermod-idotmatrix`; do not inherit WLED's default Usermod
+list implicitly.
 
-- `platformio_override.ini.example` — stable 16x16 UI with compact12/cache decoder;
-- `platformio_override.ini.32x32` — maximum 32x32 / compact LZW11;
-- `platformio_override.ini.64x64` — maximum 64x64 / complete LZW12, normal WLED feature set;
-- `platformio_override.ini.64x64-lite` — complete LZW12 with selected optional WLED integrations removed to preserve classic-ESP32 internal RAM; the 4 MB target is the **hardware-validated no-PSRAM 64->16 configuration**;
-- `platformio_override.ini.hub75` — wrappers around WLED 16.0.1's native HUB75 environments, with complete LZW12 support; experimental in this project.
+### 2a. ESP32-C3: pinned WLED source
 
-The 16x16, 32x32, and 64x64 files expose the same established classic/WROVER/S3
-hardware target set. ESP32-C3 is intentionally not shipped as a stable target in
-0.8.0 while its RMT output behavior is under investigation.
+A reproducible C3 checkout is:
 
-- `_16x16` for `platformio_override.ini.example`;
-- `_32x32` for `platformio_override.ini.32x32`;
-- `_64x64` for `platformio_override.ini.64x64`.
+```bash
+git clone https://github.com/wled/WLED.git WLED-idot-c3
+cd WLED-idot-c3
+git checkout d55037f7510541eddc390c8f3d01afc5787aa44a
+cp ../wled-usermod-idotmatrix/platformio_override.ini.c3 platformio_override.ini
+```
 
-For example, the classic 8 MB target is respectively
-`esp32dev_8M_idotmatrix_16x16`, `esp32dev_8M_idotmatrix_32x32`, or
-`esp32dev_8M_idotmatrix_64x64`. The unique names intentionally isolate
-PlatformIO build/libdeps caches between decoder profiles. `64x64-lite` uses the
-`_64x64_lite` suffix.
+Use Node.js 20+ and PlatformIO. Under WSL/Linux:
 
-`64x64-lite` intentionally contains only the three classic-ESP32 targets. The
-HUB75 file instead wraps board/pinout-specific WLED environments; do not select
-one solely by flash size. See [`BUILD_PROFILES.md`](BUILD_PROFILES.md) for the
-complete target/HUB75 matrix, partition layout, PSRAM notes, and validation status.
+```bash
+pio run -e esp32c3dev_idotmatrix_16x16 -t clean
+pio run -e esp32c3dev_idotmatrix_16x16
+```
 
-All supplied iDotMatrix profiles deliberately avoid inheriting the base WLED
-`custom_usermods` list and add only `symlink://../wled-usermod-idotmatrix`.
-This prevents AudioReactive or another default Usermod from being pulled in
-implicitly and consuming the contiguous heap needed by NimBLE/media.
-
-Copy the appropriate file to WLED's `platformio_override.ini`, then build the
-environment matching the actual controller.
-
-Do **not** define `IDOT_GIF_LZW11` and `IDOT_GIF_LZW12` together.
-Do **not** add `esp-nimble-cpp` or the registry package `ESP32 BLE Arduino`.
+Do not substitute WLED 16.0.1 or a random nightly for the C3 release build. The
+source intentionally fails compilation if IDF5/shared-RMT/NimBLE 2.x are absent.
 
 ### 3. Clean and build
 
-From the WLED source directory, for the validated classic 4 MB baseline:
+Classic ESP32 / WLED 16.0.1:
 
-```powershell
+```bash
+cp ../wled-usermod-idotmatrix/platformio_override.ini.example platformio_override.ini
 pio run -e esp32dev_idotmatrix_16x16 -t clean
 pio run -e esp32dev_idotmatrix_16x16
 ```
 
-For example, after copying `platformio_override.ini.64x64`, an ESP32-S3 with
-16 MB flash and OPI PSRAM is built with:
-
-```powershell
-pio run -e esp32s3dev_16MB_opi_idotmatrix_64x64 -t clean
-pio run -e esp32s3dev_16MB_opi_idotmatrix_64x64
-```
-
-The AnimatedGIF patch banner should match the selected build profile, for
-example:
-
-```text
-[iDotMatrix] AnimatedGIF 1.4.7 profile: 12-bit LZW / max 64x64 / dict=4096 / filebuf=1024
-```
+C3 uses the commands in the previous section.
 
 ### 4. Upload
 
-```powershell
+```bash
+# classic ESP32
 pio run -e esp32dev_idotmatrix_16x16 -t upload
+
+# ESP32-C3
+pio run -e esp32c3dev_idotmatrix_16x16 -t upload
 ```
 
-Optional serial monitor:
-
-```powershell
-pio device monitor -e esp32dev_idotmatrix_16x16
-```
+With WSL2, attach the USB device to WSL using `usbipd-win` before upload. The
+one-time `usbipd bind` persists; `usbipd attach --wsl --busid <BUSID>` normally
+must be repeated after reconnect/reboot. PlatformIO can then use `/dev/ttyACM*`.
 
 ### 5. Configure WLED
 
-For the validated physical 16x16 setup:
+For the supported 16x16 setups:
 
-1. configure the panel as a **16x16 2D matrix**;
-2. on the stable classic ESP32 baseline, use an **I2S** digital LED output, not RMT;
-3. configure Wi-Fi, timezone, and NTP if you want the clock to be correct;
-4. choose an available Usermod `screenType`, normally matching the physical
-   matrix; the compiled override determines whether 16x16, 32x32, and/or 64x64
-   are offered. `ScreenType` does not change the compiled GIF decoder, so use the
-   standard 16x16 override for the validated compact12/cache path;
-5. enable `rescale` only for a deliberate profile/matrix test;
-6. optionally edit the `deviceName` suffix shown after the fixed `IDM-` prefix;
-7. reboot and reconnect the iDotMatrix app after changing the BLE device name or logical profile;
-8. save the Usermod configuration before pressing **Test buzzer**.
-
-For the validated classic-ESP32 64x64 logical test, use
-`platformio_override.ini.64x64-lite`, set `screenType=64x64`, enable
-`rescale=true`, and keep the physical WLED matrix at 16x16.
+1. configure a **16x16 2D matrix**;
+2. classic ESP32: select an **I2S** digital LED output, not RMT;
+3. C3: use the normal WLED C3 digital output on the pinned shared-RMT stack;
+4. configure Wi-Fi/timezone/NTP as required;
+5. keep `screenType=16x16`; `Rescale` is hidden in the supported 16x16 profiles;
+6. optionally change the BLE name suffix;
+7. reboot/reconnect the iDotMatrix app after BLE-name/profile changes;
+8. buzzer support is optional and is not required for target validation.
 
 ### 6. Pair from the iDotMatrix app
 
@@ -333,7 +303,8 @@ BLE connected
 profile=64x64
 canvas=16x16
 name=IDM-123456
-build=0.8.0
+release=0.8.1
+build=0.8.1-audit-fix1
 gifDecoder=compact12/cache
 gifDecoderBytes=16128
 gifProbe=... largest=... reserve=10240
@@ -342,6 +313,18 @@ gifCacheWaits=... low=... guard=9216
 reset=poweron
 heap=... min=... largest=...
 content=gif
+```
+
+For the supported C3 profile, the same section additionally reports:
+
+```text
+BLE connected
+RMT+BLE=ESP32-C3 shared-RMT
+framework=WLED IDF5/shared-RMT
+wledBase=d55037f
+nimble=2.x API
+release=0.8.1
+build=0.8.1-audit-fix1
 ```
 
 `gifCacheWaits` is diagnostic, not automatically an error. On the no-PSRAM
@@ -365,9 +348,10 @@ brightness elsewhere in WLED does not necessarily move the app slider.
 
 ### Clock source
 
-The app time-synchronization packet is acknowledged for compatibility, but WLED
-remains the clock authority. Configure WLED NTP, timezone, and daylight-saving
-settings normally.
+WLED remains the primary clock authority whenever its local time is valid.
+Configure WLED NTP, timezone, and daylight-saving settings normally. The last
+valid app time-synchronization packet is retained and used as an offline fallback
+while WLED local time is not yet valid.
 
 ### Display ownership
 
@@ -394,7 +378,7 @@ more flash writes than the PSRAM/direct backend. The cache has a 512 KiB limit.
 
 The automatic PSRAM direct backend is implemented but has not yet been tested on
 the pending PSRAM hardware. Native physical 64x64 output and HUB75 DMA are also
-outside the 0.8.0 release-validation matrix.
+outside the 0.8.1 release-validation matrix.
 
 ## Repository layout
 
@@ -422,12 +406,13 @@ Further documentation:
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — component boundaries, current memory model, and RAM-engineering history;
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
-- [`TODO.md`](TODO.md) — roadmap after 0.8.0;
-- [`RELEASE_NOTES_0.8.0.md`](RELEASE_NOTES_0.8.0.md) — stable 0.8.0 summary, validation scope, and upgrade notes;
-- [`RELEASE_NOTES_0.7.1.md`](RELEASE_NOTES_0.7.1.md) — previous stable media/memory milestone.
+- [`TODO.md`](TODO.md) — roadmap after 0.8.1;
+- [`RELEASE_NOTES_0.8.1.md`](RELEASE_NOTES_0.8.1.md) — Release 0.8.1 notes;
+- [`AUDIT_REMEDIATION_0.8.1.md`](AUDIT_REMEDIATION_0.8.1.md) — corrective audit pass and deferred items;
+- [`TEST_REPORT_0.8.1-audit-fix1.md`](TEST_REPORT_0.8.1-audit-fix1.md) — host regression and sanitizer results for this build.
 
-The individual `RELEASE_NOTES_0.8.0-dev.*.md` files are retained as engineering
-history; normal users should follow the stable 0.8.0 notes and the current README.
+Older release/development history is consolidated in `HISTORY.md`; this source
+archive does not rely on release-note files that are not actually packaged.
 
 ## Related projects
 
@@ -445,7 +430,7 @@ WLED behave as the BLE peripheral expected by the official app.
 
 ## Optional active buzzer
 
-Stable 0.8.0 provides an optional active buzzer. Choose the buzzer GPIO in
+Version 0.8.1 retains the optional active-buzzer support from 0.8.0. Choose the buzzer GPIO in
 **Config → Usermods → iDotMatrix** and set `buzzerActiveHigh` to match the module
 polarity. Leaving the pin unassigned disables buzzer hardware. After saving,
 **Test buzzer** emits one finite three-short-beep trill so wiring and polarity

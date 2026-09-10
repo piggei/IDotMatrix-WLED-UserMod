@@ -18,6 +18,11 @@ int main() {
   assert(supportsScreenType(0x03) == (EXPECTED_SCREEN_MAX_DIM >= 32));
   assert(supportsScreenType(0x04) == (EXPECTED_SCREEN_MAX_DIM >= 64));
   assert(supportsRescale() == (EXPECTED_SCREEN_MAX_DIM > 16));
+  assert(!shouldBlockBleForRmt(false, false, false));
+  assert(shouldBlockBleForRmt(true, false, false));
+  assert(shouldBlockBleForRmt(true, false, true));
+  assert(shouldBlockBleForRmt(true, true, false));
+  assert(!shouldBlockBleForRmt(true, true, true));
   assert(normalizeScreenType(0xFF) == 0x01);
   assert(normalizeScreenType(0x03) == (EXPECTED_SCREEN_MAX_DIM >= 32 ? 0x03 : 0x01));
   assert(normalizeScreenType(0x04) ==

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static regression checks for the shipped WLED v16.0.1 build profiles."""
+"""Static regression checks for the shipped 0.8.1 build profiles."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PLATFORM = "espressif32@~6.13.0"
 USERMOD = "symlink://../wled-usermod-idotmatrix"
 NIMBLE = "h2zero/NimBLE-Arduino@1.4.3"
+NIMBLE_V2 = "h2zero/NimBLE-Arduino@2.5.1"
 GIF = "bitbank2/AnimatedGIF@1.4.7"
 
 NORMAL_TARGETS = {
@@ -100,6 +101,8 @@ def check_normal_profile(name: str, profile_define: str | None) -> None:
         flags = value(parser, section, "build_flags")
         assert f"${{env:{base}.build_flags}}" in flags
         assert "-D WLED_DISABLE_OTA" in flags
+        assert "IDOT_EXPERIMENTAL_C3_RMT_BLE" not in flags
+        assert "IDOT_C3_WLED_IDF5" not in flags
         if name == "platformio_override.ini.example":
             assert "-D IDOT_GIF_LZW12" in flags
             assert "-D IDOT_SCREEN_MAX_DIM=16" in flags
@@ -120,6 +123,63 @@ def check_normal_profile(name: str, profile_define: str | None) -> None:
         assert "custom_usermods}" not in usermods
         assert usermods == USERMOD
 
+
+def check_c3_profile() -> None:
+    parser = read_ini("platformio_override.ini.c3")
+    section = "env:esp32c3dev_idotmatrix_16x16"
+    sections = {name for name in parser.sections() if name.startswith("env:")}
+    assert sections == {section}
+    assert value(parser, section, "extends") == "env:esp32c3dev"
+    # The supported C3 profile must inherit the pinned WLED IDF5/shared-RMT stack.
+    assert not parser.has_option(section, "platform")
+    assert not parser.has_option(section, "platform_packages")
+    assert value(parser, section, "board_build.partitions") == partition_path("4MB")
+
+    flags = value(parser, section, "build_flags")
+    assert "${env:esp32c3dev.build_flags}" in flags
+    assert "-D WLED_DISABLE_OTA" in flags
+    assert "-D IDOT_GIF_LZW12" in flags
+    assert "-D IDOT_SCREEN_MAX_DIM=16" in flags
+    assert "-D IDOT_C3_WLED_IDF5" in flags
+    assert "IDOT_EXPERIMENTAL_C3_RMT_BLE" not in flags
+    # ESP-NOW is intentionally not disabled on the pinned WLED base: its module
+    # validator rejects an inherited wled-espnow dependency that links no symbols.
+    assert "WLED_DISABLE_ESPNOW" not in flags
+
+    deps = value(parser, section, "lib_deps")
+    assert "${env:esp32c3dev.lib_deps}" in deps
+    assert NIMBLE_V2 in deps
+    assert NIMBLE not in deps
+    assert GIF in deps
+
+    usermods = value(parser, section, "custom_usermods")
+    assert usermods == USERMOD
+
+
+def check_nimble_api_bridge() -> None:
+    header = (ROOT / "IDotMatrixBLEServer.h").read_text(encoding="utf-8")
+    source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
+    usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
+
+    assert "__has_include(<NimBLECppVersion.h>)" in header
+    assert "NIMBLE_CPP_VERSION_MAJOR >= 2" in header
+    assert "IDOT_NIMBLE_V2_API" in header
+    assert "NimBLEConnInfo& connInfo" in header
+    assert "ble_gap_conn_desc* desc" in header
+    assert "server_->setCallbacks(&serverCallbacks_, false);" in source
+    assert "if (!server_->start()) return false;" in source
+    assert "advertising->enableScanResponse(true);" in source
+    assert "advertising_ = advertising->start();" in source
+    assert "0.8.1 ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
+    assert "0.8.1 ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.8.1"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.8.1-audit-fix1"' in usermod
+    assert "RMT+BLE=ESP32-C3 shared-RMT" in usermod
+
+    library = (ROOT / "library.json").read_text(encoding="utf-8")
+    assert '"version": "0.8.1"' in library
+    assert '"h2zero/NimBLE-Arduino"' not in library
+    # NimBLE is target-dependent and pinned by each official PlatformIO profile.
 
 def check_lite_profile() -> None:
     parser = read_ini("platformio_override.ini.64x64-lite")
@@ -146,6 +206,8 @@ def check_lite_profile() -> None:
         flags = value(parser, section, "build_flags")
         assert "-D WLED_DISABLE_OTA" in flags
         assert "-D IDOT_GIF_LZW12" in flags
+        assert "IDOT_EXPERIMENTAL_C3_RMT_BLE" not in flags
+        assert "IDOT_C3_WLED_IDF5" not in flags
         for define in disabled:
             assert f"-D {define}" in flags
         usermods = value(parser, section, "custom_usermods")
@@ -169,6 +231,8 @@ def check_hub75_profile() -> None:
         flags = value(parser, section, "build_flags")
         assert f"${{env:{upstream}.build_flags}}" in flags
         assert "-D WLED_DISABLE_OTA" in flags
+        assert "IDOT_EXPERIMENTAL_C3_RMT_BLE" not in flags
+        assert "IDOT_C3_WLED_IDF5" not in flags
         assert "-D IDOT_GIF_LZW12" in flags
         assert "IDOT_GIF_LZW11" not in flags
         deps = value(parser, section, "lib_deps")
@@ -188,6 +252,7 @@ def check_profile_environment_isolation() -> None:
         "platformio_override.ini.64x64",
         "platformio_override.ini.64x64-lite",
         "platformio_override.ini.hub75",
+        "platformio_override.ini.c3",
     ]
     owners: dict[str, str] = {}
     for filename in files:
@@ -240,6 +305,8 @@ def main() -> None:
     check_normal_profile("platformio_override.ini.64x64", "IDOT_GIF_LZW12")
     check_lite_profile()
     check_hub75_profile()
+    check_c3_profile()
+    check_nimble_api_bridge()
     check_profile_environment_isolation()
     check_partitions()
     print("PlatformIO profile tests passed.")

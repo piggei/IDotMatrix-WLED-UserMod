@@ -1,6 +1,6 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by the stable 0.8.0
+This document describes the protocol subset implemented by the stable 0.8.1
 WLED iDotMatrix Usermod. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
 stopwatch, scoreboard, persistent alarms and programs/schedules, active-buzzer
@@ -69,9 +69,10 @@ Command:
 
 Response: `05 00 01 80 01`
 
-The current implementation acknowledges but does not apply the time fields. This is an
-intentional WLED integration decision: WLED `localTime`, NTP, timezone, and DST
-configuration remain the sole clock authority.
+WLED remains the primary clock authority whenever its `localTime` is valid, so
+normal NTP, timezone, and DST configuration continues to apply. The last valid
+application time synchronization is also retained and used as an offline fallback
+while WLED local time is not yet valid.
 
 ## Screen power
 
@@ -111,7 +112,7 @@ brightness-state message is known, so WLED changes do not update the app slider.
 
 ACK: `05 00 02 02 01`
 
-**WLED mapping (0.8.0):** fill the Usermod RGB canvas and select the
+**WLED mapping:** fill the Usermod RGB canvas and select the
 registered `iDotMatrix Display` effect. The command no longer rewrites WLED's
 primary colour or exposes native WLED `Solid`; this deliberately keeps app state
 and WLED state separate because the official app has no confirmed reverse state
@@ -183,7 +184,8 @@ valid virtual XY state. A valid pixel packet also selects the effect. No
 physical serpentine mapping is duplicated in this module.
 
 Complete short packets use the 64-byte queue. Larger logical FA02 packets are
-reassembled in the dedicated 4112-byte slot before protocol dispatch.
+reassembled with 4112 bytes of permanent inline storage and temporary dynamic
+storage up to the 8192-byte logical-packet maximum before protocol dispatch.
 
 ## Clock
 
@@ -292,7 +294,7 @@ grouping, and serpentine wiring.
 
 `screenType` is also bounded by the decoder profile compiled into the firmware:
 
-- LZW10/default accepts only protocol profile `0x01` (16x16);
+- LZW10 profile accepts only protocol profile `0x01` (16x16);
 - LZW11 accepts `0x01` and `0x03` (16x16/32x32);
 - LZW12 accepts `0x01`, `0x03` and `0x04` (16x16/32x32/64x64).
 
@@ -337,8 +339,10 @@ reference also uses it after CRC or storage failure.
 logs received bytes. Version 0.6.3-dev.1 incorrectly assigned bulk to AE01 and
 therefore observed no chunks; 0.6.3-dev.2 follows the source implementation.
 
-One dedicated FA02 assembler accepts an observed 4096-byte payload chunk plus
-the 16-byte header. The callback only performs bounded copies; logical-packet
+One dedicated FA02 assembler provides **4112 bytes of permanent inline storage**
+for the observed 4096-byte payload chunk plus 16-byte header. The maximum logical
+FA02 packet is **8192 bytes**; packets above 4112 bytes use temporary dynamic
+reassembly storage. The callback only performs bounded copies; logical-packet
 dispatch, CRC32, and notification happen in the normal Usermod loop. TEXT is
 bounded to 4096 payload bytes; RAW is bounded to the 12288 bytes required by a
 64x64 RGB frame. GIF is streamed to LittleFS and capped at 2 MiB here.
@@ -368,11 +372,14 @@ Packet length 140, size 131, and the PNG signature at offset 9 imply:
 | 5 | 4 | PNG byte length, little-endian |
 | 9 | remaining | PNG beginning `89 50 4E 47...` |
 
-The current implementation replies `05 00 00 00 03`. No outer CRC was observed; PNG/zlib
-structure is validated. This layout is a new inference from the WLED trace,
-not yet a confirmed BUILD 80 or original-device fact. The decoder accepts
-non-interlaced 8-bit RGB/RGBA and exact logical-profile dimensions. The complete
-compact PNG envelope must fit the 4112-byte FA02 slot.
+The current implementation replies `05 00 00 00 03`. No outer CRC was observed.
+The decoder validates the PNG structure required by its supported subset and
+validates/decompresses the embedded zlib payload; it is not a general-purpose PNG
+validator and does not claim full chunk-CRC validation. This layout is a new
+inference from the WLED trace, not yet a confirmed BUILD 80 or original-device
+fact. The decoder accepts non-interlaced 8-bit RGB/RGBA and exact logical-profile
+dimensions. The complete compact PNG envelope must fit the **8192-byte maximum
+logical FA02 packet size**; 4112 bytes is only the permanent inline capacity.
 
 ## GIF payload
 
@@ -381,13 +388,15 @@ compact PNG envelope must fit the 4112-byte FA02 slot.
 WLED integration writes chunks to an RX file and starts playback only after a
 valid completion and deferred RX-to-PLAY promotion.
 
-Stable 0.8.0 accepts GIF dimensions up to the active logical profile and the
-compiled decoder limit. The default build supports 16x16, `IDOT_GIF_LZW11`
-supports 32x32, and `IDOT_GIF_LZW12` supports 64x64 with the complete legal
-4096-code LZW12 space. On ESP32 with PSRAM the 64x64 build selects full
-AnimatedGIF/direct playback; on classic ESP32 without PSRAM it selects the
-compact12/LittleFS frame-cache backend. Backend choice is a WLED integration
-and memory-management detail, not a wire-protocol difference.
+Release 0.8.1 accepts GIF dimensions up to both the active logical screen profile
+and the compiled decoder capability. The supported 16x16 classic/C3 profiles
+compile `IDOT_GIF_LZW12` but set `IDOT_SCREEN_MAX_DIM=16`, so only 16x16 is
+advertised/accepted there while the complete legal 4096-code LZW12 space remains
+available to the decoder. The supplied 32x32 test profile uses `IDOT_GIF_LZW11`;
+the 64x64 profiles use `IDOT_GIF_LZW12`. With PSRAM, LZW12 can use full
+AnimatedGIF/direct playback; without PSRAM it uses the compact12/LittleFS
+frame-cache backend. Backend choice is a WLED integration and memory-management
+detail, not a wire-protocol difference.
 
 ## RAW RGB image payload
 
@@ -440,7 +449,7 @@ background, speed, movement, and effects are rendered locally. SimSun and
 SimHei require no WLED font library because the official app rasterizes them
 before transmission.
 
-## Audio / Rhythm stream (0.8.0)
+## Audio / Rhythm stream
 
 The official app emits two families directly on FA02:
 
@@ -461,13 +470,13 @@ app-originated visual mode, and renders into the existing RGB canvas. Selecting
 a normal WLED effect releases audio state; a later audio frame reclaims the
 display. No audio feedback is sent from WLED to the app.
 
-## Unsupported in 0.8.0
+## Unsupported in 0.8.1
 
 - unconfirmed TEXT marker aliases `0x03` and `0x06`;
 - interlaced PNG, other PNG colour types, and PNG dimensions differing from
   the logical profile;
 - GIF dimensions larger than the active logical profile or larger than the
-  maximum compiled GIF decoder profile (16x16 default, 32x32 LZW11, 64x64 LZW12);
+  active logical screen profile or maximum compiled GIF decoder capability;
 - device-level rotation, energy-saving, and reset commands, intentionally left
   to WLED's own configuration and control paths.
 
@@ -475,11 +484,11 @@ The unconfirmed TEXT aliases remain documented for protocol archaeology, but
 are not planned for implementation unless a real app capture requires them.
 Device-level display policy is intentionally not duplicated by the emulator.
 
-### Timer rendering note (0.8.0)
+### Timer rendering note
 
 The countdown (`08 80`) and stopwatch (`09 80`) wire formats are unchanged. The WLED renderer now preserves millisecond state internally so the BUILD80 timer-hand phase can be reproduced above the MM:SS display; this is a rendering change only, not a protocol change.
 
 
-## Alarm / program sound mapping (0.8.0)
+## Alarm / program sound mapping
 
 The wire protocol is unchanged. Alarm packets retain their per-alarm buzzer request. Program global flags retain bit 1 as the sound request. The WLED mapping intentionally differentiates them: alarms repeat the non-blocking trill for their configured duration, while a program activity emits three groups of three short trills once when the activity becomes active and does not sound continuously for the full time window.

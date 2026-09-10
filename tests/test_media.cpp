@@ -53,7 +53,76 @@ static std::vector<uint8_t> makeRgb16Png() {
   return png;
 }
 
+
+static void advanceGifOpen(IDotMatrixMedia& media, uint32_t now) {
+  media.loop(now);  // promote
+  media.loop(now);  // staging delay
+  media.loop(now);  // open/cache construction
+  for (int i = 0; i < 8 && !media.gifActive(); ++i) media.loop(now);
+}
+
+static void testGifPromotionFailures() {
+  const uint8_t gif[] = {'G', 'I', 'F', '8', '9', 'a'};
+
+  // Direct rename succeeds.
+  {
+    WLED_FS.clear();
+    IDotMatrixRenderer renderer;
+    assert(renderer.begin(0x01));
+    IDotMatrixMedia media(renderer);
+    assert(media.beginGif(sizeof(gif)));
+    assert(media.writeGif(0, gif, sizeof(gif)));
+    assert(media.completeGif(true));
+    advanceGifOpen(media, 100);
+    assert(media.gifActive());
+    assert(media.lastError() == IDotMatrixMedia::Error::None);
+  }
+
+  // Direct rename fails, streamed-copy fallback succeeds.
+  {
+    WLED_FS.clear();
+    IDotMatrixRenderer renderer;
+    assert(renderer.begin(0x01));
+    IDotMatrixMedia media(renderer);
+    assert(media.beginGif(sizeof(gif)));
+    assert(media.writeGif(0, gif, sizeof(gif)));
+    assert(media.completeGif(true));
+    WLED_FS.failRename("/idot_rx0.tmp", "/idot_play.gif");
+    advanceGifOpen(media, 200);
+    assert(media.gifActive());
+    assert(media.lastError() == IDotMatrixMedia::Error::None);
+  }
+
+  // Both promotion mechanisms fail.  The failure must be observable and a
+  // following valid GIF must still be able to stage and play.
+  {
+    WLED_FS.clear();
+    IDotMatrixRenderer renderer;
+    assert(renderer.begin(0x01));
+    IDotMatrixMedia media(renderer);
+    assert(media.beginGif(sizeof(gif)));
+    assert(media.writeGif(0, gif, sizeof(gif)));
+    assert(media.completeGif(true));
+    WLED_FS.failRename("/idot_rx0.tmp", "/idot_play.gif");
+    WLED_FS.failOpenWrite("/idot_play.gif");
+    media.loop(300);
+    assert(!media.gifActive());
+    assert(media.lastError() == IDotMatrixMedia::Error::GifCacheIo);
+
+    WLED_FS.resetFailures();
+    assert(media.beginGif(sizeof(gif)));
+    assert(media.writeGif(0, gif, sizeof(gif)));
+    assert(media.completeGif(true));
+    advanceGifOpen(media, 301);
+    assert(media.gifActive());
+    assert(media.lastError() == IDotMatrixMedia::Error::None);
+  }
+}
+
 int main() {
+  testGifPromotionFailures();
+  WLED_FS.clear();
+
   IDotMatrixRenderer renderer;
   assert(renderer.begin(0x01));
   IDotMatrixMedia media(renderer);

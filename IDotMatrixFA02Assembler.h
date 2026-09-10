@@ -29,6 +29,10 @@ public:
   bool ensureCapacity(uint16_t declaredLength);
   Result append(const uint8_t* data, size_t length);
   void reset();
+  // Reset logical state while detaching any heap buffer for deferred release.
+  // Callers may use this while holding a critical-section lock, then free the
+  // returned pointer only after interrupts are enabled again.
+  uint8_t* resetAndDetachDynamic();
 
   bool complete() const { return complete_; }
   const uint8_t* data() const { return activeBuffer(); }
@@ -39,6 +43,7 @@ public:
 private:
   uint8_t* activeBuffer() { return dynamicPacket_ != nullptr ? dynamicPacket_ : inlinePacket_; }
   const uint8_t* activeBuffer() const { return dynamicPacket_ != nullptr ? dynamicPacket_ : inlinePacket_; }
+  void resetState();
   void releaseDynamic();
 
   uint8_t inlinePacket_[INLINE_PACKET_SIZE]{};

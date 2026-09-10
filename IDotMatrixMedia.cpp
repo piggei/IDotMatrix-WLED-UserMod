@@ -311,6 +311,15 @@ bool IDotMatrixMedia::promoteGif() {
     target.close();
     if (promoted) WLED_FS.remove(rx);
   }
+  if (!promoted) {
+    // Promotion failed after both the direct rename and streamed-copy fallback.
+    // Publish a terminal media error so the WLED adapter can execute its GIF
+    // recovery path instead of leaving the transfer in an apparently healthy
+    // pending state.  The failed RX file is discarded only after every
+    // promotion strategy has been attempted.
+    lastError_ = Error::GifCacheIo;
+    WLED_FS.remove(rx);
+  }
   pendingSlot_ = -1;
   pendingGifBytes_ = 0;
   return promoted;

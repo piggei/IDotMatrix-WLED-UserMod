@@ -1,69 +1,40 @@
-# Roadmap after 0.8.0
+# Roadmap after Release 0.8.1
 
-Version 0.8.0 freezes the current stable feature milestone on the validated
-classic-ESP32 platform. It combines the 0.7.1 media/memory architecture with
-light effects, timers, scoreboard, alarms, programs/schedules, active-buzzer
-support, Audio/Rhythm visualizers, and build-aware resolution settings.
+## 0.8.1 audit-remediation status
 
-The next development cycle is primarily hardware/platform validation: native
-64x64 output, PSRAM, ESP32-S3, and HUB75 DMA.
+Public release value: **0.8.1**  
+Released internal build: **0.8.1-audit-fix1**
 
-## Stability and release engineering
+Completed in the released corrective build:
 
-- [ ] Run a 24-hour Wi-Fi + BLE + repeated-content soak test.
-- [ ] Add CI for the complete host test suite.
-- [ ] Add pinned PlatformIO compile jobs for every supplied override.
-- [ ] Test Wi-Fi loss/reconnect and the WLED recovery AP while BLE remains enabled.
-- [x] Run the complete packaging regression on the final 0.8.0 source archive.
+- [x] AUDIT-001 GIF promotion failure/recovery fix;
+- [x] AUDIT-002 transactional schedule/program replacement;
+- [x] boot-time stale/corrupt schedule metadata repair;
+- [x] GIF promotion failure-injection tests;
+- [x] behavioural `IDotMatrixAutomation` host regression suite;
+- [x] ASan/UBSan host test pass;
+- [x] release/build identifier separation;
+- [x] documentation consistency pass for LZW12, FA02 capacity, Usermod inheritance, time fallback, PNG wording and 0.8.1 references;
+- [x] final ESP32-C3 hardware smoke/stress test of build `0.8.1-audit-fix1`;
+- [x] package public Release 0.8.1 from the exact hardware-qualified build.
 
-## Larger profiles and platform validation
+The audit's lower-priority architectural hardening items are deliberately deferred
+to 0.9 unless a hardware test proves they are required: renderer failure-atomic
+reinitialization, wider FA02 synchronization refactoring, additional RX-drop
+diagnostics, and broader Preferences write-result plumbing. No wire-protocol or
+user-facing semantic change is planned for those items.
 
-- [x] Add build-time 10-bit/16x16, 11-bit/32x32, and 12-bit/64x64 decoder profiles.
-- [x] Remove the duplicate GIF animation framebuffer.
-- [x] Prefer PSRAM automatically for renderer/RAW/decoder allocations when present.
-- [x] Hardware-validate the compact 11-bit/32x32 decoder on classic ESP32 without PSRAM.
-- [x] Implement low-memory Rescale storage for a larger logical profile and smaller physical canvas.
-- [x] Implement and hardware-validate the safe no-PSRAM 64x64 compact12/LittleFS frame-cache path.
-- [x] Validate repeated GIF replacement, black staging, primary-colour restoration, and Web UI responsiveness.
-- [ ] Test the automatic 64x64 PSRAM/direct backend on the incoming PSRAM hardware.
-- [ ] Test a native physical 64x64 RGB canvas.
-- [ ] Test HUB75 DMA together with BLE/media and document the additional internal-RAM budget.
-- [ ] Re-test the 64x64 profile with the normal non-lite WLED feature set on classic ESP32 and record the margin.
+## 0.9 priorities
 
-## Rendering validation
+- bring up and hardware-validate ESP32-S3 targets, including PSRAM behavior;
+- evaluate native 64x64 and HUB75 output paths without conflating them with the BLE protocol layer;
+- implement the next iDotMatrix behavior changes only after the user-facing requirements are defined;
+- revisit build-profile consolidation once C3/S3 can share a proven WLED IDF5 base;
+- continue long-run memory, BLE reconnect, GIF replacement and Web UI stress testing;
+- evaluate whether the pinned C3 WLED development commit can be replaced by a future stable WLED release without regressing shared-RMT behavior.
 
-- [ ] Hardware-validate marker `0x05` 16x32 glyphs across larger profiles.
-- [ ] Verify every text motion, colour mode, and visual effect against the app.
-- [ ] Verify all eight clock styles, 12/24-hour mode, colour, and date cycling on native larger panels.
-- [ ] Decide whether app time sync should optionally seed WLED when NTP is absent.
+## Deferred cleanup
 
-## Media
-
-- [ ] Capture and document more compact PNG envelopes from multiple app paths.
-- [ ] Add captured-packet regression fixtures for RAW, PNG, GIF, and TEXT.
-- [ ] Test malformed/corrupt GIF files and filesystem-full behavior on hardware.
-- [ ] Measure LittleFS wear/performance under intentionally high-frequency GIF replacement.
-- [ ] Add explicit diagnostics for the actual PSRAM allocation source once PSRAM hardware testing starts.
-
-## Feature follow-up
-
-- [x] Seven standalone light effects with deterministic one-pixel scrolling.
-- [x] Countdown, stopwatch, scoreboard, and asynchronous countdown-complete status.
-- [x] Persistent alarms and programs/schedules with media and active-buzzer integration.
-- [x] Five LEVEL and five FFT Audio/Rhythm visualizers.
-- [x] Build-aware ScreenType choices and Rescale visibility.
-- [ ] Add an optional passive/PWM buzzer backend and configurable tone frequency.
-
-## Platform expansion
-
-- [x] Add WLED 16.0.1 target definitions for classic ESP32 4/8/16 MB, ESP32-WROVER/PSRAM, and ESP32-S3 8/16 MB PSRAM builds.
-- [x] Add wrappers for WLED 16.0.1's native HUB75 board/pinout environments.
-- [x] Add matching 4/8/16/32 MB single-app/no-OTA partition tables and host regression checks.
-- [ ] Run the full WLED PlatformIO compile matrix for every supplied target in CI/release infrastructure.
-- [ ] ESP32-S3 hardware validation.
-- [ ] PSRAM-enabled target validation.
-- [ ] HUB75 wrapper hardware validation on the incoming controller/panel.
-- [ ] Newer WLED/framework versions.
-- [ ] Measure the RAM impact of inherited/default WLED Usermods on classic ESP32,
-      especially when manually re-enabled in `64x64-lite`, and document safe combinations.
-- [ ] Revisit true PinManager ownership when WLED exposes a collision-safe owner mechanism for out-of-tree Usermods.
+- review optional feature/library pruning on the IDF5 profiles after the WLED module validator behavior stabilizes;
+- keep passive/PWM buzzer support out of scope unless it becomes a real hardware requirement;
+- retain experimental larger-profile/HUB75 wrappers as unsupported until physical hardware validation exists.

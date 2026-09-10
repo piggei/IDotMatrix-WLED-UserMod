@@ -1,5 +1,96 @@
 # History
 
+## 0.8.1-audit-fix1 - 2026-09-10 - Final released remediation build
+
+Public release is **0.8.1**; this internal build identifier is retained because it
+marks the exact source revision that passed the final corrective hardware test
+and is published as the definitive 0.8.1 source archive.
+
+- Fixed the GIF promotion failure path so a failed rename plus failed copy
+  fallback publishes `gif-cache-io` and the established WLED-adapter recovery
+  path can terminate stale GIF state.
+- Reworked schedule/program replacement into a per-activity transactional
+  promotion with filesystem backup/rollback and confirmed NVS metadata commit.
+- Added boot-time repair for corrupt metadata and schedules whose persisted media
+  is missing or has the wrong size.
+- Added real host-side `IDotMatrixAutomation` regression tests, filesystem/NVS
+  failure injection, subsequent-GIF recovery tests, and ASan/UBSan coverage.
+- Separated runtime release/build markers: `release=0.8.1`,
+  `build=0.8.1-audit-fix1`.
+- Corrected documentation inconsistencies identified by the independent 0.8.1
+  audit without changing BLE packet formats, command semantics, the validated
+  C3 WLED commit, or the normal successful media/automation paths.
+- Final C3 qualification of this exact build completed roughly 50 WLED changes,
+  50 iDotMatrix changes, another 50 WLED changes, and successful program/schedule
+  operation; final heap was 75,296 bytes with a 65,536-byte largest block and no
+  reported reboot or LED instability.
+
+## 0.8.1 - 2026-09-10 - Stable ESP32-C3 support
+
+- Promoted ESP32-C3 4 MB / 16x16 to a supported hardware target on pinned WLED
+  commit `d55037f7510541eddc390c8f3d01afc5787aa44a`, Arduino Core 3.3.8 / ESP-IDF
+  5.5.4, `WLED_USE_SHARED_RMT`, and NimBLE-Arduino 2.5.1.
+- Hardware validation covered BLE advertising/connection, static images, animated
+  GIFs, WLED effects, WebSocket activity and roughly 100 media changes with zero
+  LED spikes and no reboot.
+- Kept classic ESP32/WLED 16.0.1/NimBLE 1.4.3 behavior and profiles intact.
+- Removed experimental C3 dev-profile files from the stable package; their
+  findings remain documented in this history.
+- Renamed C3 runtime diagnostics from experimental wording to the supported
+  shared-RMT marker and set the package/runtime version to `0.8.1`.
+- Fixed the FA02 large-packet reset path so heap storage is detached while the
+  queue spinlock is held and released only after leaving the critical section.
+- Documented Linux/WSL + Node.js 20+ as the recommended C3 build environment;
+  current WLED IDF5 builds can exceed Windows process command-line limits.
+- Retained all 0.8.0 protocol, renderer, media, automation and buzzer behavior.
+
+## 0.8.1-dev.3 - 2026-09-09 - ESP32-C3 IDF5/shared-RMT migration experiment
+
+- Recorded that dev.1 and dev.2 both show residual C3 LED spikes with BLE off
+  and much stronger instability during BLE advertising; dev.2 reproduced the
+  fault on WLED-native IDF 4.4.8 despite substantially better heap margin.
+- Added `esp32c3dev_idotmatrix_16x16_dev3`, pinned conceptually to WLED commit
+  `d55037f7510541eddc390c8f3d01afc5787aa44a` and inheriting its ESP-IDF 5.5.4,
+  Arduino Core 3.3.8, `WLED_USE_SHARED_RMT`, and CORE3 NeoPixelBus path.
+- Raised only the dev.3 BLE dependency to NimBLE-Arduino 2.5.1.
+- Added a compile-time NimBLE 1.x/2.x API bridge: stable profiles keep their
+  original callback/service behavior, while dev.3 uses `NimBLEConnInfo`,
+  server-level GATT start, and explicit scan-response enablement.
+- Added compile guards requiring ESP32-C3, IDF5, `WLED_USE_SHARED_RMT`, the
+  explicit experimental RMT+BLE flag, and the NimBLE 2.x API for dev.3.
+- Added diagnostics `framework=WLED IDF5/shared-RMT`, `wledBase=d55037f`, and
+  `nimble=2.x API`; corrected the development build id to `0.8.1-dev.3`.
+- No decoder, renderer, protocol, media, automation, or buzzer behavior was
+  intentionally changed.
+
+## 0.8.1-dev.2 - 2026-09-09 - ESP32-C3 native WLED framework A/B experiment
+
+- Recorded the dev.1 hardware result: enabling BLE advertising alone causes
+  visible matrix flicker/spikes on the forced Espressif 6.13.0 / IDF 4.4.7 C3
+  build; with BLE off only smaller residual spikes remain on heavier effects.
+- Added `esp32c3dev_idotmatrix_16x16_dev2`, which extends WLED v16.0.1
+  `env:esp32c3dev` without overriding `platform` or `platform_packages`.
+- Retained exactly the same C3-only `IDOT_EXPERIMENTAL_C3_RMT_BLE` exception so
+  framework selection is the principal experimental variable.
+- Added diagnostics marker `framework=WLED native C3` and build id
+  `0.8.1-dev.2`.
+- Added static regression checks proving dev.2 does not pin a PlatformIO
+  platform while all stable profiles retain their existing behavior.
+- No renderer, protocol, GIF/media, automation or buzzer behavior was changed.
+
+## 0.8.1-dev.1 - 2026-09-09 - ESP32-C3 RMT + BLE isolation experiment
+
+- Added a dedicated `esp32c3dev_idotmatrix_16x16_dev1` PlatformIO environment.
+- Kept the previous C3 experiment's Espressif 6.13.0 / Arduino 2.0.17 / ESP-IDF
+  4.4.7 framework so the next hardware run changes only the RMT/BLE policy.
+- Added `IDOT_EXPERIMENTAL_C3_RMT_BLE`, accepted only on an actual ESP32-C3;
+  defining it on another target is a compile-time error.
+- Preserved the stable rule that a digital RMT bus blocks BLE everywhere else.
+- Added `/json/info` marker `RMT+BLE=EXPERIMENTAL ESP32-C3` and build id
+  `0.8.1-dev.1` for unambiguous hardware-test identification.
+- Added host regression coverage for the RMT/BLE policy and C3 PlatformIO profile.
+- No protocol, renderer, GIF/media, automation or buzzer behavior was changed.
+
 ## 0.8.0 - 2026-09-07 - Stable feature release
 
 - Kept ESP32-C3 out of the stable target matrix after physical testing exposed

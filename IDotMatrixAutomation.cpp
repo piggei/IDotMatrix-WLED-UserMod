@@ -1,10 +1,14 @@
 #include "IDotMatrixAutomation.h"
 
+#if defined(IDOT_AUTOMATION_HOST_TEST)
+#include "tests/automation_stub/IDotMatrixAutomationDeps.h"
+#else
 #include "IDotMatrixBuzzer.h"
-#include "IDotMatrixFA02Assembler.h"
 #include "IDotMatrixMedia.h"
 #include "IDotMatrixRenderer.h"
 #include "IDotMatrixWLEDAdapter.h"
+#endif
+#include "IDotMatrixFA02Assembler.h"
 #include "wled.h"
 
 #include <Preferences.h>
@@ -27,6 +31,10 @@ void schedulePath(uint8_t index, char* buffer, size_t length) {
 
 void scheduleTempPath(uint8_t index, char* buffer, size_t length) {
   snprintf(buffer, length, "/idot_t%u.bin", unsigned(index));
+}
+
+void scheduleBackupPath(uint8_t index, char* buffer, size_t length) {
+  snprintf(buffer, length, "/idot_b%u.bin", unsigned(index));
 }
 }
 
@@ -74,8 +82,11 @@ void IDotMatrixAutomation::loadPersistence() {
   for (uint8_t slot = 0; slot < IDotMatrixAlarmSettings::SLOT_COUNT; ++slot) {
     char key[8];
     snprintf(key, sizeof(key), "a%u", unsigned(slot));
-    if (alarmPrefs_->getBytesLength(key) == sizeof(AlarmSlot)) {
+    const size_t storedBytes = alarmPrefs_->getBytesLength(key);
+    if (storedBytes == sizeof(AlarmSlot)) {
       alarmPrefs_->getBytes(key, &alarms_[slot], sizeof(AlarmSlot));
+    } else if (storedBytes != 0) {
+      alarmPrefs_->remove(key);
     }
     alarms_[slot].lastTriggerMinuteKey = 0xFFFFFFFFu;
   }
@@ -84,8 +95,23 @@ void IDotMatrixAutomation::loadPersistence() {
   for (uint8_t index = 0; index < IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES; ++index) {
     char key[8];
     snprintf(key, sizeof(key), "s%u", unsigned(index));
-    if (schedulePrefs_->getBytesLength(key) == sizeof(ScheduleActivity)) {
+    const size_t storedBytes = schedulePrefs_->getBytesLength(key);
+    if (storedBytes == sizeof(ScheduleActivity)) {
       schedulePrefs_->getBytes(key, &scheduleActivities_[index], sizeof(ScheduleActivity));
+      if (scheduleActivities_[index].configured) {
+        // A persisted schedule is usable only when its media is present with
+        // the expected size.  This also repairs stale metadata left by older
+        // non-transactional replacement failures.
+        char path[20];
+        schedulePath(index, path, sizeof(path));
+        File file = WLED_FS.open(path, "r");
+        const bool mediaValid = file &&
+          uint32_t(file.size()) == scheduleActivities_[index].mediaSize;
+        if (file) file.close();
+        if (!mediaValid) clearScheduleMeta(index);
+      }
+    } else if (storedBytes != 0) {
+      schedulePrefs_->remove(key);
     }
   }
 }
@@ -101,11 +127,12 @@ void IDotMatrixAutomation::saveScheduleGlobal() {
   if (schedulePrefs_ != nullptr) schedulePrefs_->putUChar("flags", scheduleGlobalFlags_);
 }
 
-void IDotMatrixAutomation::saveScheduleMeta(uint8_t index) {
-  if (schedulePrefs_ == nullptr || index >= IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES) return;
+bool IDotMatrixAutomation::saveScheduleMeta(uint8_t index) {
+  if (schedulePrefs_ == nullptr || index >= IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES) return false;
   char key[8];
   snprintf(key, sizeof(key), "s%u", unsigned(index));
-  schedulePrefs_->putBytes(key, &scheduleActivities_[index], sizeof(ScheduleActivity));
+  return schedulePrefs_->putBytes(key, &scheduleActivities_[index], sizeof(ScheduleActivity)) ==
+    sizeof(ScheduleActivity);
 }
 
 void IDotMatrixAutomation::clearScheduleMeta(uint8_t index) {
@@ -202,6 +229,8 @@ void IDotMatrixAutomation::beginScheduleUpload(uint8_t flags) {
     char path[20];
     scheduleTempPath(index, path, sizeof(path));
     WLED_FS.remove(path);
+    scheduleBackupPath(index, path, sizeof(path));
+    WLED_FS.remove(path);
   }
 }
 
@@ -216,6 +245,8 @@ void IDotMatrixAutomation::cancelScheduleUpload() {
   for (uint8_t index = 0; index < IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES; ++index) {
     char path[20];
     scheduleTempPath(index, path, sizeof(path));
+    WLED_FS.remove(path);
+    scheduleBackupPath(index, path, sizeof(path));
     WLED_FS.remove(path);
   }
 }
@@ -295,17 +326,71 @@ void IDotMatrixAutomation::commitScheduleUpload() {
   for (uint8_t index = 0; index < IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES; ++index) {
     const bool received = (scheduleReceivedMask_ & (1UL << index)) != 0;
     if (received) {
-      scheduleActivities_[index] = scheduleStaging_[index];
-      char tempPath[20], finalPath[20];
+      char tempPath[20], finalPath[20], backupPath[20];
       scheduleTempPath(index, tempPath, sizeof(tempPath));
       schedulePath(index, finalPath, sizeof(finalPath));
-      WLED_FS.remove(finalPath);
-      if (!WLED_FS.rename(tempPath, finalPath)) {
+      scheduleBackupPath(index, backupPath, sizeof(backupPath));
+
+      // Replace one program transactionally.  Keep the currently valid file and
+      // metadata untouched until the new temporary file is installed.  LittleFS
+      // rename semantics do not guarantee replacement of an existing target, so
+      // stage the old file under a short backup name and roll it back on failure.
+      WLED_FS.remove(backupPath);
+      const bool previousConfigured = scheduleActivities_[index].configured != 0;
+      const bool finalFileExists = WLED_FS.exists(finalPath);
+      const bool hadPreviousFile = previousConfigured && finalFileExists;
+      if (finalFileExists && !previousConfigured) WLED_FS.remove(finalPath);
+      bool oldFileStaged = false;
+      if (hadPreviousFile) oldFileStaged = WLED_FS.rename(finalPath, backupPath);
+
+      bool promoted = !hadPreviousFile || oldFileStaged;
+      if (promoted) promoted = WLED_FS.rename(tempPath, finalPath);
+
+      if (!promoted) {
         lastError_ = Error::FileWrite;
-        scheduleActivities_[index] = ScheduleActivity{};
+        bool previousRestored = hadPreviousFile && !oldFileStaged;
+        if (oldFileStaged) {
+          WLED_FS.remove(finalPath);
+          previousRestored = WLED_FS.rename(backupPath, finalPath);
+        }
+
+        WLED_FS.remove(tempPath);
+        if (!previousRestored && scheduleActivities_[index].configured) {
+          // If rollback itself failed (or stale metadata had no media to begin
+          // with), converge to the safe empty state instead of retaining NVS
+          // metadata that points at a missing file.
+          clearScheduleMeta(index);
+        }
+        WLED_FS.remove(backupPath);
         continue;
       }
-      saveScheduleMeta(index);
+
+      // The new media is durable. Only now publish RAM/NVS metadata. Keep the
+      // old media backup until the NVS write is confirmed so a persistence
+      // failure can still roll back to the previous valid schedule.
+      const ScheduleActivity previousActivity = scheduleActivities_[index];
+      scheduleActivities_[index] = scheduleStaging_[index];
+      if (!saveScheduleMeta(index)) {
+        lastError_ = Error::Preferences;
+        WLED_FS.remove(finalPath);
+        bool previousRestored = false;
+        if (hadPreviousFile && oldFileStaged) {
+          previousRestored = WLED_FS.rename(backupPath, finalPath);
+        }
+        scheduleActivities_[index] = previousActivity;
+
+        // A failed Preferences write is not assumed to leave the previous NVS
+        // value untouched. Re-assert the old metadata after restoring its media;
+        // if either half cannot be restored, converge to the safe empty state.
+        if (previousActivity.configured && previousRestored) {
+          if (!saveScheduleMeta(index)) clearScheduleMeta(index);
+        } else {
+          clearScheduleMeta(index);
+        }
+        WLED_FS.remove(backupPath);
+        continue;
+      }
+      WLED_FS.remove(backupPath);
     } else if (scheduleActivities_[index].configured) {
       clearScheduleMeta(index);
     }

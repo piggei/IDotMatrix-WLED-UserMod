@@ -1,6 +1,19 @@
 #pragma once
 
 #include <Arduino.h>
+
+// NimBLE-Arduino 2.x ships a version header; the 1.4.3 stable dependency does
+// not.  Detect it at compile time so the WLED 16.0.1 classic-ESP32 profiles
+// keep their proven NimBLE 1.x API while the supported ESP32-C3/IDF5 profile uses 2.x.
+#if defined(__has_include)
+#  if __has_include(<NimBLECppVersion.h>)
+#    include <NimBLECppVersion.h>
+#    if defined(NIMBLE_CPP_VERSION_MAJOR) && NIMBLE_CPP_VERSION_MAJOR >= 2
+#      define IDOT_NIMBLE_V2_API 1
+#    endif
+#  endif
+#endif
+
 #include <NimBLEDevice.h>
 
 #include "IDotMatrixBulkTransfer.h"
@@ -43,9 +56,15 @@ private:
   class ServerCallbacks final : public NimBLEServerCallbacks {
   public:
     explicit ServerCallbacks(IDotMatrixBLEServer& owner) : owner_(owner) {}
+#if defined(IDOT_NIMBLE_V2_API)
+    void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override;
+    void onDisconnect(NimBLEServer* server, NimBLEConnInfo& connInfo, int reason) override;
+    void onMTUChange(uint16_t mtu, NimBLEConnInfo& connInfo) override;
+#else
     void onConnect(NimBLEServer* server) override;
     void onDisconnect(NimBLEServer* server) override;
     void onMTUChange(uint16_t mtu, ble_gap_conn_desc* desc) override;
+#endif
 
   private:
     IDotMatrixBLEServer& owner_;
@@ -54,7 +73,11 @@ private:
   class WriteCallbacks final : public NimBLECharacteristicCallbacks {
   public:
     explicit WriteCallbacks(IDotMatrixBLEServer& owner) : owner_(owner) {}
+#if defined(IDOT_NIMBLE_V2_API)
+    void onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo& connInfo) override;
+#else
     void onWrite(NimBLECharacteristic* characteristic) override;
+#endif
 
   private:
     IDotMatrixBLEServer& owner_;

@@ -5,9 +5,9 @@
 ; settings UI is constrained to 16x16.  The decoder workspace and the visible
 ; ScreenType choices are independent through IDOT_SCREEN_MAX_DIM.
 ;
-; All iDotMatrix environments deliberately use Espressif Arduino 2.0.17 /
-; ESP-IDF 4.4.7 (espressif32 ~6.13.0). WLED's default Tasmota framework does
-; not expose the complete BLE GATT server required by this Usermod.
+; These WLED 16.0.1 profiles deliberately retain the Espressif Arduino 2.0.17 /
+; ESP-IDF 4.4.7 (espressif32 ~6.13.0) stack used by the validated classic-ESP32
+; release path. ESP32-C3 support uses the separate IDF5/shared-RMT profile.
 ;
 ; OTA is disabled and the supplied single-app partition tables are used.
 ; The lean feature set is intentional: it preserves heap for NimBLE/media and

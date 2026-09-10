@@ -39,6 +39,18 @@ constexpr bool supportsScreenType(uint8_t screenType) {
     (screenType == 0x04 && IDOT_SCREEN_MAX_DIM >= 64);
 }
 
+// Stable policy: any digital RMT output blocks BLE unless the build is the
+// supported ESP32-C3 IDF5/shared-RMT profile. Classic ESP32 keeps the proven
+// RMT guard; C3 coexistence is allowed only when the release profile explicitly
+// enables the shared-RMT path.
+constexpr bool shouldBlockBleForRmt(
+  bool hasDigitalRmtBus,
+  bool isEsp32C3,
+  bool c3SharedRmtBle
+) {
+  return hasDigitalRmtBus && !(isEsp32C3 && c3SharedRmtBle);
+}
+
 // Preserve the nearest supported profile when an older configuration was
 // written by a larger build. Unknown values still use the 16x16 baseline.
 constexpr uint8_t normalizeScreenType(uint8_t screenType) {

@@ -1,6 +1,6 @@
 # Build profiles and hardware targets
 
-Version 0.8.0 separates two independent build choices that were previously
+Version 0.8.1 keeps two independent build choices that were previously
 combined in the old single `esp32dev_idotmatrix` example:
 
 1. **iDotMatrix media profile** — the largest logical GIF/protocol resolution
@@ -8,9 +8,11 @@ combined in the old single `esp32dev_idotmatrix` example:
 2. **WLED hardware target** — MCU family, flash size, PSRAM configuration, and,
    for HUB75, the controller/pinout selected by WLED.
 
-The supplied profiles target **WLED v16.0.1**. They deliberately inherit WLED's
-board definitions, flash/PSRAM modes, USB settings, HUB75 flags, and board
-pinouts instead of duplicating them in this repository.
+Classic/media/HUB75 profiles retain the WLED v16.0.1 build family. The supported
+ESP32-C3 profile is intentionally separate and targets pinned WLED commit
+`d55037f7510541eddc390c8f3d01afc5787aa44a`, whose `esp32c3dev` environment uses
+ESP-IDF 5/shared-RMT. Profiles inherit the matching WLED board definitions and
+driver flags rather than duplicating them.
 
 ## Media profiles
 
@@ -60,26 +62,34 @@ where `<media-profile>` is `16x16`, `32x32`, or `64x64`.
 
 ### ESP32-C3 status
 
-ESP32-C3 is **not a supported 0.8.0 target** and is intentionally absent from the
-shipped stable overrides. Preliminary builds compile and run NimBLE, but the
-BLE-capable Arduino/ESP-IDF framework produced visible RMT LED flicker/spikes on
-a physical matrix. The effect was reduced, but not eliminated, with the Usermod
-disabled and BLE never initialized; stock WLED on the same hardware was stable.
-C3 support therefore remains under investigation for a later maintenance/dev release.
+ESP32-C3 4 MB / 16x16 is a **supported 0.8.1 target** through:
 
-Examples: `esp32dev_8M_idotmatrix_16x16`,
-`esp32dev_8M_idotmatrix_32x32`, and `esp32dev_8M_idotmatrix_64x64` all target the
-same 8 MB ESP32 hardware but compile different decoder/media profiles.
+```text
+platformio_override.ini.c3
+env:esp32c3dev_idotmatrix_16x16
+```
 
-Use the OPI or QSPI S3 target that matches the actual module. A successful flash
-configuration for one PSRAM wiring mode is not interchangeable with the other.
+The release profile must be used with WLED commit
+`d55037f7510541eddc390c8f3d01afc5787aa44a`. It inherits Arduino Core 3.3.8 /
+ESP-IDF 5.5.4, `WLED_USE_SHARED_RMT`, and the CORE3 NeoPixelBus backend, and pins
+NimBLE-Arduino 2.5.1.
 
-`platformio_override.ini.64x64-lite` intentionally supplies only the three
-classic-ESP32 targets and uses the suffix `_64x64_lite`. More flash does not
-create more internal DRAM, so the same low-RAM feature reductions are retained
-on the 8 MB and 16 MB variants. The 4 MB version is the hardware-validated
-`64x64 logical -> 16x16 physical` configuration; the larger-flash variants
-remain pending hardware validation.
+Because the supported classic and C3 profiles require different NimBLE major
+APIs, `library.json` does not declare a broad NimBLE dependency. The official
+PlatformIO overrides are authoritative and pin the exact validated versions:
+1.4.3 for classic ESP32 and 2.5.1 for ESP32-C3.
+
+Hardware evidence behind the support decision:
+
+| Build path | Result on physical 16x16 C3 |
+|---|---|
+| IDF 4.4.7 legacy RMT + BLE | strong visible spikes |
+| IDF 4.4.8 legacy RMT + BLE | same class of spikes despite more heap |
+| IDF 5.5.4 shared-RMT + BLE | no spikes through advertising, connection, images, GIFs, WLED effects and ~100 media changes |
+
+The final stress snapshot retained about 74 KB free heap and a 64 KB largest
+contiguous block with `reset=poweron`. The old development profiles are recorded
+in `HISTORY.md` but are not shipped as build choices in the stable package.
 
 ## HUB75 targets
 
@@ -120,26 +130,23 @@ of misleading low-heap behavior during 0.8.0 validation.
 
 ## Framework pinning
 
-Every supplied iDotMatrix environment overrides WLED's default ESP32 platform
-with:
+The release intentionally supports two framework generations:
 
-```ini
-platform = espressif32@~6.13.0
-platform_packages =
+```text
+classic ESP32: WLED 16.0.1 + Arduino 2.0.17 / IDF 4.4.7 + NimBLE 1.4.3
+ESP32-C3:      WLED d55037f + Arduino 3.3.8 / IDF 5.5.4 + NimBLE 2.5.1
 ```
 
-This selects Espressif Arduino **2.0.17 / ESP-IDF 4.4.7**, the framework used by
-the validated BLE implementation. The WLED v16.0.1 Tasmota framework does not
-provide the complete BLE GATT server required by this Usermod.
+`platformio_override.ini.c3` contains no `platform` or `platform_packages` key;
+it must inherit them from the pinned WLED `env:esp32c3dev`. Compile-time guards
+require ESP32-C3, IDF5, `WLED_USE_SHARED_RMT`, and the NimBLE 2.x API.
 
-NimBLE and AnimatedGIF are pinned explicitly in every environment:
+The C3 profile deliberately does **not** define `WLED_DISABLE_ESPNOW` on this
+pinned WLED base. During release compilation WLED's module validator rejected the
+inherited `wled-espnow` module when that flag produced an empty linked module.
+Other optional features disabled by the release profile remain unchanged.
 
-```ini
-h2zero/NimBLE-Arduino@1.4.3
-bitbank2/AnimatedGIF@1.4.7
-```
-
-Do not add `esp-nimble-cpp` or `ESP32 BLE Arduino` to these profiles.
+Do not add `esp-nimble-cpp` or `ESP32 BLE Arduino`.
 
 ## No-OTA partition policy
 
@@ -189,6 +196,18 @@ pio run -e esp32dev_8M_idotmatrix_16x16 -t clean
 pio run -e esp32dev_8M_idotmatrix_16x16
 ```
 
+Example: supported **ESP32-C3 4 MB / 16x16** build after checking out the pinned WLED commit:
+
+```sh
+cp ../wled-usermod-idotmatrix/platformio_override.ini.c3 platformio_override.ini
+pio run -e esp32c3dev_idotmatrix_16x16 -t clean
+pio run -e esp32c3dev_idotmatrix_16x16
+```
+
+Expected `/json/info` markers include `release=0.8.1`, `build=0.8.1-audit-fix1`,
+`RMT+BLE=ESP32-C3 shared-RMT`, `framework=WLED IDF5/shared-RMT`,
+`wledBase=d55037f`, and `nimble=2.x API`.
+
 Example: WLED's MOONHUB/LilyGo T7-S3 HUB75 target plus iDotMatrix:
 
 ```sh
@@ -210,11 +229,10 @@ The repository distinguishes three different claims:
 
 - **profile-defined**: a PlatformIO environment is supplied and statically
   checked by the host regression suite;
-- **build-validated**: that environment has completed a WLED v16.0.1 PlatformIO
-  build with the pinned dependencies;
+- **build-validated**: that environment has completed a PlatformIO build with its documented WLED base and pinned dependencies;
 - **hardware-validated**: the resulting firmware has been exercised on the
   corresponding physical controller/display configuration.
 
-The stable hardware baseline remains the classic 4 MB ESP32 configurations
-listed in `README.md` and `TESTING.md`. ESP32-S3, PSRAM/direct 64x64, native
-physical 64x64, and HUB75 remain the next hardware-validation phase.
+The supported hardware baselines are the classic 4 MB ESP32 and the documented
+4 MB ESP32-C3 16x16 profile. ESP32-S3, PSRAM/direct 64x64, native physical 64x64,
+and HUB75 remain the next hardware-validation phase.
