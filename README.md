@@ -1,6 +1,6 @@
 # WLED iDotMatrix Usermod
 
-> **Release 0.8.1 / build 0.8.1-audit-fix1:** final public source release.
+> **Release 0.8.1 / build 0.8.1** final public source release.
 > This is the exact corrective build that completed the final ESP32-C3 hardware
 > qualification after the independent release audit. It keeps the validated
 > ESP32-C3 IDF5/shared-RMT path and the established classic-ESP32/WLED 16.0.1 path.
