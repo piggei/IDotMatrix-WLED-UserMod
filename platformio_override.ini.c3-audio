@@ -1,19 +1,17 @@
-; WLED iDotMatrix Usermod - supported ESP32-C3 16x16 profile
+; WLED iDotMatrix Usermod - ESP32-C3 16x16 + AudioReactive development profile
 ; Usermod build: 0.8.2-rc.2
 ; Required WLED base commit:
 ;   d55037f7510541eddc390c8f3d01afc5787aa44a (2026-09-07)
 ;
-; This profile intentionally inherits WLED's ESP32-C3 IDF5/shared-RMT stack.
-; Do not add platform/platform_packages here and do not use this profile with
-; WLED 16.0.1. The source guards require ESP32-C3, ESP-IDF 5.x,
-; WLED_USE_SHARED_RMT, and NimBLE-Arduino 2.x.
+; This profile is intentionally separate from platformio_override.ini.c3.
+; It adds WLED AudioReactive to the already validated IDF5/shared-RMT C3 stack
+; so iDotMatrix Audio/Rhythm visualizers can optionally use WLED's local audio
+; data instead of the phone microphone stream.
 ;
-; The C3 hardware release path was validated on a 4 MB ESP32-C3 with a 16x16
-; matrix on GPIO4: BLE advertising/connection, images, animated GIFs, WLED
-; effects, WebSocket activity, and repeated media changes all ran without LED
-; spikes on the pinned WLED shared-RMT backend.
+; AudioReactive remains runtime-configurable in WLED. This profile includes the
+; Usermod but does not force it enabled or prescribe microphone GPIOs.
 
-[env:esp32c3dev_idotmatrix_16x16]
+[env:esp32c3dev_idotmatrix_audio_16x16]
 extends = env:esp32c3dev
 board_build.partitions = ../wled-usermod-idotmatrix/WLED_ESP32_4MB_IDOT_NO_OTA.csv
 
@@ -36,4 +34,5 @@ lib_deps =
   bitbank2/AnimatedGIF@1.4.7
 
 custom_usermods =
+  audioreactive
   symlink://../wled-usermod-idotmatrix

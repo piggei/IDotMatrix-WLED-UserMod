@@ -96,6 +96,7 @@ private:
 
   IDotMatrixProtocol& protocol_;
   IDotMatrixBulkTransfer bulkTransfer_;
+  bool carouselTransferReady_ = false;
   bool initialized_ = false;
   bool advertising_ = false;
   volatile bool connected_ = false;

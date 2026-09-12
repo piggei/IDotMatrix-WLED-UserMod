@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static regression checks for the shipped 0.8.1 build profiles."""
+"""Static regression checks for the 0.8.2-rc.2 build profiles."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ USERMOD = "symlink://../wled-usermod-idotmatrix"
 NIMBLE = "h2zero/NimBLE-Arduino@1.4.3"
 NIMBLE_V2 = "h2zero/NimBLE-Arduino@2.5.1"
 GIF = "bitbank2/AnimatedGIF@1.4.7"
+AUDIOREACTIVE = "audioreactive"
 
 NORMAL_TARGETS = {
     "esp32dev_idotmatrix": ("env:esp32dev", "esp32dev", "4MB"),
@@ -156,6 +157,31 @@ def check_c3_profile() -> None:
     assert usermods == USERMOD
 
 
+def check_c3_audio_profile() -> None:
+    parser = read_ini("platformio_override.ini.c3-audio")
+    section = "env:esp32c3dev_idotmatrix_audio_16x16"
+    sections = {name for name in parser.sections() if name.startswith("env:")}
+    assert sections == {section}
+    assert value(parser, section, "extends") == "env:esp32c3dev"
+    assert not parser.has_option(section, "platform")
+    assert not parser.has_option(section, "platform_packages")
+    assert value(parser, section, "board_build.partitions") == partition_path("4MB")
+
+    flags = value(parser, section, "build_flags")
+    assert "${env:esp32c3dev.build_flags}" in flags
+    assert "-D IDOT_C3_WLED_IDF5" in flags
+    assert "-D IDOT_GIF_LZW12" in flags
+    assert "-D IDOT_SCREEN_MAX_DIM=16" in flags
+    assert "WLED_DISABLE_ESPNOW" not in flags
+
+    deps = value(parser, section, "lib_deps")
+    assert "${env:esp32c3dev.lib_deps}" in deps
+    assert NIMBLE_V2 in deps and GIF in deps
+
+    usermods = [line.strip() for line in value(parser, section, "custom_usermods").splitlines() if line.strip()]
+    assert usermods == [AUDIOREACTIVE, USERMOD]
+
+
 def check_nimble_api_bridge() -> None:
     header = (ROOT / "IDotMatrixBLEServer.h").read_text(encoding="utf-8")
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
@@ -170,14 +196,15 @@ def check_nimble_api_bridge() -> None:
     assert "if (!server_->start()) return false;" in source
     assert "advertising->enableScanResponse(true);" in source
     assert "advertising_ = advertising->start();" in source
-    assert "0.8.1 ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
-    assert "0.8.1 ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
-    assert 'IDOTMATRIX_RELEASE = "0.8.1"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.8.1-audit-fix1"' in usermod
+    assert "ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
+    assert "ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.8.2"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.8.2-rc.2"' in usermod
     assert "RMT+BLE=ESP32-C3 shared-RMT" in usermod
+    assert "UsermodManager::getUMData(&data, USERMOD_ID_AUDIOREACTIVE)" in usermod
 
     library = (ROOT / "library.json").read_text(encoding="utf-8")
-    assert '"version": "0.8.1"' in library
+    assert '"version": "0.8.2"' in library
     assert '"h2zero/NimBLE-Arduino"' not in library
     # NimBLE is target-dependent and pinned by each official PlatformIO profile.
 
@@ -253,6 +280,7 @@ def check_profile_environment_isolation() -> None:
         "platformio_override.ini.64x64-lite",
         "platformio_override.ini.hub75",
         "platformio_override.ini.c3",
+        "platformio_override.ini.c3-audio",
     ]
     owners: dict[str, str] = {}
     for filename in files:
@@ -306,6 +334,7 @@ def main() -> None:
     check_lite_profile()
     check_hub75_profile()
     check_c3_profile()
+    check_c3_audio_profile()
     check_nimble_api_bridge()
     check_profile_environment_isolation()
     check_partitions()

@@ -1,6 +1,7 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by the stable 0.8.1
+This document describes the protocol subset implemented by 0.8.2-rc.2. The
+BLE wire protocol is carried forward unchanged from the stable 0.8.1
 WLED iDotMatrix Usermod. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
 stopwatch, scoreboard, persistent alarms and programs/schedules, active-buzzer
@@ -49,10 +50,12 @@ Status `01` is confirmed for the commands below; it is not a universal bulk ACK.
 
 Request: `04 00 01 80`
 
-16x16 response: `09 00 01 80 04 0E 01 01 00`
+16x16 response: `09 00 01 80 00 09 01 01 00`
 
-Offset 7 becomes `03` or `04` for the other profiles. The final byte remains the
-confirmed fixed `00`. Encoding WLED power there did not change the app switch and
+Offsets 4 and 5 expose the public Usermod release major/minor to the official app.
+For release `0.8.2` they are `00 08`; the internal build identifier is never encoded
+in this response. Offset 7 becomes `03` or `04` for the other profiles. The final
+byte remains the confirmed fixed `00`. Encoding WLED power there did not change the app switch and
 was reverted.
 
 For compatibility, the Usermod sends this response unsolicited at about 1.2 and
@@ -73,6 +76,21 @@ WLED remains the primary clock authority whenever its `localTime` is valid, so
 normal NTP, timezone, and DST configuration continues to apply. The last valid
 application time synchronization is also retained and used as an offline fallback
 while WLED local time is not yet valid.
+
+## Program / Schedule ACK semantics
+
+Hardware-informed behavior requires command-specific interpretation:
+
+```text
+07 80 -> 05 00 07 80 01
+05 80 -> 05 00 05 80 03
+```
+
+`0x03` is a transaction-termination status here, not a universal success flag.
+A recognized schedule-activity transaction therefore returns `0x03` even when
+validation or persistent storage rejects the activity internally. This keeps the
+wire transaction aligned with original-device behavior while failures remain
+visible through Usermod diagnostics.
 
 ## Screen power
 
@@ -470,7 +488,27 @@ app-originated visual mode, and renders into the existing RGB canvas. Selecting
 a normal WLED effect releases audio state; a later audio frame reclaims the
 display. No audio feedback is sent from WLED to the app.
 
-## Unsupported in 0.8.1
+### Optional local AudioReactive source
+
+The **wire protocol is unchanged**. The app continues to send the same LEVEL and
+FFT frames, and those frames continue to select the visualizer family and mode.
+The new `audioSource` Usermod setting changes only where the live amplitude and
+spectrum values used by the renderer come from:
+
+- `Phone / BLE` (`0`) uses the frame values exactly as in 0.8.1;
+- `WLED AudioReactive` (`1`) ignores the frame's amplitude/bands and substitutes
+  processed data exported by WLED AudioReactive; if that data is unavailable,
+  the renderer receives silence rather than silently changing source;
+- `Auto` (`2`) prefers AudioReactive data when available and otherwise uses the
+  original BLE values.
+
+The bridge consumes AudioReactive's smoothed volume and 16 GEQ bands through
+WLED's inter-Usermod data API. Adjacent GEQ pairs are averaged to produce the
+eight legacy iDotMatrix bands, then mapped from `0..255` to `0..12`. This is a
+renderer-input substitution only: it adds no GATT characteristic, command, ACK,
+or packet format and does not sample the microphone independently.
+
+## Deferred / unsupported
 
 - unconfirmed TEXT marker aliases `0x03` and `0x06`;
 - interlaced PNG, other PNG colour types, and PNG dimensions differing from
@@ -492,3 +530,68 @@ The countdown (`08 80`) and stopwatch (`09 80`) wire formats are unchanged. The 
 ## Alarm / program sound mapping
 
 The wire protocol is unchanged. Alarm packets retain their per-alarm buzzer request. Program global flags retain bit 1 as the sound request. The WLED mapping intentionally differentiates them: alarms repeat the non-blocking trill for their configured duration, while a program activity emits three groups of three short trills once when the activity becomes active and does not sound continuously for the full time window.
+
+
+## Device reset (`03 80`)
+
+The recognized reset frame is:
+
+```text
+04 00 03 80
+```
+
+It is a **live iDotMatrix protocol reset**, not an ESP32/WLED reboot. The Usermod:
+
+- erases all persistent Device Assets / Carousel slots and their manifest;
+- erases all persisted alarms and alarm media;
+- erases all persisted schedules/programs, staging data and schedule media;
+- stops active alarm/program/buzzer ownership and clears transient iDotMatrix display content;
+- preserves WLED configuration, Wi-Fi/BLE operation, system time and the last valid app time synchronization.
+
+The normal acknowledgement is `05 00 03 80 01`. If `iDotMatrix Display` remains selected after reset, the normal no-Carousel standalone policy may subsequently show the Clock fallback.
+
+## Device Assets / Carousel
+
+Original-hardware observations confirm one persistent Device Assets bank with 12 playable slots (`0..11`). The official app may show multiple 12-item pages, but those are alternative app-side sets rather than additional physical device slots.
+
+### Slot setup / clear
+
+```text
+11 00 02 01 0C 00 01 02 03 04 05 06 07 08 09 0A 0B
+```
+
+`CMD=0x02`, `SUB=0x01`. Byte 4 is the number of configured slots and the following bytes are the playback order. A new setup clears the existing Usermod-managed Device Assets bank before the replacement assets are uploaded.
+
+### Bulk metadata
+
+The normal 16-byte Bulk header is also used for Device Assets. In addition to data type, total length and CRC32:
+
+```text
+bytes 13..14  timeSign   uint16 little-endian dwell time in seconds
+byte  15      imageIndex Device Assets slot index
+```
+
+`imageIndex=0..11` selects a persistent Carousel slot. `imageIndex=12` is the normal transient/show-now path and `13` is treated as transient preview content. The Usermod does not reinterpret indices above the physical 12-slot Carousel bank as additional Carousel slots.
+
+The Usermod supports persistent GIF (`type=0x01`) and TEXT (`type=0x03`) slots, matching the mixed-content behavior observed on original 64x64 hardware. Slot data is streamed to LittleFS rather than accumulated as one complete compressed-media buffer in RAM.
+
+### Carousel activation
+
+The first dev.4 hardware test showed that the official app can complete a
+Device Assets page upload without sending a separate reliable "enter Carousel"
+command. Therefore the Usermod treats successful persistent slot transfers as
+the authoritative signal: after a short quiet period following the last slot,
+autonomous Carousel playback starts automatically. A following slot transfer
+cancels and rearms that quiet-period timer.
+
+`04 00 0A 01` is still accepted as an explicit compatibility enter command if
+it is observed, but playback does not depend on it.
+
+Bulk `option`, `timeSign` and `imageIndex` are latched from the first chunk of a
+transfer. Continuation chunks are required to keep type, total size and CRC
+stable, but are not required to repeat those Device Assets metadata bytes.
+
+Playback continues without a BLE connection. A later transient display command
+suspends runtime Carousel playback but does not delete the stored bank. WLED
+controls boot behavior: a stored Carousel starts at boot when `iDotMatrix
+Display` is the selected WLED boot effect.

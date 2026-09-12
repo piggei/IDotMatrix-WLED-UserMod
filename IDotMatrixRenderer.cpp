@@ -1038,6 +1038,8 @@ bool IDotMatrixRenderer::beginText(
   textAnimationStart_ = now;
   textLastFrame_ = now;
   textLastMove_ = now;
+  textLastPageChange_ = now;
+  textFirstVisibleGlyph_ = 0;
   textFrameRendered_ = false;
   textValid_ = true;
 
@@ -1055,12 +1057,11 @@ bool IDotMatrixRenderer::beginText(
       textOffsetY_ = centeredY;
       break;
     case 3:
-      textOffsetX_ = 0;
-      textOffsetY_ = logicalHeight_;
-      break;
     case 4:
+      // Vertical text starts with the first page already visible.  Subsequent
+      // pages form a continuous tape separated by one logical pixel.
       textOffsetX_ = 0;
-      textOffsetY_ = -int16_t(textGlyphHeight_);
+      textOffsetY_ = centeredY;
       break;
     default:
       textOffsetX_ = 0;
@@ -1068,6 +1069,13 @@ bool IDotMatrixRenderer::beginText(
       break;
   }
   return true;
+}
+
+uint8_t IDotMatrixRenderer::textVisibleCapacity() const {
+  if (textGlyphWidth_ == 0 || logicalWidth_ == 0) return 0;
+  const uint16_t capacity = uint16_t(logicalWidth_) / textGlyphWidth_;
+  if (capacity == 0) return 1;
+  return capacity > 255u ? 255u : uint8_t(capacity);
 }
 
 bool IDotMatrixRenderer::setTextGlyph(
@@ -1087,22 +1095,27 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
   if (!textValid_ || textBitmaps_ == nullptr || pixels_ == nullptr) return;
 
   const uint8_t boundedSpeed = textSpeed_ > 100 ? 100 : textSpeed_;
-  // The app uses the full 0..100 field, but common presets sit near the slow
-  // end (for example speed=5).  The former 140..20 ms mapping made most of the
-  // slider feel almost identical.  Use a deliberately wider 500..15 ms range:
-  // movement now spans from clearly readable to approximately one pixel per
-  // WLED effect frame at the fast end.
+  // Keep physical movement independent from visual refresh.  The app speed
+  // field therefore has the same meaning for solid and animated colours.
   const uint16_t moveInterval = 500u - uint16_t(boundedSpeed) * 485u / 100u;
-
-  // Visual effects (blink/colour animation) may need frequent redraws, but they
-  // must not change the text movement cadence.  The previous implementation
-  // clamped the common interval to 45 ms, effectively defeating the speed
-  // slider whenever one of those effects was selected.
   const bool animatedVisual = textMotionEffect_ >= 5 || textColorMode_ >= 2;
   const uint16_t renderInterval = animatedVisual ? 45u : moveInterval;
   if (textFrameRendered_ && uint32_t(now - textLastFrame_) < renderInterval) return;
 
   const int16_t textWidth = int16_t(textGlyphCount_) * textGlyphWidth_;
+  const uint8_t pageCapacity = textVisibleCapacity();
+  const bool multiplePages = pageCapacity > 0 && textGlyphCount_ > pageCapacity;
+  const int16_t centeredY = logicalHeight_ > textGlyphHeight_
+    ? int16_t(logicalHeight_ - textGlyphHeight_) / 2
+    : 0;
+  const int16_t pageStep = int16_t(textGlyphHeight_) + 1;
+
+  auto nextPageStart = [&]() -> uint8_t {
+    if (!multiplePages) return 0;
+    const uint16_t candidate = uint16_t(textFirstVisibleGlyph_) + pageCapacity;
+    return candidate >= textGlyphCount_ ? 0 : uint8_t(candidate);
+  };
+
   const bool moveNow = !textFrameRendered_ || uint32_t(now - textLastMove_) >= moveInterval;
   if (textFrameRendered_ && moveNow) {
     switch (textMotionEffect_) {
@@ -1112,17 +1125,40 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
       case 2:
         if (++textOffsetX_ > logicalWidth_) textOffsetX_ = -textWidth;
         break;
-      case 3:
-        if (--textOffsetY_ < -int16_t(textGlyphHeight_)) textOffsetY_ = logicalHeight_;
+      case 3: // UP: next page follows immediately below the current page.
+        --textOffsetY_;
+        if (textOffsetY_ <= centeredY - pageStep) {
+          textFirstVisibleGlyph_ = nextPageStart();
+          textOffsetY_ += pageStep;
+          textLastPageChange_ = now;
+        }
         break;
-      case 4:
-        if (++textOffsetY_ > logicalHeight_) textOffsetY_ = -int16_t(textGlyphHeight_);
+      case 4: // DOWN: next page follows immediately above the current page.
+        ++textOffsetY_;
+        if (textOffsetY_ >= centeredY + pageStep) {
+          textFirstVisibleGlyph_ = nextPageStart();
+          textOffsetY_ -= pageStep;
+          textLastPageChange_ = now;
+        }
         break;
       default:
         break;
     }
     textLastMove_ = now;
   }
+
+  // Page-based effects (including the stationary presentation) must consume
+  // the complete glyph stream.  Use the same page+gap travel time as vertical
+  // motion so the app speed value remains the sole paging cadence control.
+  if (textMotionEffect_ != 1 && textMotionEffect_ != 2 &&
+      textMotionEffect_ != 3 && textMotionEffect_ != 4 && multiplePages) {
+    const uint32_t pageInterval = uint32_t(moveInterval) * uint32_t(pageStep);
+    if (uint32_t(now - textLastPageChange_) >= pageInterval) {
+      textFirstVisibleGlyph_ = nextPageStart();
+      textLastPageChange_ = now;
+    }
+  }
+
   textLastFrame_ = now;
   textFrameRendered_ = true;
 
@@ -1141,11 +1177,13 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
     brightnessScale = 110;
   }
 
-  if (!blinkHidden) {
+  auto drawGlyphRange = [&](uint8_t firstGlyph, uint8_t count, int16_t baseX, int16_t baseY) {
     const uint8_t bytesPerRow = (textGlyphWidth_ + 7u) / 8u;
-    for (uint8_t glyph = 0; glyph < textGlyphCount_; ++glyph) {
-      const uint8_t* bitmap = textBitmaps_ + size_t(glyph) * textGlyphBytes_;
-      const int16_t glyphX = textOffsetX_ + int16_t(glyph) * textGlyphWidth_;
+    for (uint8_t pageIndex = 0; pageIndex < count; ++pageIndex) {
+      const uint16_t glyphIndex = uint16_t(firstGlyph) + pageIndex;
+      if (glyphIndex >= textGlyphCount_) break;
+      const uint8_t* bitmap = textBitmaps_ + size_t(glyphIndex) * textGlyphBytes_;
+      const int16_t glyphX = baseX + int16_t(pageIndex) * textGlyphWidth_;
       for (uint8_t row = 0; row < textGlyphHeight_; ++row) {
         for (uint8_t column = 0; column < textGlyphWidth_; ++column) {
           const uint16_t offset = uint16_t(row) * bytesPerRow + (column >> 3);
@@ -1154,7 +1192,7 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
             continue;
           }
           const int16_t x = glyphX + column;
-          const int16_t y = textOffsetY_ + row;
+          const int16_t y = baseY + row;
           if (x < 0 || y < 0 || x >= logicalWidth_ || y >= logicalHeight_) continue;
 
           Pixel value = textColor_;
@@ -1178,6 +1216,24 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
           }
         }
       }
+    }
+  };
+
+  if (!blinkHidden) {
+    if (textMotionEffect_ == 1 || textMotionEffect_ == 2) {
+      // Horizontal motion remains one continuous full text line.
+      drawGlyphRange(0, textGlyphCount_, textOffsetX_, textOffsetY_);
+    } else if (textMotionEffect_ == 3 || textMotionEffect_ == 4) {
+      // Vertical motion is a continuous tape: the following logical page is
+      // rendered one glyph-height plus one pixel behind the current page.
+      drawGlyphRange(textFirstVisibleGlyph_, pageCapacity, 0, textOffsetY_);
+      const uint8_t following = nextPageStart();
+      const int16_t followingY = textMotionEffect_ == 3
+        ? textOffsetY_ + pageStep
+        : textOffsetY_ - pageStep;
+      drawGlyphRange(following, pageCapacity, 0, followingY);
+    } else {
+      drawGlyphRange(textFirstVisibleGlyph_, pageCapacity, 0, centeredY);
     }
   }
 

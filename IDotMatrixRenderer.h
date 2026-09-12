@@ -100,6 +100,8 @@ public:
   uint8_t textGlyphWidth() const { return textGlyphWidth_; }
   uint8_t textGlyphHeight() const { return textGlyphHeight_; }
   uint8_t textSpeed() const { return textSpeed_; }
+  uint8_t textVisibleCapacity() const;
+  uint8_t textFirstVisibleGlyph() const { return textFirstVisibleGlyph_; }
   bool isRawImagePending() const { return rawImagePixels_ != nullptr; }
   const Pixel* pixels() const { return pixels_; }
   uint8_t* animationFrameData() { return reinterpret_cast<uint8_t*>(pixels_); }
@@ -145,6 +147,8 @@ private:
   uint32_t textAnimationStart_ = 0;
   uint32_t textLastFrame_ = 0;
   uint32_t textLastMove_ = 0;
+  uint32_t textLastPageChange_ = 0;
+  uint8_t textFirstVisibleGlyph_ = 0;
   Pixel* rawImagePixels_ = nullptr;
   size_t rawImageBytes_ = 0;
   bool rawImageInPlace_ = false;

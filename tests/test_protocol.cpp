@@ -5,6 +5,7 @@
 
 class TestEvents final : public IDotMatrixProtocolEvents {
 public:
+  void onDeviceReset() override { deviceResetReceived = true; }
   void onScreenPower(bool on) override {
     screenEventReceived = true;
     screenOn = on;
@@ -147,6 +148,7 @@ public:
     return crcValid;
   }
 
+  bool deviceResetReceived = false;
   bool screenEventReceived = false;
   bool screenOn = false;
   bool brightnessEventReceived = false;
@@ -205,6 +207,7 @@ public:
 
 class TestAutomation final : public IDotMatrixAutomationEvents {
 public:
+  void onAutomationReset() override { resetReceived = true; }
   void onTimeSync(const IDotMatrixTimeSyncSettings& settings) override {
     timeReceived = true;
     time = settings;
@@ -239,6 +242,7 @@ public:
     return scheduleAccept;
   }
 
+  bool resetReceived = false;
   bool timeReceived = false;
   IDotMatrixTimeSyncSettings time{};
   bool alarmReceived = false;
@@ -253,6 +257,27 @@ public:
   IDotMatrixScheduleActivitySettings schedule{};
   size_t scheduleMediaLength = 0;
   uint8_t scheduleFirstByte = 0;
+};
+
+
+class TestCarousel final : public IDotMatrixCarouselEvents {
+public:
+  void onCarouselReset() override { resetReceived = true; }
+  void onCarouselConfigure(const uint8_t* slots, uint8_t count) override {
+    configured = true; configuredCount = count;
+    for (uint8_t i = 0; i < count && i < 12; ++i) order[i] = slots[i];
+  }
+  void onCarouselEnter() override { entered = true; }
+  void onCarouselSuspend() override { suspended = true; ++suspendCount; }
+  bool onCarouselAssetBegin(uint8_t type, uint8_t slot, uint16_t dwell, size_t total) override {
+    assetType=type; assetSlot=slot; assetDwell=dwell; assetTotal=total; return true;
+  }
+  bool onCarouselAssetData(size_t offset, const uint8_t*, size_t length) override { assetOffset=offset; assetChunk=length; return true; }
+  bool onCarouselAssetComplete(bool valid) override { assetComplete=true; assetValid=valid; return valid; }
+  void onCarouselAssetCancel() override { assetCancelled=true; }
+  bool resetReceived=false, configured=false, entered=false, suspended=false, assetComplete=false, assetValid=false, assetCancelled=false;
+  uint8_t configuredCount=0, order[12]{}, assetType=0, assetSlot=0;
+  uint16_t assetDwell=0; size_t assetTotal=0, assetOffset=0, assetChunk=0; uint32_t suspendCount=0;
 };
 
 static uint32_t testCRC32(const uint8_t* data, size_t length) {
@@ -278,17 +303,20 @@ static void expectReply(
 int main() {
   TestEvents events;
   TestAutomation automation;
+  TestCarousel carousel;
   IDotMatrixProtocol protocol(events);
   protocol.setAutomationEvents(&automation);
+  protocol.setCarouselEvents(&carousel);
+  protocol.setDeviceReleaseVersion(0x00, 0x09);
   IDotMatrixReply reply;
 
   const uint8_t deviceInfoRequest[] = {0x04, 0x00, 0x01, 0x80};
-  const uint8_t deviceInfo16[] = {0x09, 0x00, 0x01, 0x80, 0x04, 0x0E, 0x01, 0x01, 0x00};
+  const uint8_t deviceInfo16[] = {0x09, 0x00, 0x01, 0x80, 0x00, 0x09, 0x01, 0x01, 0x00};
   assert(protocol.processFA02(deviceInfoRequest, sizeof(deviceInfoRequest), reply));
   expectReply(reply, deviceInfo16, sizeof(deviceInfo16));
 
   protocol.setScreenType(0x04);
-  const uint8_t deviceInfo64[] = {0x09, 0x00, 0x01, 0x80, 0x04, 0x0E, 0x01, 0x04, 0x00};
+  const uint8_t deviceInfo64[] = {0x09, 0x00, 0x01, 0x80, 0x00, 0x09, 0x01, 0x04, 0x00};
   protocol.makeDeviceInfoReply(reply);
   expectReply(reply, deviceInfo64, sizeof(deviceInfo64));
 
@@ -297,6 +325,14 @@ int main() {
   protocol.onConnected();
   assert(events.screenEventReceived && events.screenOn);
 
+  const uint8_t resetCommand[] = {0x04,0x00,0x03,0x80};
+  const uint8_t resetAck[] = {0x05,0x00,0x03,0x80,0x01};
+  assert(protocol.processFA02(resetCommand, sizeof(resetCommand), reply));
+  expectReply(reply, resetAck, sizeof(resetAck));
+  assert(events.deviceResetReceived);
+  assert(automation.resetReceived);
+  assert(carousel.resetReceived);
+
   const uint8_t timeSync[] = {0x0B,0x00,0x01,0x80,0x1A,0x09,0x05,0x06,0x17,0x2A,0x0B};
   const uint8_t timeAck[] = {0x05,0x00,0x01,0x80,0x01};
   assert(protocol.processFA02(timeSync, sizeof(timeSync), reply));
@@ -304,6 +340,27 @@ int main() {
   assert(automation.time.year == 2026 && automation.time.month == 9 && automation.time.day == 5);
   assert(automation.time.hour == 23 && automation.time.minute == 42 && automation.time.second == 11);
   expectReply(reply, timeAck, sizeof(timeAck));
+
+  const uint8_t carouselSetup[] = {0x08,0x00,0x02,0x01,0x03,0x00,0x05,0x0B};
+  const uint8_t carouselSetupAck[] = {0x05,0x00,0x02,0x01,0x01};
+  assert(protocol.processFA02(carouselSetup, sizeof(carouselSetup), reply));
+  assert(carousel.configured && carousel.configuredCount == 3);
+  assert(carousel.order[0] == 0 && carousel.order[1] == 5 && carousel.order[2] == 11);
+  expectReply(reply, carouselSetupAck, sizeof(carouselSetupAck));
+
+  const uint8_t carouselEnter[] = {0x04,0x00,0x0A,0x01};
+  const uint8_t carouselEnterAck[] = {0x05,0x00,0x0A,0x01,0x01};
+  assert(protocol.processFA02(carouselEnter, sizeof(carouselEnter), reply));
+  assert(carousel.entered);
+  expectReply(reply, carouselEnterAck, sizeof(carouselEnterAck));
+
+  assert(protocol.beginCarouselAsset(0x01, 7, 300, 1234));
+  assert(carousel.assetType == 0x01 && carousel.assetSlot == 7 && carousel.assetDwell == 300 && carousel.assetTotal == 1234);
+  const uint8_t assetData[] = {1,2,3};
+  assert(protocol.writeCarouselAsset(10, assetData, sizeof(assetData)));
+  assert(carousel.assetOffset == 10 && carousel.assetChunk == 3);
+  assert(protocol.completeCarouselAsset(true));
+  assert(carousel.assetComplete && carousel.assetValid);
 
   const uint8_t alarmShort[] = {0x0C,0x00,0x00,0x80,0x02,0x83,0x07,0x1E,0x0A,0x00,0x01,0x01};
   const uint8_t alarmAck[] = {0x05,0x00,0x00,0x80,0x01};
@@ -353,6 +410,13 @@ int main() {
   assert(automation.scheduleActivityReceived && automation.schedule.index == 3);
   assert(automation.schedule.contentType == 2 && automation.scheduleMediaLength == 4 && automation.scheduleFirstByte == 9);
   expectReply(reply, scheduleAck, sizeof(scheduleAck));
+
+  // 0x03 terminates a recognized schedule-activity transaction even when the
+  // activity is rejected internally; it is not a universal success flag.
+  automation.scheduleAccept = false;
+  assert(protocol.processFA02(schedulePacket, sizeof(schedulePacket), reply));
+  expectReply(reply, scheduleAck, sizeof(scheduleAck));
+  automation.scheduleAccept = true;
 
   const uint8_t screenOff[] = {0x05, 0x00, 0x07, 0x01, 0x00};
   const uint8_t screenAck[] = {0x05, 0x00, 0x07, 0x01, 0x01};

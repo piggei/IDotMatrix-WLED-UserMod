@@ -4,6 +4,8 @@
 #include "IDotMatrixRenderer.h"
 #include "IDotMatrixMediaSink.h"
 
+class Segment;
+
 class IDotMatrixWLEDAdapter final : public IDotMatrixProtocolEvents {
 public:
   explicit IDotMatrixWLEDAdapter(
@@ -15,11 +17,14 @@ public:
   void setRescaleEnabled(bool enabled) { rescaleEnabled_ = enabled; }
   void loop(uint32_t now);
 
+  void onDeviceReset() override;
   void onScreenPower(bool on) override;
   void onBrightnessPercent(uint8_t percent) override;
   void onSolidColor(uint8_t red, uint8_t green, uint8_t blue) override;
   void onLightEffect(const IDotMatrixLightEffectSettings& settings) override;
   void onAudio(const IDotMatrixAudioSettings& settings) override;
+  void setAudioDataOverride(bool enabled);
+  void updateAudioSample(uint8_t level, const uint8_t bands[8]);
   void onGraffitiMode(bool enter) override;
   void onGraffitiPixels(
     uint8_t red,
@@ -51,6 +56,7 @@ public:
   bool onGifBegin(size_t byteLength) override;
   bool onGifData(size_t offset, const uint8_t* data, size_t length) override;
   bool onGifComplete(bool crcValid) override;
+  bool playStoredGif(const char* path);
 
   void renderDisplayEffectFrame();
   bool isDiySessionActive() const { return diySessionActive_; }
@@ -58,12 +64,31 @@ public:
   bool isLightEffectActive() const { return lightEffectActive_; }
   bool isAudioActive() const { return audioActive_; }
   bool audioUsesFFT() const { return audioSettings_.fft; }
+  bool audioDataOverride() const { return audioDataOverride_; }
   uint8_t audioMode() const { return audioSettings_.mode; }
+  uint8_t audioLevel() const { return audioSettings_.level; }
+  uint8_t audioBand(uint8_t index) const { return index < 8 ? audioSettings_.bands[index] : 0; }
   uint8_t lightEffectId() const { return renderer_.lightEffectId(); }
   uint8_t lightEffectSpeed() const { return renderer_.lightEffectSpeed(); }
   uint8_t lightEffectColorCount() const { return renderer_.lightEffectColorCount(); }
   bool isDisplayEffectRegistered() const { return displayEffectId_ != 0xFF; }
   bool isDisplayEffectActive() const;
+  bool isDisplayEffectSelected() const;
+  uint8_t selectedEffectId() const;
+  uint8_t displayEffectSegmentId() const { return displayEffectSegmentId_; }
+  bool hasLogicalContent() const;
+  bool hasActiveContent() const;
+  bool displayEffectObserved() const { return displayEffectObserved_; }
+  uint32_t displayEffectCallbackCount() const { return displayEffectCallbackCount_; }
+  uint32_t displayEffectLiveCallbackCount() const { return displayEffectLiveCallbackCount_; }
+  uint32_t displayEffectOldCallbackCount() const { return displayEffectOldCallbackCount_; }
+  uint8_t displayEffectCallbackSegmentId() const { return displayEffectCallbackSegmentId_; }
+  uint8_t displayEffectCallbackContextMode() const { return displayEffectCallbackContextMode_; }
+  bool displayEffectLastCallbackWasLive() const { return displayEffectLastCallbackWasLive_; }
+  bool displayEffectCallbackLeaseActive(uint32_t now) const;
+  bool pollDisplayEffectSelection();
+  bool takeDisplayEffectActivationRequest();
+  void claimDisplayEffectFromCallback();
   void syncWLEDControl();
   void syncGifPlayback(bool playing, bool failed);
   // Automation (alarm/program) playback temporarily reuses the normal iDot
@@ -108,6 +133,7 @@ private:
   void endGifBlankStaging();
   void stopMediaPlayback();
   void renderCanvasToSegment();
+  Segment& controlSegment();
 
   IDotMatrixRenderer& renderer_;
   IDotMatrixMediaSink* media_ = nullptr;
@@ -115,6 +141,7 @@ private:
   bool solidActive_ = false;
   bool lightEffectActive_ = false;
   bool audioActive_ = false;
+  bool audioDataOverride_ = false;
   bool diySessionActive_ = false;
   bool clockActive_ = false;
   bool countdownActive_ = false;
@@ -135,6 +162,17 @@ private:
   bool rescaleEnabled_ = false;
   bool dimensionsMatch_ = false;
   uint8_t displayEffectId_ = 0xFF;
+  uint8_t displayEffectSegmentId_ = 0xFF;
+  bool displayEffectObserved_ = false;
+  bool displayEffectActivationRequested_ = false;
+  uint32_t displayEffectCallbackCount_ = 0;
+  uint32_t displayEffectLiveCallbackCount_ = 0;
+  uint32_t displayEffectOldCallbackCount_ = 0;
+  uint32_t displayEffectLastCallbackMillis_ = 0;
+  uint8_t displayEffectCallbackSegmentId_ = 0xFF;
+  uint8_t displayEffectCallbackContextMode_ = 0xFF;
+  bool displayEffectLastCallbackWasLive_ = false;
+  bool displayEffectSelectedLast_ = false;
   IDotMatrixClockSettings clockSettings_{};
   IDotMatrixAudioSettings audioSettings_{};
   uint32_t audioLastRenderMillis_ = 0;

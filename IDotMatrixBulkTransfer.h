@@ -18,6 +18,9 @@ struct IDotMatrixBulkResult {
   uint32_t totalLength = 0;
   uint32_t expectedCRC = 0;
   uint32_t calculatedCRC = 0;
+  uint8_t option = 0;
+  uint16_t timeSign = 0;
+  uint8_t imageIndex = 12;
 };
 
 class IDotMatrixBulkTransfer {
@@ -49,6 +52,9 @@ private:
   uint32_t expectedCRC_ = 0;
   uint32_t runningCRC_ = 0xFFFFFFFFu;
   uint32_t receivedSize_ = 0;
+  uint8_t option_ = 0;
+  uint16_t timeSign_ = 0;
+  uint8_t imageIndex_ = 12;
   uint8_t textPayload_[MAX_TEXT_PAYLOAD]{};
   size_t textPayloadLength_ = 0;
   bool textReady_ = false;

@@ -9,7 +9,10 @@ static size_t makePacket(
   const uint8_t* payload,
   size_t payloadLength,
   uint32_t totalLength,
-  uint32_t crc
+  uint32_t crc,
+  uint8_t option = 0,
+  uint16_t timeSign = 0,
+  uint8_t imageIndex = 12
 ) {
   const size_t packetLength = IDotMatrixBulkTransfer::HEADER_SIZE + payloadLength;
   memset(packet, 0, packetLength);
@@ -20,10 +23,14 @@ static size_t makePacket(
   packet[6] = static_cast<uint8_t>((totalLength >> 8) & 0xFF);
   packet[7] = static_cast<uint8_t>((totalLength >> 16) & 0xFF);
   packet[8] = static_cast<uint8_t>((totalLength >> 24) & 0xFF);
+  packet[4] = option;
   packet[9] = static_cast<uint8_t>(crc & 0xFF);
   packet[10] = static_cast<uint8_t>((crc >> 8) & 0xFF);
   packet[11] = static_cast<uint8_t>((crc >> 16) & 0xFF);
   packet[12] = static_cast<uint8_t>((crc >> 24) & 0xFF);
+  packet[13] = static_cast<uint8_t>(timeSign & 0xFF);
+  packet[14] = static_cast<uint8_t>((timeSign >> 8) & 0xFF);
+  packet[15] = imageIndex;
   memcpy(packet + IDotMatrixBulkTransfer::HEADER_SIZE, payload, payloadLength);
   return packetLength;
 }
@@ -86,6 +93,29 @@ int main() {
   assert(result.expectedCRC == 0x564ACEF2u);
   assert(result.calculatedCRC == 0x564ACEF2u);
   assert(result.crcValid);
+
+  const uint8_t metaPayload[] = {'o','k'};
+  packetLength = makePacket(packet, 0x01, metaPayload, sizeof(metaPayload), sizeof(metaPayload), 0x79DCDD47u, 2, 300, 7);
+  assert(transfer.processPacket(packet, packetLength, result));
+  assert(result.option == 2);
+  assert(result.timeSign == 300);
+  assert(result.imageIndex == 7);
+
+
+  // Device Assets metadata is transaction metadata. Continuation chunks from
+  // the app are allowed to carry different/zero values: the first chunk stays
+  // authoritative and the transfer must not abort.
+  transfer.reset();
+  const uint8_t assetA[] = {'a', 'b'};
+  const uint8_t assetB[] = {'c', 'd', 'e'};
+  packetLength = makePacket(packet, 0x01, assetA, sizeof(assetA), 5, 0x8587D865u, 2, 30, 4);
+  assert(transfer.processPacket(packet, packetLength, result));
+  assert(result.began && !result.completed);
+  assert(result.option == 2 && result.timeSign == 30 && result.imageIndex == 4);
+  packetLength = makePacket(packet, 0x01, assetB, sizeof(assetB), 5, 0x8587D865u, 0, 0, 12);
+  assert(transfer.processPacket(packet, packetLength, result));
+  assert(result.completed && result.crcValid && !result.aborted);
+  assert(result.option == 2 && result.timeSign == 30 && result.imageIndex == 4);
 
   packet[0] ^= 1;
   assert(!transfer.processPacket(packet, packetLength, result));

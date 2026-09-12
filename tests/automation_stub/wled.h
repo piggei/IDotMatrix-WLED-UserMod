@@ -127,6 +127,7 @@ public:
 class TestStrip {
 public:
   Segment& getFirstSelectedSeg() { return segment_; }
+  uint8_t getModeCount() const { return 200; }
   void trigger() {}
 private:
   Segment segment_;

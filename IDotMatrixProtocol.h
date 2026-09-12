@@ -108,6 +108,7 @@ struct IDotMatrixTextSettings {
 class IDotMatrixProtocolEvents {
 public:
   virtual ~IDotMatrixProtocolEvents() = default;
+  virtual void onDeviceReset() = 0;
   virtual void onScreenPower(bool on) = 0;
   virtual void onBrightnessPercent(uint8_t percent) = 0;
   virtual void onSolidColor(uint8_t red, uint8_t green, uint8_t blue) = 0;
@@ -160,11 +161,26 @@ public:
     size_t mediaLength
   ) = 0;
   virtual void onScheduleGlobal(uint8_t flags) = 0;
+  virtual void onAutomationReset() = 0;
   virtual bool onScheduleActivity(
     const IDotMatrixScheduleActivitySettings& settings,
     const uint8_t* media,
     size_t mediaLength
   ) = 0;
+};
+
+
+class IDotMatrixCarouselEvents {
+public:
+  virtual ~IDotMatrixCarouselEvents() = default;
+  virtual void onCarouselReset() = 0;
+  virtual void onCarouselConfigure(const uint8_t* slots, uint8_t count) = 0;
+  virtual void onCarouselEnter() = 0;
+  virtual void onCarouselSuspend() = 0;
+  virtual bool onCarouselAssetBegin(uint8_t type, uint8_t slot, uint16_t dwellSeconds, size_t totalLength) = 0;
+  virtual bool onCarouselAssetData(size_t offset, const uint8_t* data, size_t length) = 0;
+  virtual bool onCarouselAssetComplete(bool crcValid) = 0;
+  virtual void onCarouselAssetCancel() = 0;
 };
 
 struct IDotMatrixReply {
@@ -181,7 +197,9 @@ public:
   explicit IDotMatrixProtocol(IDotMatrixProtocolEvents& events) : events_(events) {}
 
   void setScreenType(uint8_t screenType);
+  void setDeviceReleaseVersion(uint8_t major, uint8_t minor);
   void setAutomationEvents(IDotMatrixAutomationEvents* events) { automationEvents_ = events; }
+  void setCarouselEvents(IDotMatrixCarouselEvents* events) { carouselEvents_ = events; }
   void onConnected();
   void makeDeviceInfoReply(IDotMatrixReply& reply) const;
   bool processFA02(const uint8_t* data, size_t length, IDotMatrixReply& reply);
@@ -196,6 +214,11 @@ public:
   bool beginGif(size_t byteLength);
   bool writeGif(size_t offset, const uint8_t* data, size_t length);
   bool completeGif(bool crcValid);
+  bool beginCarouselAsset(uint8_t type, uint8_t slot, uint16_t dwellSeconds, size_t totalLength);
+  bool writeCarouselAsset(size_t offset, const uint8_t* data, size_t length);
+  bool completeCarouselAsset(bool crcValid);
+  void cancelCarouselAsset();
+  void suspendCarousel();
 
 private:
   static bool hasValidLength(const uint8_t* data, size_t length);
@@ -206,7 +229,10 @@ private:
 
   IDotMatrixProtocolEvents& events_;
   IDotMatrixAutomationEvents* automationEvents_ = nullptr;
+  IDotMatrixCarouselEvents* carouselEvents_ = nullptr;
   uint8_t screenType_ = 0x01;
+  uint8_t releaseMajor_ = 0x00;
+  uint8_t releaseMinor_ = 0x00;
   uint8_t audioFrame_[21]{};
   uint8_t audioFrameLength_ = 0;
   uint8_t audioFrameExpected_ = 0;

@@ -175,6 +175,57 @@ bool IDotMatrixMedia::completeGif(bool crcValid) {
   return true;
 }
 
+bool IDotMatrixMedia::queueStoredGif(const char* path) {
+  if (path == nullptr) return false;
+  cancelGifReceive();
+  lastError_ = Error::None;
+  if (useFrameCache()) releasePlaybackResources();
+
+  File source = WLED_FS.open(path, "r");
+  if (!source || source.size() < 6 || source.size() > 2u * 1024u * 1024u) {
+    if (source) source.close();
+    lastError_ = Error::GifInvalid;
+    return false;
+  }
+  const size_t bytes = source.size();
+  rxSlot_ = nextRxSlot_ & 1u;
+  nextRxSlot_ ^= 1u;
+  if (rxSlot_ == pendingSlot_) rxSlot_ ^= 1;
+  const char* targetPath = GIF_RX[uint8_t(rxSlot_)];
+  WLED_FS.remove(targetPath);
+  File target = WLED_FS.open(targetPath, "w");
+  if (!target) {
+    source.close();
+    rxSlot_ = -1;
+    lastError_ = Error::GifCacheIo;
+    return false;
+  }
+  uint8_t buffer[256];
+  size_t copied = 0;
+  bool ok = true;
+  while (copied < bytes) {
+    const size_t remaining = bytes - copied;
+    const size_t got = source.read(buffer, remaining < sizeof(buffer) ? remaining : sizeof(buffer));
+    if (got == 0 || target.write(buffer, got) != got) { ok = false; break; }
+    copied += got;
+  }
+  target.flush();
+  source.close();
+  target.close();
+  if (!ok || copied != bytes) {
+    WLED_FS.remove(targetPath);
+    rxSlot_ = -1;
+    lastError_ = Error::GifCacheIo;
+    return false;
+  }
+  pendingGifBytes_ = bytes;
+  if (pendingSlot_ >= 0) WLED_FS.remove(GIF_RX[uint8_t(pendingSlot_)]);
+  pendingSlot_ = rxSlot_;
+  rxSlot_ = -1;
+  promotePending_ = true;
+  return true;
+}
+
 void IDotMatrixMedia::cancelGifReceive() {
   if (rxOpen_) {
     gifRxFile.close();

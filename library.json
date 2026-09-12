@@ -1,7 +1,7 @@
 {
   "name": "wled-usermod-idotmatrix",
-  "version": "0.8.1",
-  "description": "iDotMatrix BLE server/emulator usermod for WLED",
+  "version": "0.8.2",
+  "description": "iDotMatrix BLE server/emulator usermod for WLED with optional AudioReactive input",
   "keywords": [
     "wled",
     "idotmatrix",

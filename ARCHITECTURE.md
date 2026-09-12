@@ -1,10 +1,10 @@
 # Architecture
 
-This document describes the **stable 0.8.1 architecture**. It combines the
-validated 0.7.1 memory/media design with the feature layer added for light
-effects, timers, automation, active-buzzer support, Audio/Rhythm rendering, and
-build-aware resolution settings. Special attention remains on the RAM constraints
-that shaped the 32x32 and 64x64 media paths on classic ESP32.
+This document describes the **0.8.2-rc.2 architecture**, built directly on the
+hardware-qualified 0.8.1 baseline. The first 0.9 development step adds a small
+audio-source abstraction for the existing Audio/Rhythm renderers while leaving
+BLE framing, media/GIF, automation and display ownership unchanged. ESP32-S3
+and HUB75 work remain outside this build.
 
 ## Design goals
 
@@ -245,7 +245,7 @@ iDotMatrix decoder profile. `platformio_override.ini.hub75` instead wraps WLED's
 board/pinout-specific HUB75 environments. See `BUILD_PROFILES.md` for the full
 matrix and validation status.
 
-Every supplied override intentionally **replaces** the base environment's
+The normal supplied overrides intentionally **replace** the base environment's
 `custom_usermods` list with only:
 
 ```ini
@@ -253,10 +253,18 @@ custom_usermods =
   symlink://../wled-usermod-idotmatrix
 ```
 
-The profiles do not inherit `${env:<base>.custom_usermods}`. This prevents WLED
-base environments from silently pulling additional Usermods such as
-AudioReactive into memory-sensitive BLE/media builds. Any extra Usermod must be
-added deliberately and the resulting heap pressure must be revalidated.
+They do not inherit `${env:<base>.custom_usermods}`. The explicit exception in
+0.8.2-rc.2 is `platformio_override.ini.c3-audio`, which deliberately contains:
+
+```ini
+custom_usermods =
+  audioreactive
+  symlink://../wled-usermod-idotmatrix
+```
+
+This keeps the standard C3 memory budget unchanged while providing a separate
+test build for local microphone data. No profile silently inherits arbitrary
+base Usermods.
 
 ## Current memory rules
 
@@ -543,16 +551,35 @@ The buzzer has two deliberately different automation semantics:
 
 Program sound is started only by a real `startScheduleActivity()` transition. The normal automation loop never restarts the finite notice simply because the schedule remains active. If an alarm fires while the finite program notice is still playing, the alarm takes priority and switches the buzzer to its repeating pattern. The implementation remains non-blocking and does not change display ownership.
 
-## Audio/Rhythm stream and rendering
+## Audio/Rhythm stream, source selection and rendering
 
 Audio FA02 traffic bypasses the ordinary length-prefixed command assembler.
 LEVEL frames are six bytes; FFT uses a continuous sequence of 21-byte logical
-frames even when ATT writes are 33 bytes and split the following frame. A
-21-byte carry buffer in `IDotMatrixProtocol` performs resynchronisation and
-publishes only complete, valid frames from WLED's main loop.
+frames even when ATT writes split a logical frame. A 21-byte carry buffer in
+`IDotMatrixProtocol` performs resynchronisation and publishes only complete,
+valid frames from WLED's main loop. The wire protocol is unchanged in
+0.8.2-rc.2.
+
+`IDotMatrixAudioSource` adds source selection **after** BLE parsing. `Phone /
+BLE` preserves the 0.8.1 data path. `WLED AudioReactive` asks the registered
+AudioReactive Usermod for its exported `um_data_t`; slot 0 supplies smoothed
+volume and slot 2 supplies the 16-byte GEQ/FFT array. `Auto` prefers that local
+data when available and otherwise falls back to the original BLE samples. An
+explicit AudioReactive selection does not silently fall back: if the Usermod is
+absent or disabled, it supplies silence until local data becomes available.
+
+The local path does not initialize I2S and does not perform an additional FFT.
+WLED AudioReactive owns acquisition and signal processing. The bridge averages
+adjacent pairs of its 16 GEQ bands to retain the full frequency range, then
+scales those eight values and the smoothed level into the existing iDotMatrix
+0..12 renderer domain. BLE Audio/Rhythm frames continue to select LEVEL versus
+FFT and visualizer mode, so no new BLE command or application behaviour is
+required.
 
 `IDotMatrixWLEDAdapter` stores only the current family, mode, level and eight
-FFT bands. All ten BUILD80 renderers draw a temporary 16x16 legacy canvas on
-the stack and scale it immediately into the existing renderer canvas. There is
-no persistent second framebuffer. Animated visualizers are refreshed at an
-80 ms cadence while `iDotMatrix Display` owns the selected segment.
+FFT bands. With local override enabled, incoming BLE frames update family/mode
+but cannot overwrite the locally supplied level/bands. All ten renderers draw a
+temporary 16x16 legacy canvas on the stack and scale it immediately into the
+existing renderer canvas. There is no persistent second framebuffer. Animated
+visualizers are refreshed at an 80 ms cadence while `iDotMatrix Display` owns
+the selected segment; local AudioReactive data is sampled at a 40 ms cadence.

@@ -1,7 +1,8 @@
 # Build profiles and hardware targets
 
-Version 0.8.1 keeps two independent build choices that were previously
-combined in the old single `esp32dev_idotmatrix` example:
+Version 0.8.2-rc.2 keeps the 0.8.1 hardware/media profile model and retains the
+explicit optional AudioReactive profile for ESP32-C3. The two independent build
+choices remain:
 
 1. **iDotMatrix media profile** — the largest logical GIF/protocol resolution
    compiled into the Usermod (`16x16`, `32x32`, or `64x64`);
@@ -9,7 +10,7 @@ combined in the old single `esp32dev_idotmatrix` example:
    for HUB75, the controller/pinout selected by WLED.
 
 Classic/media/HUB75 profiles retain the WLED v16.0.1 build family. The supported
-ESP32-C3 profile is intentionally separate and targets pinned WLED commit
+ESP32-C3 profiles are intentionally separate and target pinned WLED commit
 `d55037f7510541eddc390c8f3d01afc5787aa44a`, whose `esp32c3dev` environment uses
 ESP-IDF 5/shared-RMT. Profiles inherit the matching WLED board definitions and
 driver flags rather than duplicating them.
@@ -87,9 +88,37 @@ Hardware evidence behind the support decision:
 | IDF 4.4.8 legacy RMT + BLE | same class of spikes despite more heap |
 | IDF 5.5.4 shared-RMT + BLE | no spikes through advertising, connection, images, GIFs, WLED effects and ~100 media changes |
 
-The final stress snapshot retained about 74 KB free heap and a 64 KB largest
-contiguous block with `reset=poweron`. The old development profiles are recorded
-in `HISTORY.md` but are not shipped as build choices in the stable package.
+The final 0.8.1 stress snapshot retained about 74 KB free heap and a 64 KB
+largest contiguous block with `reset=poweron`.
+
+### ESP32-C3 AudioReactive development profile
+
+The 0.9 line retains the second C3 override introduced for AudioReactive testing:
+
+```text
+platformio_override.ini.c3-audio
+env:esp32c3dev_idotmatrix_audio_16x16
+```
+
+It uses the **same pinned WLED commit, IDF5/shared-RMT backend, NimBLE 2.5.1,
+AnimatedGIF 1.4.7, partition layout and iDotMatrix media profile** as the normal
+C3 build. The only intentional Usermod difference is:
+
+```ini
+custom_usermods =
+  audioreactive
+  symlink://../wled-usermod-idotmatrix
+```
+
+AudioReactive is not forced enabled at compile time and microphone GPIOs are not
+hard-coded by this project. Configure those through WLED AudioReactive. The
+normal `platformio_override.ini.c3` remains iDotMatrix-only.
+
+The user-reported pre-development feasibility test on the same C3/IDF5 base ran
+AudioReactive I2S processing, BLE-connected iDotMatrix, a heavy GIF with 32
+cached frames and two WLED WebSockets concurrently without LED spikes or reboot.
+That experiment motivates this profile but does **not** constitute hardware
+validation of the optional AudioReactive source-routing implementation.
 
 ## HUB75 targets
 
@@ -117,16 +146,17 @@ HUB75 geometry remains WLED's responsibility.
 
 ## Usermod inheritance policy
 
-Every supplied override sets `custom_usermods` to only:
+Normal supplied overrides explicitly set `custom_usermods` to only:
 
 ```ini
 custom_usermods =
   symlink://../wled-usermod-idotmatrix
 ```
 
-Do not inherit `${env:<base>.custom_usermods}` here. WLED base environments can
-include AudioReactive; inheriting it changed the memory budget and was the cause
-of misleading low-heap behavior during 0.8.0 validation.
+Do not inherit `${env:<base>.custom_usermods}`. WLED base environments may gain
+additional Usermods over time, which would silently change memory and behaviour.
+The deliberate 0.8.2-rc.2 exception is `platformio_override.ini.c3-audio`,
+which explicitly lists **exactly** `audioreactive` plus iDotMatrix.
 
 ## Framework pinning
 
@@ -204,9 +234,18 @@ pio run -e esp32c3dev_idotmatrix_16x16 -t clean
 pio run -e esp32c3dev_idotmatrix_16x16
 ```
 
-Expected `/json/info` markers include `release=0.8.1`, `build=0.8.1-audit-fix1`,
-`RMT+BLE=ESP32-C3 shared-RMT`, `framework=WLED IDF5/shared-RMT`,
-`wledBase=d55037f`, and `nimble=2.x API`.
+For C3 + WLED AudioReactive:
+
+```sh
+cp ../wled-usermod-idotmatrix/platformio_override.ini.c3-audio platformio_override.ini
+pio run -e esp32c3dev_idotmatrix_audio_16x16 -t clean
+pio run -e esp32c3dev_idotmatrix_audio_16x16
+```
+
+Expected `/json/info` markers for this development tree include
+`release=0.8.2`, `build=0.8.2-rc.2`, `RMT+BLE=ESP32-C3 shared-RMT`,
+`framework=WLED IDF5/shared-RMT`, `wledBase=d55037f`, `nimble=2.x API`, and the
+new audio-source diagnostics.
 
 Example: WLED's MOONHUB/LilyGo T7-S3 HUB75 target plus iDotMatrix:
 

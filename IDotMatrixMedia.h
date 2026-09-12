@@ -25,6 +25,7 @@ public:
   bool beginGif(size_t byteLength) override;
   bool writeGif(size_t offset, const uint8_t* data, size_t length) override;
   bool completeGif(bool crcValid) override;
+  bool queueStoredGif(const char* path) override;
   void cancelGifReceive();
   bool gifUsesFrameCache() const override { return useFrameCache(); }
   void stopPlayback() override;

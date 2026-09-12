@@ -36,8 +36,14 @@ bool IDotMatrixBulkTransfer::processPacket(
   result.type = type;
   const uint32_t totalSize = readLE32(data + 5);
   const uint32_t expectedCRC = readLE32(data + 9);
+  const uint8_t option = data[4];
+  const uint16_t timeSign = uint16_t(data[13]) | (uint16_t(data[14]) << 8);
+  const uint8_t imageIndex = data[15];
   result.totalLength = totalSize;
   result.expectedCRC = expectedCRC;
+  result.option = option;
+  result.timeSign = timeSign;
+  result.imageIndex = imageIndex;
 
   const uint32_t maximumSize = type == TEXT_TYPE ? MAX_TEXT_PAYLOAD :
     type == RAW_TYPE ? MAX_RAW_PAYLOAD : MAX_GIF_PAYLOAD;
@@ -56,6 +62,9 @@ bool IDotMatrixBulkTransfer::processPacket(
     expectedCRC_ = expectedCRC;
     runningCRC_ = 0xFFFFFFFFu;
     receivedSize_ = 0;
+    option_ = option;
+    timeSign_ = timeSign;
+    imageIndex_ = imageIndex;
     if (type == TEXT_TYPE) {
       textPayloadLength_ = 0;
       textReady_ = false;
@@ -63,10 +72,19 @@ bool IDotMatrixBulkTransfer::processPacket(
     result.began = true;
   } else if (type != activeType_ || totalSize != expectedSize_ ||
              expectedCRC != expectedCRC_) {
+    // Only the transfer identity (type/size/CRC) is required to remain stable
+    // across chunks.  The app does not guarantee that Device Assets metadata
+    // bytes are repeated verbatim in every continuation packet.  Latch option,
+    // dwell and slot from the first packet and expose those latched values for
+    // the whole transaction instead of aborting a valid multi-chunk asset.
     resetActive();
     result.aborted = true;
     return true;
   }
+
+  result.option = option_;
+  result.timeSign = timeSign_;
+  result.imageIndex = imageIndex_;
 
   const size_t payloadLength = length - HEADER_SIZE;
   const uint32_t remaining = expectedSize_ - receivedSize_;
@@ -126,6 +144,9 @@ void IDotMatrixBulkTransfer::resetActive() {
   expectedCRC_ = 0;
   runningCRC_ = 0xFFFFFFFFu;
   receivedSize_ = 0;
+  option_ = 0;
+  timeSign_ = 0;
+  imageIndex_ = 12;
 }
 
 void IDotMatrixBulkTransfer::reset() {

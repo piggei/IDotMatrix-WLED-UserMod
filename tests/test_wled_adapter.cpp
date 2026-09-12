@@ -145,6 +145,34 @@ int main() {
   strip.renderEffect();
   assert(strip.segmentRef().colorAt(7, 0) != 0);
 
+  // Local audio override keeps the visualizer family/mode selected by BLE but
+  // replaces phone amplitude data with the local provider sample.
+  adapter.setAudioDataOverride(true);
+  const uint8_t localBands[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+  adapter.updateAudioSample(7, localBands);
+  IDotMatrixAudioSettings noisyPhone{};
+  noisyPhone.fft = true;
+  noisyPhone.mode = 4;
+  noisyPhone.level = 12;
+  for (uint8_t& band : noisyPhone.bands) band = 12;
+  adapter.onAudio(noisyPhone);
+  assert(adapter.audioDataOverride());
+  assert(adapter.audioUsesFFT());
+  assert(adapter.audioMode() == 4);
+  assert(adapter.audioLevel() == 7);
+  assert(adapter.audioBand(0) == 1 && adapter.audioBand(7) == 8);
+
+  // Returning to phone mode restores the original protocol semantics.
+  adapter.setAudioDataOverride(false);
+  noisyPhone.fft = false;
+  noisyPhone.mode = 2;
+  noisyPhone.level = 11;
+  adapter.onAudio(noisyPhone);
+  assert(!adapter.audioDataOverride());
+  assert(!adapter.audioUsesFFT());
+  assert(adapter.audioMode() == 2);
+  assert(adapter.audioLevel() == 11);
+
   IDotMatrixLightEffectSettings light{};
   light.effect = 3;
   light.speed = 50;
@@ -170,6 +198,11 @@ int main() {
   // A WLED-side effect selection is an explicit source change. It releases the
   // iDotMatrix canvas; the next iDotMatrix effect command can reclaim it.
   strip.segmentRef().setMode(42);
+  // The callback heartbeat intentionally owns the framebuffer for a short
+  // grace period so a newly started Carousel/Clock is not cleared while WLED
+  // still exposes the previous native Segment::mode. Once the heartbeat has
+  // expired, native WLED ownership is authoritative again.
+  testMillis += 301;
   adapter.syncWLEDControl();
   assert(!adapter.isLightEffectActive());
   assert(!renderer.isVisible());
@@ -241,6 +274,11 @@ int main() {
   adapter.onCountdown(countdown);
   assert(adapter.isCountdownRunning());
   strip.segmentRef().setMode(42);
+  // The callback heartbeat intentionally owns the framebuffer for a short
+  // grace period so a newly started Carousel/Clock is not cleared while WLED
+  // still exposes the previous native Segment::mode. Once the heartbeat has
+  // expired, native WLED ownership is authoritative again.
+  testMillis += 301;
   adapter.syncWLEDControl();
   assert(!adapter.isCountdownActive());
   assert(adapter.isCountdownRunning());
@@ -268,6 +306,11 @@ int main() {
   adapter.onStopwatch(3);
   assert(adapter.isStopwatchRunning());
   strip.segmentRef().setMode(42);
+  // The callback heartbeat intentionally owns the framebuffer for a short
+  // grace period so a newly started Carousel/Clock is not cleared while WLED
+  // still exposes the previous native Segment::mode. Once the heartbeat has
+  // expired, native WLED ownership is authoritative again.
+  testMillis += 301;
   adapter.syncWLEDControl();
   assert(!adapter.isStopwatchActive());
   assert(adapter.isStopwatchRunning());
@@ -377,7 +420,8 @@ int main() {
   assert(!mediaAdapter.isDisplayEffectActive());
   assert(strip.segmentRef().mode == 42);
   // LZW12/no-PSRAM frame-cache preparation must keep iDotMatrix Display
-  // inactive until the decoder has been released and the cache is ready.
+  // selected while the decoder/cache is prepared, so WLED UI/presets retain
+  // the dedicated effect ID throughout the transient blank staging phase.
   TestMediaSink cacheMedia;
   cacheMedia.cacheMode = true;
   IDotMatrixWLEDAdapter cacheAdapter(renderer, &cacheMedia);
@@ -386,10 +430,10 @@ int main() {
   strip.segmentRef().colors[0] = RGBW32(0x12, 0x34, 0x56, 0);
   assert(cacheAdapter.onGifComplete(true));
   assert(!cacheAdapter.isGifActive());
-  assert(!cacheAdapter.isDisplayEffectActive());
-  assert(strip.segmentRef().mode == FX_MODE_STATIC);
-  // Cached-GIF staging keeps Static internally for its low RAM cost, but temporarily makes
-  // the physical panel black while the frame cache is being built.
+  assert(cacheAdapter.isDisplayEffectActive());
+  assert(strip.segmentRef().mode == cacheAdapter.displayEffectId());
+  // Cached-GIF staging temporarily makes the physical panel black while the
+  // frame cache is being built, without changing the public WLED effect.
   assert(strip.segmentRef().colors[0] == BLACK);
   strip.renderEffect();
   assert(strip.segmentRef().colorAt(0, 0) == BLACK);
@@ -403,6 +447,7 @@ int main() {
   assert(strip.segmentRef().colors[0] == RGBW32(0x12, 0x34, 0x56, 0));
 
   strip.segmentRef().setMode(42);
+  testMillis += 301;
   cacheAdapter.syncWLEDControl();
   assert(!cacheAdapter.isGifActive());
   assert(cacheMedia.stopCount == 1);
@@ -427,7 +472,7 @@ int main() {
 
   assert(replaceAdapter.onGifComplete(true));
   assert(!replaceAdapter.isGifActive());
-  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().mode == replaceAdapter.displayEffectId());
   assert(strip.segmentRef().colors[0] == BLACK);
   replaceAdapter.syncGifPlayback(false, true);
   assert(!replaceAdapter.isGifActive());
@@ -438,7 +483,7 @@ int main() {
 
   // The next replacement attempt must still be able to stage and publish.
   assert(replaceAdapter.onGifComplete(true));
-  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().mode == replaceAdapter.displayEffectId());
   assert(strip.segmentRef().colors[0] == BLACK);
   replaceAdapter.syncGifPlayback(true, false);
   assert(replaceAdapter.isGifActive());
@@ -459,7 +504,7 @@ int main() {
   assert(clockAdapter.isDisplayEffectActive());
   assert(renderer.isVisible());
   assert(clockAdapter.onGifComplete(true));
-  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().mode == clockAdapter.displayEffectId());
   assert(strip.segmentRef().colors[0] == BLACK);
   assert(!renderer.isVisible());
   clockAdapter.syncGifPlayback(false, true);
@@ -485,7 +530,7 @@ int main() {
   assert(lightAdapter.isLightEffectActive());
   assert(lightAdapter.isDisplayEffectActive());
   assert(lightAdapter.onGifComplete(true));
-  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().mode == lightAdapter.displayEffectId());
   assert(!renderer.isVisible());
   lightAdapter.syncGifPlayback(false, true);
   assert(lightAdapter.isLightEffectActive());
@@ -501,7 +546,7 @@ int main() {
   strip.segmentRef().setMode(42);
   strip.segmentRef().colors[0] = RGBW32(0x41, 0x42, 0x43, 0);
   assert(cancelAdapter.onGifComplete(true));
-  assert(strip.segmentRef().mode == FX_MODE_STATIC);
+  assert(strip.segmentRef().mode == cancelAdapter.displayEffectId());
   assert(strip.segmentRef().colors[0] == BLACK);
   strip.segmentRef().setMode(43);
   cancelAdapter.syncWLEDControl();

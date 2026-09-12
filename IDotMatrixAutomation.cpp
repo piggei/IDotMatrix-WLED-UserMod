@@ -65,6 +65,62 @@ void IDotMatrixAutomation::begin() {
   begun_ = true;
 }
 
+void IDotMatrixAutomation::resetPersistent() {
+  if (!begun_) begin();
+
+  // Stop active runtime ownership first, but do not restore the effect that was
+  // captured before an alarm/program: reset intentionally clears iDotMatrix
+  // runtime content and persistent automation state in one transaction.
+  alarmActive_ = false;
+  activeAlarmSlot_ = 0xFF;
+  alarmEndsAt_ = 0;
+  alarmReturnValid_ = false;
+  scheduleActiveIndex_ = -1;
+  scheduleFailedIndex_ = -1;
+  scheduleReturnValid_ = false;
+  cancelScheduleUpload();
+  buzzer_.stop();
+  alarmBuzzerOwned_ = false;
+  scheduleBuzzerOwned_ = false;
+  adapter_.cancelAutomationContent();
+
+  for (uint8_t slot = 0; slot < IDotMatrixAlarmSettings::SLOT_COUNT; ++slot) {
+    if (alarmPrefs_ != nullptr) {
+      char key[8];
+      snprintf(key, sizeof(key), "a%u", unsigned(slot));
+      alarmPrefs_->remove(key);
+    }
+    alarms_[slot] = AlarmSlot{};
+    alarms_[slot].lastTriggerMinuteKey = 0xFFFFFFFFu;
+    char path[20];
+    alarmPath(slot, path, sizeof(path));
+    WLED_FS.remove(path);
+  }
+
+  scheduleGlobalFlags_ = 0;
+  if (schedulePrefs_ != nullptr) schedulePrefs_->remove("flags");
+  for (uint8_t index = 0; index < IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES; ++index) {
+    if (schedulePrefs_ != nullptr) {
+      char key[8];
+      snprintf(key, sizeof(key), "s%u", unsigned(index));
+      schedulePrefs_->remove(key);
+    }
+    scheduleActivities_[index] = ScheduleActivity{};
+    char path[20];
+    schedulePath(index, path, sizeof(path)); WLED_FS.remove(path);
+    scheduleTempPath(index, path, sizeof(path)); WLED_FS.remove(path);
+    scheduleBackupPath(index, path, sizeof(path)); WLED_FS.remove(path);
+  }
+
+  // Reset scheduling edge state only.  The last valid application time sync is
+  // intentionally retained; WLED/system time remains authoritative when valid.
+  lastAlarmCheckAt_ = 0;
+  scheduleReceivedMask_ = 0;
+  scheduleUploadDirty_ = false;
+  scheduleLastRxMs_ = 0;
+  lastError_ = Error::None;
+}
+
 void IDotMatrixAutomation::loadPersistence() {
   alarmPrefs_ = new (std::nothrow) Preferences();
   schedulePrefs_ = new (std::nothrow) Preferences();

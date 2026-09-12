@@ -123,6 +123,8 @@ void IDotMatrixBLEServer::loop() {
       deviceInfoPushAt_ = millis() + 1200;
     } else {
       bulkTransfer_.reset();
+      if (carouselTransferReady_) protocol_.cancelCarouselAsset();
+      carouselTransferReady_ = false;
       protocol_.completeRawImage(false);
       protocol_.completeGif(false);
       rawTransferReady_ = false;
@@ -167,6 +169,8 @@ void IDotMatrixBLEServer::loop() {
     portEXIT_CRITICAL(&queueMux_);
     free(detachedFaBuffer);
     bulkTransfer_.reset();
+    if (carouselTransferReady_) protocol_.cancelCarouselAsset();
+    carouselTransferReady_ = false;
     protocol_.completeRawImage(false);
     protocol_.completeGif(false);
     rawTransferReady_ = false;
@@ -424,15 +428,39 @@ void IDotMatrixBLEServer::processFA02Complete(
   }
   IDotMatrixBulkResult bulkResult;
   if (bulkTransfer_.processPacket(data, length, bulkResult)) {
+    const bool carouselAsset =
+      (bulkResult.type == 0x01 || bulkResult.type == 0x03) && bulkResult.imageIndex < 12;
+
     if (bulkResult.aborted) {
+      if (carouselTransferReady_) protocol_.cancelCarouselAsset();
       protocol_.completeRawImage(false);
       protocol_.completeGif(false);
       rawTransferReady_ = false;
       gifTransferReady_ = false;
+      carouselTransferReady_ = false;
     }
 
-    if (bulkResult.type == 0x01) {
+    if (carouselAsset) {
       if (bulkResult.began) {
+        carouselTransferReady_ = protocol_.beginCarouselAsset(
+          bulkResult.type,
+          bulkResult.imageIndex,
+          bulkResult.timeSign,
+          bulkResult.totalLength
+        );
+      }
+      if (bulkResult.chunkLength > 0 && carouselTransferReady_) {
+        carouselTransferReady_ = protocol_.writeCarouselAsset(
+          bulkResult.chunkOffset, bulkResult.chunkData, bulkResult.chunkLength
+        );
+      }
+      if (bulkResult.completed) {
+        protocol_.completeCarouselAsset(bulkResult.crcValid && carouselTransferReady_);
+        carouselTransferReady_ = false;
+      }
+    } else if (bulkResult.type == 0x01) {
+      if (bulkResult.began) {
+        protocol_.suspendCarousel();
         gifTransferReady_ = protocol_.beginGif(bulkResult.totalLength);
       }
       if (bulkResult.chunkLength > 0 && gifTransferReady_) {
@@ -446,9 +474,7 @@ void IDotMatrixBLEServer::processFA02Complete(
       }
     } else if (bulkResult.type == 0x02) {
       if (bulkResult.began) {
-        // The transfer's total length is validated by the renderer when the
-        // first chunk arrives. For sequential RAW data, its final byte count
-        // must match the logical RGB framebuffer exactly.
+        protocol_.suspendCarousel();
         rawTransferReady_ = protocol_.beginRawImage(bulkResult.totalLength);
       }
       if (bulkResult.chunkLength > 0 && rawTransferReady_) {
@@ -463,6 +489,7 @@ void IDotMatrixBLEServer::processFA02Complete(
         rawTransferReady_ = false;
       }
     } else if (bulkResult.type == 0x03 && bulkResult.completed && bulkResult.crcValid) {
+      protocol_.suspendCarousel();
       protocol_.processTextPayload(
         bulkTransfer_.textPayload(),
         bulkTransfer_.textPayloadLength()

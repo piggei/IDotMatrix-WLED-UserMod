@@ -11,5 +11,6 @@ public:
   virtual bool writeGif(size_t offset, const uint8_t* data, size_t length) = 0;
   virtual bool completeGif(bool crcValid) = 0;
   virtual bool gifUsesFrameCache() const { return false; }
+  virtual bool queueStoredGif(const char* path) { (void)path; return false; }
   virtual void stopPlayback() = 0;
 };

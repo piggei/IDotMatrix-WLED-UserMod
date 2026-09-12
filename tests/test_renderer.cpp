@@ -300,4 +300,98 @@ int main() {
   renderer.renderText(15);
   pixel = renderer.pixel(15, 0);
   assert(pixel != nullptr && pixel->red == 4 && pixel->green == 5 && pixel->blue == 6);
+
+  // 0.8.2: page capacity is derived from the logical matrix geometry,
+  // never from a hard-coded glyph count.
+  assert(renderer.begin(0x01));
+  assert(renderer.beginText(
+    5, 8, 16, 16, 0, 100, 1,
+    30, 40, 50, false, 0, 0, 0, 0
+  ));
+  assert(renderer.textVisibleCapacity() == 2);
+  assert(renderer.textFirstVisibleGlyph() == 0);
+
+  uint8_t pageGlyphs[5][16]{};
+  for (uint8_t glyph = 0; glyph < 5; ++glyph) {
+    pageGlyphs[glyph][0] = uint8_t(1u << glyph);
+    assert(renderer.setTextGlyph(glyph, pageGlyphs[glyph], sizeof(pageGlyphs[glyph])));
+  }
+  renderer.renderText(0);
+  pixel = renderer.pixel(0, 0); // glyph 0, column 0
+  assert(pixel && pixel->red == 30);
+  renderer.renderText(255); // 17 logical rows * 15 ms at speed 100
+  assert(renderer.textFirstVisibleGlyph() == 2);
+  expectBlack(renderer.pixel(0, 0));
+  pixel = renderer.pixel(2, 0); // glyph 2 becomes the first visible glyph
+  assert(pixel && pixel->red == 30);
+  renderer.renderText(510);
+  assert(renderer.textFirstVisibleGlyph() == 4);
+  renderer.renderText(765);
+  assert(renderer.textFirstVisibleGlyph() == 0); // short final page wraps cleanly
+
+  // UP/DOWN use a continuous page tape with a one-pixel logical gap. There
+  // must never be a completely blank transition between long-text pages.
+  uint8_t solidGlyph[16];
+  memset(solidGlyph, 0xFF, sizeof(solidGlyph));
+  for (uint8_t direction = 3; direction <= 4; ++direction) {
+    assert(renderer.beginText(
+      4, 8, 16, 16, direction, 100, 1,
+      60, 70, 80, false, 0, 0, 0, 0
+    ));
+    for (uint8_t glyph = 0; glyph < 4; ++glyph) {
+      assert(renderer.setTextGlyph(glyph, solidGlyph, sizeof(solidGlyph)));
+    }
+    renderer.renderText(0);
+    assert(countNonBlack(renderer) > 0);
+    for (uint32_t tick = 15; tick <= 255; tick += 15) {
+      renderer.renderText(tick);
+      assert(countNonBlack(renderer) > 0);
+    }
+    assert(renderer.textFirstVisibleGlyph() == 2);
+  }
+
+  // Page-based visual effects consume all glyphs without resetting their
+  // animation epoch.  One page duration at speed 100 is 255 ms.
+  const uint8_t pageEffects[] = {0, 5, 6, 7, 8};
+  for (uint8_t effect : pageEffects) {
+    assert(renderer.beginText(
+      4, 8, 16, 16, effect, 100, 1,
+      90, 100, 110, false, 0, 0, 0, 0
+    ));
+    for (uint8_t glyph = 0; glyph < 4; ++glyph) {
+      assert(renderer.setTextGlyph(glyph, solidGlyph, sizeof(solidGlyph)));
+    }
+    renderer.renderText(0);
+    renderer.renderText(255);
+    assert(renderer.textFirstVisibleGlyph() == 2);
+  }
+
+  // Blink proves phase continuity: at 400 ms the global animation phase is in
+  // its hidden half-cycle. Resetting the epoch at the 255 ms page change would
+  // make the text visible here.
+  assert(renderer.beginText(
+    4, 8, 16, 16, 5, 100, 1,
+    120, 130, 140, false, 0, 0, 0, 0
+  ));
+  for (uint8_t glyph = 0; glyph < 4; ++glyph) {
+    assert(renderer.setTextGlyph(glyph, solidGlyph, sizeof(solidGlyph)));
+  }
+  renderer.renderText(0);
+  renderer.renderText(255);
+  renderer.renderText(400);
+  assert(renderer.textFirstVisibleGlyph() == 2);
+  assert(countNonBlack(renderer) == 0);
+
+  // The same viewport math scales naturally to larger logical profiles.
+  assert(renderer.begin(0x04));
+  assert(renderer.beginText(
+    9, 8, 16, 16, 0, 50, 1,
+    1, 1, 1, false, 0, 0, 0, 0
+  ));
+  assert(renderer.textVisibleCapacity() == 8);
+  assert(renderer.beginText(
+    5, 16, 32, 64, 0, 50, 1,
+    1, 1, 1, false, 0, 0, 0, 0
+  ));
+  assert(renderer.textVisibleCapacity() == 4);
 }

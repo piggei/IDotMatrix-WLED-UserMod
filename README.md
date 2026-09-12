@@ -1,9 +1,10 @@
 # WLED iDotMatrix Usermod
 
-> **Release 0.8.1 / build 0.8.1-audit-fix1:** final public source release.
-> This is the exact corrective build that completed the final ESP32-C3 hardware
-> qualification after the independent release audit. It keeps the validated
-> ESP32-C3 IDF5/shared-RMT path and the established classic-ESP32/WLED 16.0.1 path.
+> **Release 0.8.2 / build 0.8.2-rc.2:** release candidate focused on protocol convergence with original iDotMatrix behaviour while retaining the hardware-qualified 0.8.1 platform baseline.
+
+> **Important for dev.6-dev.11 testers:** dev.12 moves `iDotMatrix Display` out of a reserved WLED effect hole and appends it after the built-in effect table. Any WLED preset saved with the old numeric custom-effect ID must be saved once again after flashing dev.12.
+> It is based on the hardware-qualified 0.8.1 code and adds optional WLED
+> AudioReactive input for the existing iDotMatrix Audio/Rhythm visualizers.
 
 WLED Usermod for the ESP32 family that emulates an iDotMatrix BLE peripheral
 and lets the official iDotMatrix app drive a WLED 2D matrix. WLED remains the
@@ -12,36 +13,58 @@ HTTP/JSON APIs, Home Assistant, mapping and network realtime protocols; the
 Usermod adds the iDotMatrix-compatible BLE peripheral and renders app content
 through the `iDotMatrix Display` WLED effect.
 
-## Release status
+## Development status
 
-Release **0.8.1** is the current public release. The released source remains
-identified internally as build **0.8.1-audit-fix1**, because that is the exact
-corrective revision that passed the final hardware qualification. Keeping the
-validated build identifier makes the published source unambiguous without
-changing the public release number.
+**0.8.2-rc.2** keeps the AudioReactive source integration, the dev.2
+Device Info / Schedule ACK corrections, the hardware-validated dev.3 TEXT
+renderer, and the dev.4 persistent 12-slot Device Assets bank.  This build fixes
+Carousel activation and multi-chunk asset routing based on the first C3 hardware
+tests. ESP32-S3, HUB75 and the unknown third 64x64 TEXT format remain pending.
 
-Two stable build families are intentionally maintained because the proven LED/BLE
-backend differs by MCU:
+The new audio-source setting has three modes:
+
+| Setting | Behaviour |
+|---|---|
+| **Phone / BLE** | Original 0.8.1 behaviour. Level/FFT data sent by the iDotMatrix app drives the visualizer. This remains the default. |
+| **WLED AudioReactive** | Uses WLED AudioReactive's processed local audio data. BLE Audio/Rhythm frames still select LEVEL/FFT and visualizer mode, but phone amplitude/spectrum data is ignored. If AudioReactive data is unavailable, the visualizer receives silence. |
+| **Auto** | Prefers WLED AudioReactive data when available and falls back to the original Phone / BLE stream otherwise. |
+
+The Usermod does **not** open a second I2S input and does not run a second FFT.
+It consumes the data already exported by WLED AudioReactive. Its 16 GEQ bins are
+reduced to the eight legacy iDotMatrix bands by averaging adjacent bin pairs,
+then mapping the 0..255 values to the renderer's 0..12 range.
+
+A dedicated C3 test profile is supplied as `platformio_override.ini.c3-audio`.
+The normal `platformio_override.ini.c3` remains iDotMatrix-only so users who do
+not need local audio keep the lower RAM footprint. The C3 audio profile uses the
+same pinned WLED IDF5/shared-RMT base and NimBLE 2.5.1 as the validated 0.8.1
+C3 build; it only adds `audioreactive` to `custom_usermods`.
+
+### Persistent Device Assets / Carousel
+
+The Usermod stores one 12-slot Device Assets bank in LittleFS. GIF and TEXT
+slots may be mixed and each slot retains its app-provided dwell time. After a
+page upload, playback starts automatically once the transfer stream becomes
+quiet; no separate app-side "play Carousel" command is required.
+
+WLED remains authoritative at boot. If `iDotMatrix Display` is configured as
+the WLED boot effect and a valid stored Carousel exists, that Carousel becomes
+the startup content. Selecting a native WLED effect suspends Carousel playback
+without deleting the bank; selecting `iDotMatrix Display` again resumes it.
+
+### Stable baseline carried into 0.9
+
+Release 0.8.1 remains the last public stable baseline. Two hardware families
+were qualified there:
 
 | Target | WLED base | Arduino / ESP-IDF | LED/BLE path | NimBLE |
 |---|---|---|---|---|
 | classic ESP32 (`esp32dev`) | WLED 16.0.1 | Arduino 2.0.17 / IDF 4.4.7 in supplied overrides | I2S LED output + BLE | 1.4.3 |
 | ESP32-C3 4 MB | pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a` | Arduino 3.3.8 / IDF 5.5.4 | WLED shared-RMT + BLE | 2.5.1 |
 
-The C3 support decision is based on physical testing, not compilation alone. The
-legacy IDF4 RMT path reproduced visible LED spikes, strongly amplified by BLE.
-The pinned IDF5/shared-RMT path completed BLE advertising/connection, images,
-animated GIFs, WLED effects, WebSocket use, program/schedule operation and
-extended switching stress without reported LED instability or reboot. The final
-`0.8.1-audit-fix1` qualification performed about 50 WLED effect changes, 50
-iDotMatrix content/effect changes, and another 50 WLED effect changes. Its final
-`/json/info` reported 75,296 bytes free heap, a 65,536-byte largest contiguous
-block, `gifProbe=79444`, and a 69,632-byte probe largest block. The IDF5 reset
-reason diagnostic reported `unknown`; no reset was observed during the run.
-
-The C3 WLED base identifies itself as `17.0.0-devV5`, so WLED's Web UI displays
-its normal development-build warning. That warning is expected; 0.8.1 pins the
-exact tested WLED commit rather than an arbitrary nightly.
+The 0.8.1 C3 qualification covered BLE, images/GIFs, WLED effects, WebSocket
+traffic, schedules and extended switching stress with no reported LED spikes or
+reboot. The same C3 base is intentionally retained for 0.8.2-rc.2.
 
 ### Hardware validation scope
 
@@ -63,6 +86,7 @@ firmware. The settings page never offers a profile larger than that capacity:
 |---|---|---|
 | `platformio_override.ini.example` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
 | `platformio_override.ini.c3` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
+| `platformio_override.ini.c3-audio` / same media profile + AudioReactive | 16x16 | hidden and forced off |
 | `platformio_override.ini.32x32` / LZW11 | 16x16, 32x32 | available for tests |
 | `.64x64` or `.64x64-lite` / LZW12 | 16x16, 32x32, 64x64 | available for tests |
 
@@ -79,7 +103,7 @@ For normal use select the `ScreenType` matching the physical WLED matrix.
 | Brightness | FA02 | WLED master brightness | Verified |
 | Full-screen RGB | FA02 | `iDotMatrix Display` framebuffer | Verified; isolated from native WLED state |
 | Standalone light effects (7) | FA02 `03 02` | locally rendered by `iDotMatrix Display` | Hardware-validated, including one-pixel scrolling for effects 3/4/5 |
-| Audio/Rhythm (5 LEVEL + 5 FFT) | FA02 stream `06 00 00 02` / `21 00 01 02` | locally rendered by `iDotMatrix Display` | Hardware-validated |
+| Audio/Rhythm (5 LEVEL + 5 FFT) | FA02 stream `06 00 00 02` / `21 00 01 02`; optional WLED AudioReactive source | locally rendered by `iDotMatrix Display` | Phone/BLE path hardware-validated in 0.8.1; optional local AudioReactive source included in 0.8.2 |
 | Countdown | FA02 `08 80` | local timer icon + `MM:SS` under `iDotMatrix Display` | Hardware-validated; async finish status on FA03 |
 | Stopwatch | FA02 `09 80` | local timer icon + `MM:SS` under `iDotMatrix Display` | Hardware-validated |
 | Scoreboard | FA02 `0A 80` | locally rendered blue/white/red score under `iDotMatrix Display` | Hardware-validated |
@@ -95,7 +119,7 @@ For normal use select the `ScreenType` matching the physical WLED matrix.
 | 64x64 profile | profile `0x04` | logical profile + optional low-memory rescale | Hardware-validated with physical 16x16/no PSRAM |
 
 Alarms and programs/schedules include persistent metadata/media and active-buzzer
-integration. Display rotation, energy-saving, and reset policy remain owned by WLED
+integration. Display rotation and energy-saving remain owned by WLED; the verified `03 80` protocol reset clears Usermod-owned Carousel/alarm/program state without rebooting WLED
 rather than duplicated in the BLE emulator.
 
 ## Hardware requirements
@@ -209,13 +233,15 @@ symlink:
 
 - classic ESP32 16x16: `platformio_override.ini.example` with WLED 16.0.1;
 - ESP32-C3 16x16: `platformio_override.ini.c3` with the pinned WLED IDF5 commit;
+- ESP32-C3 16x16 + AudioReactive: `platformio_override.ini.c3-audio` on the same
+  pinned WLED base;
 - larger logical classic/S3/HUB75 profiles remain in the repository for the
-  previously documented validation/development cases and are **not** newly
-  promoted by 0.8.1.
+  previously documented validation/development cases and are not promoted by
+  this first 0.9 build.
 
-Every supplied override sets `custom_usermods` to only
-`symlink://../wled-usermod-idotmatrix`; do not inherit WLED's default Usermod
-list implicitly.
+Normal overrides keep only iDotMatrix in `custom_usermods`. The C3 audio profile
+explicitly lists `audioreactive` plus iDotMatrix; no profile inherits WLED's
+default Usermod list implicitly.
 
 ### 2a. ESP32-C3: pinned WLED source
 
@@ -228,11 +254,20 @@ git checkout d55037f7510541eddc390c8f3d01afc5787aa44a
 cp ../wled-usermod-idotmatrix/platformio_override.ini.c3 platformio_override.ini
 ```
 
-Use Node.js 20+ and PlatformIO. Under WSL/Linux:
+Use Node.js 20+ and PlatformIO. Under WSL/Linux, the normal C3 build is:
 
 ```bash
 pio run -e esp32c3dev_idotmatrix_16x16 -t clean
 pio run -e esp32c3dev_idotmatrix_16x16
+```
+
+For C3 + AudioReactive, replace the copied override and build its separate
+environment:
+
+```bash
+cp ../wled-usermod-idotmatrix/platformio_override.ini.c3-audio platformio_override.ini
+pio run -e esp32c3dev_idotmatrix_audio_16x16 -t clean
+pio run -e esp32c3dev_idotmatrix_audio_16x16
 ```
 
 Do not substitute WLED 16.0.1 or a random nightly for the C3 release build. The
@@ -258,6 +293,9 @@ pio run -e esp32dev_idotmatrix_16x16 -t upload
 
 # ESP32-C3
 pio run -e esp32c3dev_idotmatrix_16x16 -t upload
+
+# ESP32-C3 + AudioReactive
+pio run -e esp32c3dev_idotmatrix_audio_16x16 -t upload
 ```
 
 With WSL2, attach the USB device to WSL using `usbipd-win` before upload. The
@@ -291,7 +329,10 @@ A successful connection should let the app control the WLED matrix directly.
   from the ESP32 eFuse MAC;
 - `rescale`: test-only nearest-neighbour mapping from a deliberately mismatched logical profile to the selected WLED 2D segment/storage canvas; hidden and forced off in the standard 16x16 build;
 - `buzzer-pin`: optional GPIO for an active buzzer; leave unassigned to disable it;
-- `buzzerActiveHigh`: selects active-high or active-low buzzer polarity.
+- `buzzerActiveHigh`: selects active-high or active-low buzzer polarity;
+- `audioSource`: `Phone / BLE` (default), `WLED AudioReactive`, or `Auto`. The
+  AudioReactive choices consume WLED's existing processed audio data when the
+  AudioReactive Usermod is compiled and enabled.
 
 ## Runtime status
 
@@ -303,8 +344,10 @@ BLE connected
 profile=64x64
 canvas=16x16
 name=IDM-123456
-release=0.8.1
-build=0.8.1-audit-fix1
+release=0.8.2
+build=0.8.2-rc.2
+audioSource=phone active=phone
+audioReactive=absent
 gifDecoder=compact12/cache
 gifDecoderBytes=16128
 gifProbe=... largest=... reserve=10240
@@ -323,8 +366,10 @@ RMT+BLE=ESP32-C3 shared-RMT
 framework=WLED IDF5/shared-RMT
 wledBase=d55037f
 nimble=2.x API
-release=0.8.1
-build=0.8.1-audit-fix1
+release=0.8.2
+build=0.8.2-rc.2
+audioSource=phone active=phone
+audioReactive=absent
 ```
 
 `gifCacheWaits` is diagnostic, not automatically an error. On the no-PSRAM
@@ -406,10 +451,12 @@ Further documentation:
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — component boundaries, current memory model, and RAM-engineering history;
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
-- [`TODO.md`](TODO.md) — roadmap after 0.8.1;
-- [`RELEASE_NOTES_0.8.1.md`](RELEASE_NOTES_0.8.1.md) — Release 0.8.1 notes;
+- [`TODO.md`](TODO.md) — 0.9 development roadmap;
+- [`RELEASE_NOTES_0.8.2-rc.2.md`](RELEASE_NOTES_0.8.2-rc.2.md) — current release-candidate notes;
+- [`TEST_REPORT_0.8.2-rc.2.md`](TEST_REPORT_0.8.2-rc.2.md) — current regression report;
+- [`RELEASE_NOTES_0.8.1.md`](RELEASE_NOTES_0.8.1.md) — stable Release 0.8.1 notes;
 - [`AUDIT_REMEDIATION_0.8.1.md`](AUDIT_REMEDIATION_0.8.1.md) — corrective audit pass and deferred items;
-- [`TEST_REPORT_0.8.1-audit-fix1.md`](TEST_REPORT_0.8.1-audit-fix1.md) — host regression and sanitizer results for this build.
+- [`TEST_REPORT_0.8.1-audit-fix1.md`](TEST_REPORT_0.8.1-audit-fix1.md) — stable 0.8.1 host regression and sanitizer results.
 
 Older release/development history is consolidated in `HISTORY.md`; this source
 archive does not rely on release-note files that are not actually packaged.
@@ -430,7 +477,7 @@ WLED behave as the BLE peripheral expected by the official app.
 
 ## Optional active buzzer
 
-Version 0.8.1 retains the optional active-buzzer support from 0.8.0. Choose the buzzer GPIO in
+Version 0.8.2-rc.2 retains the optional active-buzzer support from 0.8.1. Choose the buzzer GPIO in
 **Config → Usermods → iDotMatrix** and set `buzzerActiveHigh` to match the module
 polarity. Leaving the pin unassigned disables buzzer hardware. After saving,
 **Test buzzer** emits one finite three-short-beep trill so wiring and polarity

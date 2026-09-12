@@ -6,7 +6,9 @@
 #include "IDotMatrixWLEDAdapter.h"
 #include "IDotMatrixBuzzer.h"
 #include "IDotMatrixAutomation.h"
+#include "IDotMatrixCarousel.h"
 #include "IDotMatrixBuildProfile.h"
+#include "IDotMatrixAudioSource.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp_system.h>
@@ -17,20 +19,22 @@
 #error "IDOT_C3_WLED_IDF5 is only valid for ESP32-C3 builds"
 #endif
 #if defined(IDOT_C3_WLED_IDF5) && !defined(WLED_USE_SHARED_RMT)
-#error "0.8.1 ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT"
+#error "ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT"
 #endif
 #if defined(IDOT_C3_WLED_IDF5) && !defined(IDOT_NIMBLE_V2_API)
-#error "0.8.1 ESP32-C3 requires NimBLE-Arduino 2.x"
+#error "ESP32-C3 requires NimBLE-Arduino 2.x"
 #endif
 #if defined(IDOT_C3_WLED_IDF5)
 #include <esp_idf_version.h>
 #if ESP_IDF_VERSION_MAJOR < 5
-#error "0.8.1 ESP32-C3 requires ESP-IDF 5.x or newer"
+#error "ESP32-C3 requires ESP-IDF 5.x or newer"
 #endif
 #endif
 
-static constexpr const char* IDOTMATRIX_RELEASE = "0.8.1";
-static constexpr const char* IDOTMATRIX_BUILD = "0.8.1-audit-fix1";
+static constexpr const char* IDOTMATRIX_RELEASE = "0.8.2";
+static constexpr const char* IDOTMATRIX_BUILD = "0.8.2-rc.2";
+static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
+static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x08;
 
 namespace {
 const char USERMOD_NAME[] PROGMEM = "iDotMatrix";
@@ -40,6 +44,7 @@ const char CFG_DEVICE_NAME[] PROGMEM = "deviceName";
 const char CFG_RESCALE[] PROGMEM = "rescale";
 const char CFG_BUZZER_PIN[] PROGMEM = "buzzer-pin";
 const char CFG_BUZZER_ACTIVE_HIGH[] PROGMEM = "buzzerActiveHigh";
+const char CFG_AUDIO_SOURCE[] PROGMEM = "audioSource";
 
 #if defined(ARDUINO_ARCH_ESP32)
 struct CrashSnapshot {
@@ -82,12 +87,17 @@ private:
   bool buzzerActiveHigh_ = true;
   bool buzzerHardwareReady_ = false;
   bool buzzerPinUnavailable_ = false;
+  IDotMatrixAudioSourceMode audioSourceMode_ = IDotMatrixAudioSourceMode::Phone;
+  bool audioReactivePresent_ = false;
+  bool audioReactiveDataAvailable_ = false;
+  uint32_t audioSourceNextPollAt_ = 0;
   bool setupComplete_ = false;
   IDotMatrixBuzzer buzzer_;
   IDotMatrixRenderer renderer_;
   IDotMatrixMedia media_{renderer_};
   IDotMatrixWLEDAdapter adapter_{renderer_, &media_};
   IDotMatrixProtocol protocol_{adapter_};
+  IDotMatrixCarousel carousel_{protocol_, adapter_};
   IDotMatrixAutomation automation_{renderer_, adapter_, media_, buzzer_};
   IDotMatrixBLEServer ble_{protocol_};
   bool rmtBusActive_ = false;
@@ -174,6 +184,83 @@ private:
 #else
     return false;
 #endif
+  }
+
+  bool readAudioReactive(IDotMatrixAudioSettings& sample) {
+    audioReactivePresent_ = UsermodManager::lookup(USERMOD_ID_AUDIOREACTIVE) != nullptr;
+
+    um_data_t* data = nullptr;
+    if (!UsermodManager::getUMData(&data, USERMOD_ID_AUDIOREACTIVE) ||
+        data == nullptr || data->u_size < 3 || data->u_data == nullptr ||
+        data->u_data[0] == nullptr || data->u_data[2] == nullptr) {
+      audioReactiveDataAvailable_ = false;
+      return false;
+    }
+
+    // Both WLED 16.0.1 AudioReactive and the pinned IDF5 branch export
+    // volumeSmth at slot 0 and the 16-byte GEQ/FFT array at slot 2. Keep the
+    // type checks defensive so a future incompatible provider cannot be read
+    // through the old layout accidentally.
+    if (data->u_type != nullptr &&
+        (data->u_type[0] != UMT_FLOAT || data->u_type[2] != UMT_BYTE_ARR)) {
+      audioReactiveDataAvailable_ = false;
+      return false;
+    }
+
+    IDotMatrixAudioSource::mapAudioReactive(
+      *static_cast<float*>(data->u_data[0]),
+      static_cast<const uint8_t*>(data->u_data[2]),
+      adapter_.audioUsesFFT(),
+      adapter_.audioMode(),
+      sample
+    );
+    audioReactiveDataAvailable_ = true;
+    return true;
+  }
+
+  void serviceAudioSource(uint32_t now) {
+    const bool strictLocal = audioSourceMode_ == IDotMatrixAudioSourceMode::AudioReactive;
+    const bool autoLocal = audioSourceMode_ == IDotMatrixAudioSourceMode::Auto;
+
+    if (!strictLocal && !autoLocal) {
+      adapter_.setAudioDataOverride(false);
+      // Presence is still useful diagnostic information in phone mode, but do
+      // not repeatedly ask AudioReactive for live data when it is not selected.
+      if (int32_t(now - audioSourceNextPollAt_) >= 0) {
+        audioReactivePresent_ = UsermodManager::lookup(USERMOD_ID_AUDIOREACTIVE) != nullptr;
+        audioReactiveDataAvailable_ = false;
+        audioSourceNextPollAt_ = now + 1000u;
+      }
+      return;
+    }
+
+    if (int32_t(now - audioSourceNextPollAt_) < 0) return;
+    audioSourceNextPollAt_ = now + 40u;
+
+    IDotMatrixAudioSettings sample;
+    const bool localAvailable = readAudioReactive(sample);
+    if (localAvailable) {
+      adapter_.setAudioDataOverride(true);
+      adapter_.updateAudioSample(sample.level, sample.bands);
+      return;
+    }
+
+    if (strictLocal) {
+      // Explicit AudioReactive means exactly that source. If the usermod is
+      // absent/disabled, keep the visualizer selected but feed silence rather
+      // than silently reverting to the phone microphone.
+      adapter_.setAudioDataOverride(true);
+      adapter_.updateAudioSample(0, nullptr);
+    } else {
+      // Auto is the compatibility mode: prefer local AudioReactive data when
+      // available, otherwise keep using the app's existing BLE audio stream.
+      adapter_.setAudioDataOverride(false);
+    }
+  }
+
+  const char* effectiveAudioSourceText() const {
+    if (!adapter_.audioDataOverride()) return "phone";
+    return audioReactiveDataAvailable_ ? "audioreactive" : "silent";
   }
 
 
@@ -276,6 +363,8 @@ public:
 #endif
     buzzer_.attach(&IDotMatrixUsermod::buzzerOutputThunk, this);
     protocol_.setAutomationEvents(&automation_);
+    protocol_.setCarouselEvents(&carousel_);
+    protocol_.setDeviceReleaseVersion(IDOTMATRIX_APP_RELEASE_MAJOR, IDOTMATRIX_APP_RELEASE_MINOR);
     automation_.attachProtocol(&protocol_);
     registerBuzzerTestEndpoint();
     setupBuzzerHardware();
@@ -322,23 +411,39 @@ public:
       DEBUG_PRINTLN(F("[iDotMatrix] framebuffer allocation failed"));
     }
     adapter_.setRescaleEnabled(rescale_);
+    adapter_.setAudioDataOverride(audioSourceMode_ == IDotMatrixAudioSourceMode::AudioReactive);
 
     if (adapter_.registerDisplayEffect()) {
       DEBUG_PRINTF_P(
         PSTR("[iDotMatrix] display effect registered as id %u\n"),
         adapter_.displayEffectId()
       );
+      // WLED queues the boot preset in beginStrip() and applies it only after
+      // UsermodManager::setup() has returned. The effect is therefore already
+      // registered before the preset is deserialized; no Usermod-side replay
+      // is required or desirable.
     } else {
       DEBUG_PRINTLN(F("[iDotMatrix] display effect registration failed"));
     }
 
     automation_.begin();
+    carousel_.begin();
 
     // Let WLED complete its first Wi-Fi initialization pass before starting
     // the lower-memory NimBLE host.
     startPending_ = true;
     startAt_ = millis() + 5000;
     setupComplete_ = true;
+  }
+
+  void onStateChange(uint8_t mode) override {
+    (void)mode;
+    if (!enabled_ || blockedByRmt_) return;
+
+    // Selection is consumed in loop() by scanning every real WLED segment.
+    // Trigger a render pass as usual, but Carousel/Clock startup does not wait
+    // for the custom-effect callback and is completely independent of BLE.
+    strip.trigger();
   }
 
   void loop() override {
@@ -348,6 +453,7 @@ public:
     // non-blocking pattern engine alive even when BLE is blocked by an RMT bus.
     buzzer_.loop(millis());
     if (blockedByRmt_) return;
+
 
     if (startPending_ && int32_t(millis() - startAt_) >= 0) {
       startPending_ = false;
@@ -359,7 +465,31 @@ public:
       }
     }
 
+    // Poll the WLED segment table before BLE/media service. This is the
+    // authoritative "effect selected" event for standalone startup and also
+    // runs while the phone app is disconnected. At boot it naturally becomes
+    // true as soon as WLED has applied the configured boot preset.
+    adapter_.pollDisplayEffectSelection();
+
+    serviceAudioSource(millis());
     ble_.loop();
+
+    // Selecting iDotMatrix Display means: stored Carousel first, otherwise
+    // Clock. No BLE connection or app command is required.
+    if (adapter_.takeDisplayEffectActivationRequest()) {
+      // A real WLED invocation is authoritative even if the transition has not
+      // yet committed Segment::mode. First make the public WLED state match the
+      // effect WLED is actually servicing, then apply the standalone policy.
+      adapter_.claimDisplayEffectFromCallback();
+      if (!carousel_.playing() && !carousel_.autoStartPending() &&
+          !adapter_.hasLogicalContent()) {
+        if (carousel_.hasAssets()) carousel_.enter();
+        else adapter_.restoreClockFallback();
+      }
+      strip.trigger();
+    }
+
+    carousel_.loop(millis());
     automation_.loop(millis());
     adapter_.loop(millis());
 
@@ -372,6 +502,14 @@ public:
       media_.gifActive(),
       media_.lastError() != IDotMatrixMedia::Error::None
     );
+
+    // Conversely, selecting a native WLED effect must stop autonomous Carousel
+    // ownership.  During GIF frame-cache staging WLED Static is temporary and
+    // gifPending keeps the Carousel alive until iDotMatrix Display is restored.
+    if (carousel_.playing() && !adapter_.isDisplayEffectActive() &&
+        !adapter_.isGifPending()) {
+      carousel_.suspend();
+    }
 
 #if defined(ARDUINO_ARCH_ESP32)
     const uint32_t now = millis();
@@ -428,6 +566,27 @@ public:
     info.add(String(F("name=")) + deviceName_);
     info.add(String(F("release=")) + IDOTMATRIX_RELEASE);
     info.add(String(F("build=")) + IDOTMATRIX_BUILD);
+    {
+      char fxLine[224];
+      snprintf(fxLine, sizeof(fxLine), "displayFx=id:%u count:%u seg:%u mode:%u current:%u active:%u observed:%u cb:%lu livecb:%lu oldcb:%lu cbseg:%u cbmode:%u cblive:%u lease:%u logical:%u",
+        unsigned(adapter_.displayEffectId()), unsigned(strip.getModeCount()),
+        unsigned(adapter_.displayEffectSegmentId()), unsigned(adapter_.selectedEffectId()),
+        unsigned(effectCurrent), adapter_.isDisplayEffectActive() ? 1u : 0u,
+        adapter_.displayEffectObserved() ? 1u : 0u,
+        static_cast<unsigned long>(adapter_.displayEffectCallbackCount()),
+        static_cast<unsigned long>(adapter_.displayEffectLiveCallbackCount()),
+        static_cast<unsigned long>(adapter_.displayEffectOldCallbackCount()),
+        unsigned(adapter_.displayEffectCallbackSegmentId()),
+        unsigned(adapter_.displayEffectCallbackContextMode()),
+        adapter_.displayEffectLastCallbackWasLive() ? 1u : 0u,
+        adapter_.displayEffectCallbackLeaseActive(millis()) ? 1u : 0u,
+        adapter_.hasLogicalContent() ? 1u : 0u);
+      info.add(fxLine);
+    }
+    info.add(String(F("audioSource=")) + IDotMatrixAudioSource::modeText(audioSourceMode_) +
+      F(" active=") + effectiveAudioSourceText());
+    info.add(String(F("audioReactive=")) +
+      (audioReactivePresent_ ? (audioReactiveDataAvailable_ ? F("data") : F("present")) : F("absent")));
     info.add(String(F("gifDecoder=")) + media_.gifDecoderModeText());
     info.add(String(F("gifDecoderBytes=")) + media_.gifDecoderBytes());
     if (media_.gifProbeFree() > 0) {
@@ -477,6 +636,17 @@ public:
         ? String(F(" active=")) + automation_.activeScheduleIndex()
         : String()) +
       (automation_.scheduleSoundEnabled() ? F(" sound=1") : F(" sound=0")));
+    char carouselLine[96];
+    snprintf(
+      carouselLine, sizeof(carouselLine),
+      "carousel=%s stored=%u configured=%u slot=%d dwell=%us",
+      carousel_.playing() ? "playing" : (carousel_.resumeOnBoot() ? "stored" : "off"),
+      unsigned(carousel_.storedCount()),
+      unsigned(carousel_.configuredCount()),
+      int(carousel_.currentSlot()),
+      unsigned(carousel_.currentDwellSeconds())
+    );
+    info.add(carouselLine);
     if (automation_.scheduleUploadOpen()) info.add(F("scheduleUpload=staging"));
     if (strcmp(automation_.lastErrorText(), "none") != 0) {
       info.add(String(F("automationError=")) + automation_.lastErrorText());
@@ -541,6 +711,7 @@ public:
 #endif
     config[FPSTR(CFG_BUZZER_PIN)] = buzzerPin_;
     config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)] = buzzerActiveHigh_;
+    config[FPSTR(CFG_AUDIO_SOURCE)] = static_cast<uint8_t>(audioSourceMode_);
   }
 
   bool readFromConfig(JsonObject& root) override {
@@ -550,6 +721,8 @@ public:
     const int8_t previousBuzzerPin = buzzerPin_;
     const bool previousBuzzerActiveHigh = buzzerActiveHigh_;
     const bool previousEnabled = enabled_;
+    const IDotMatrixAudioSourceMode previousAudioSource = audioSourceMode_;
+    uint8_t audioSourceRaw = static_cast<uint8_t>(audioSourceMode_);
 
     bool complete = true;
     complete &= getJsonValue(config[FPSTR(CFG_ENABLED)], enabled_, true);
@@ -564,10 +737,17 @@ public:
 #endif
     complete &= getJsonValue(config[FPSTR(CFG_BUZZER_PIN)], buzzerPin_, int8_t(-1));
     complete &= getJsonValue(config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)], buzzerActiveHigh_, true);
+    complete &= getJsonValue(config[FPSTR(CFG_AUDIO_SOURCE)], audioSourceRaw, uint8_t(0));
 
+    audioSourceMode_ = IDotMatrixAudioSource::normalizeMode(audioSourceRaw);
     screenType_ = IDotMatrixBuildProfile::normalizeScreenType(screenType_);
     deviceName_ = normalizedDeviceName(deviceName_);
     adapter_.setRescaleEnabled(rescale_);
+    if (previousAudioSource != audioSourceMode_) {
+      audioSourceNextPollAt_ = 0;
+      audioReactiveDataAvailable_ = false;
+      adapter_.setAudioDataOverride(audioSourceMode_ == IDotMatrixAudioSourceMode::AudioReactive);
+    }
     if (setupComplete_ &&
         (previousBuzzerPin != buzzerPin_ ||
          previousBuzzerActiveHigh != buzzerActiveHigh_ ||
@@ -598,12 +778,17 @@ public:
 #if IDOT_SCREEN_MAX_DIM >= 64
     oappend(F("addOption(dd,'64 x 64',4);"));
 #endif
-    oappend(F("(()=>{const s=(k,o,n)=>{let e=document.querySelector('[name=\"iDotMatrix:'+k+'\"]');if(!e)return;if(e.id){let l=document.querySelector('label[for=\"'+e.id+'\"]');if(l){l.textContent=n;return;}}for(let p=e.parentElement,d=0;p&&d<5;p=p.parentElement,d++){for(let x of p.childNodes)if(x.nodeType===3&&x.nodeValue.trim()===o){x.nodeValue=x.nodeValue.replace(o,n);return;}for(let l of p.querySelectorAll('label,span,td'))if(l.children.length===0&&l.textContent.trim()===o){l.textContent=n;return;}}};s('enabled','Enabled','Enabled:');s('screenType','ScreenType','ScreenType:');s('deviceName','DeviceName','DeviceName:');s('rescale','Rescale','Scale the logical profile to the selected WLED 2D segment:');s('buzzer-pin','Buzzer Pin','Buzzer Pin:');s('buzzerActiveHigh','BuzzerActiveHigh','BuzzerActiveHigh:');})();"));
+    oappend(F("dd=addDropdown('iDotMatrix','audioSource');"));
+    oappend(F("addOption(dd,'Phone / BLE',0);"));
+    oappend(F("addOption(dd,'WLED AudioReactive',1);"));
+    oappend(F("addOption(dd,'Auto (AudioReactive, then Phone)',2);"));
+    oappend(F("(()=>{const s=(k,o,n)=>{let e=document.querySelector('[name=\"iDotMatrix:'+k+'\"]');if(!e)return;if(e.id){let l=document.querySelector('label[for=\"'+e.id+'\"]');if(l){l.textContent=n;return;}}for(let p=e.parentElement,d=0;p&&d<5;p=p.parentElement,d++){for(let x of p.childNodes)if(x.nodeType===3&&x.nodeValue.trim()===o){x.nodeValue=x.nodeValue.replace(o,n);return;}for(let l of p.querySelectorAll('label,span,td'))if(l.children.length===0&&l.textContent.trim()===o){l.textContent=n;return;}}};s('enabled','Enabled','Enabled:');s('screenType','ScreenType','ScreenType:');s('deviceName','DeviceName','DeviceName:');s('rescale','Rescale','Scale the logical profile to the selected WLED 2D segment:');s('buzzer-pin','Buzzer Pin','Buzzer Pin:');s('buzzerActiveHigh','BuzzerActiveHigh','BuzzerActiveHigh:');s('audioSource','AudioSource','Audio Source:');})();"));
 #if IDOT_SCREEN_MAX_DIM > 16
     oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
 #endif
     oappend(F("(()=>{let e=document.querySelector('[name=\"iDotMatrix:deviceName\"]');if(!e){let r=[...document.querySelectorAll('tr')].find(x=>x.cells&&x.cells[0]&&x.cells[0].textContent.trim()==='DeviceName');e=r&&r.querySelector('input');}if(e&&!document.getElementById('idotmatrix-prefix'))e.insertAdjacentHTML('beforebegin','<span id=\"idotmatrix-prefix\">IDM-</span>');})();"));
     oappend(F("addInfo('iDotMatrix:deviceName',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
+    oappend(F("addInfo('iDotMatrix:audioSource',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">AudioReactive uses WLED Usermod data when that Usermod is compiled and enabled. Auto falls back to Phone / BLE; explicit AudioReactive becomes silent if local audio data is unavailable.</div>');"));
     oappend(F("addInfo('iDotMatrix:buzzerActiveHigh',1,'<button type=\"button\" onclick=\"fetch(&quot;/idotmatrix/buzzer-test&quot;,{method:&quot;POST&quot;}).then(async r=>{if(!r.ok)alert(await r.text())}).catch(()=>alert(&quot;Buzzer test failed&quot;))\">Test buzzer</button><div style=\"color:#fa0;font-style:italic;margin-top:8px\">Save before testing.</div>');"));
   }
 };

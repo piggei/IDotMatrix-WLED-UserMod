@@ -30,8 +30,10 @@ public:
 
   void attachProtocol(IDotMatrixProtocol* protocol) { protocol_ = protocol; }
   void begin();
+  void resetPersistent();
   void loop(uint32_t now);
 
+  void onAutomationReset() override { resetPersistent(); }
   void onTimeSync(const IDotMatrixTimeSyncSettings& settings) override;
   bool onAlarm(
     const IDotMatrixAlarmSettings& settings,

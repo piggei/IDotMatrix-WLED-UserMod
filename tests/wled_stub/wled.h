@@ -69,11 +69,27 @@ public:
 
   void restartRuntime() { ++restartCount; }
   void trigger() { ++stripTriggerCount; }
-  uint8_t addEffect(uint8_t, ModeFunction function, const char*) {
+  uint8_t addEffect(uint8_t id, ModeFunction function, const char* data) {
+    const uint8_t expected = framebufferEffectId + effectCount;
+    if (id == 255) id = expected;
+    if (id != expected) return 0xFF;
     effectFunctions[effectCount] = function;
-    return framebufferEffectId + effectCount++;
+    effectData[effectCount] = data;
+    ++effectCount;
+    return id;
+  }
+  uint8_t getModeCount() const { return framebufferEffectId + effectCount; }
+  const char* getModeData(unsigned id = 0) const {
+    if (id >= framebufferEffectId) {
+      const unsigned index = id - framebufferEffectId;
+      if (index < effectCount && effectData[index]) return effectData[index];
+    }
+    return "Solid";
   }
   Segment& getFirstSelectedSeg() { return segment; }
+  Segment& getSegment(unsigned) { return segment; }
+  uint8_t getSegmentsNum() const { return 1; }
+  uint8_t getCurrSegmentId() const { return 0; }
   uint32_t restartCount = 0;
   Segment& segmentRef() { return segment; }
   void renderEffect() {
@@ -92,6 +108,7 @@ public:
 private:
   Segment segment;
   ModeFunction effectFunctions[8]{};
+  const char* effectData[8]{};
   uint8_t effectCount = 0;
 };
 

@@ -9,6 +9,9 @@ export UBSAN_OPTIONS="${UBSAN_OPTIONS:-halt_on_error=1:print_stacktrace=1}"
 $CXX $FLAGS IDotMatrixProtocol.cpp tests/test_protocol.cpp -o "$TMP/idotmatrix_protocol_san"
 "$TMP/idotmatrix_protocol_san"
 
+$CXX $FLAGS IDotMatrixAudioSource.cpp tests/test_audio_source.cpp -o "$TMP/idotmatrix_audio_source_san"
+"$TMP/idotmatrix_audio_source_san"
+
 $CXX $FLAGS IDotMatrixRenderer.cpp tests/test_renderer.cpp -o "$TMP/idotmatrix_renderer_san"
 "$TMP/idotmatrix_renderer_san"
 

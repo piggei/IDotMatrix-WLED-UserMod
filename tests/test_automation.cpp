@@ -323,6 +323,49 @@ static void testTimeBehaviour() {
   assert(!IDotMatrixAutomation::scheduleTimeInside(overnight, 12u * 60u));
 }
 
+static void testDeviceResetClearsPersistentAutomationButKeepsTimeSync() {
+  resetState();
+  Fixture f;
+  f.automation.begin();
+
+  IDotMatrixTimeSyncSettings sync{};
+  sync.year = 2026; sync.month = 9; sync.day = 12;
+  sync.hour = 16; sync.minute = 15; sync.second = 0;
+  testMillis = 1000;
+  testYear = 1970;
+  f.automation.onTimeSync(sync);
+  assert(f.automation.timeValid());
+
+  IDotMatrixAlarmSettings alarm{};
+  alarm.slot = 0; alarm.flags = 0x01; alarm.hour = 7; alarm.minute = 30;
+  alarm.packetLength = 9;
+  assert(f.automation.onAlarm(alarm, nullptr, 0));
+
+  const std::vector<uint8_t> media{4, 5, 6, 7};
+  commitOne(f, media, 77);
+  assert(f.automation.configuredAlarmCount() == 1);
+  assert(f.automation.configuredScheduleCount() == 1);
+  assert(TestPreferencesStore::bytesLength("idot-alarm", "a0") != 0);
+  assert(TestPreferencesStore::bytesLength("idot-sched", "s0") != 0);
+  assert(WLED_FS.exists("/idot_s0.bin"));
+
+  f.automation.resetPersistent();
+  assert(f.automation.configuredAlarmCount() == 0);
+  assert(f.automation.configuredScheduleCount() == 0);
+  assert(!f.automation.scheduleEnabled());
+  assert(f.automation.timeValid());
+  assert(TestPreferencesStore::bytesLength("idot-alarm", "a0") == 0);
+  assert(TestPreferencesStore::bytesLength("idot-sched", "s0") == 0);
+  assert(TestPreferencesStore::bytesLength("idot-sched", "flags") == 0);
+  assert(!WLED_FS.exists("/idot_s0.bin"));
+
+  Fixture rebooted;
+  rebooted.automation.begin();
+  assert(rebooted.automation.configuredAlarmCount() == 0);
+  assert(rebooted.automation.configuredScheduleCount() == 0);
+  assert(!rebooted.automation.scheduleEnabled());
+}
+
 static void testExplicitScheduleClear() {
   resetState();
   const std::vector<uint8_t> media{8, 8, 8};
@@ -346,6 +389,7 @@ int main() {
   testMissingMediaAndCorruptMetadataRecovery();
   testAlarmPersistence();
   testTimeBehaviour();
+  testDeviceResetClearsPersistentAutomationButKeepsTimeSync();
   testExplicitScheduleClear();
   return 0;
 }

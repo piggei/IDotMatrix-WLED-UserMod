@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-package and critical-section regression checks for 0.8.1."""
+"""Release-candidate and critical-section regression checks for 0.8.2-rc.2."""
 
 from __future__ import annotations
 
@@ -12,26 +12,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.8.1"
+    assert library["version"] == "0.8.2"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
-    assert 'IDOTMATRIX_RELEASE = "0.8.1"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.8.1-audit-fix1"' in usermod
-    assert "0.8.1-dev" not in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.8.2"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.8.2-rc.2"' in usermod
+    assert "IDotMatrixAudioSource" in usermod
 
 
 def check_release_surface() -> None:
     required = [
         "platformio_override.ini.c3",
+        "platformio_override.ini.c3-audio",
+        "RELEASE_NOTES_0.8.2-rc.2.md",
+        "TEST_REPORT_0.8.2-rc.2.md",
         "RELEASE_NOTES_0.8.1.md",
         "AUDIT_REMEDIATION_0.8.1.md",
         "TEST_REPORT_0.8.1-audit-fix1.md",
+        "IDotMatrixAudioSource.h",
+        "IDotMatrixAudioSource.cpp",
+        "IDotMatrixCarousel.h",
+        "IDotMatrixCarousel.cpp",
+        "tests/test_audio_source.cpp",
         "run_host_tests.sh",
         "run_host_sanitizers.sh",
     ]
     for name in required:
-        assert (ROOT / name).is_file(), f"missing release file: {name}"
+        assert (ROOT / name).is_file(), f"missing development file: {name}"
     assert not list(ROOT.glob("platformio_override.ini.c3-dev*"))
-    assert not list(ROOT.glob("RELEASE_NOTES_0.8.1-dev.*"))
 
 
 def check_markdown_links() -> None:
@@ -66,17 +73,63 @@ def check_documentation_contract() -> None:
     assert "not a general-purpose PNG" in protocol
     assert "LZW10/default" not in protocol
 
-    assert "release **0.8.1**" in readme.lower()
-    assert "0.8.1-audit-fix1" in readme
-    assert "final public source release" in readme.lower()
-    release_notes = (ROOT / "RELEASE_NOTES_0.8.1.md").read_text(encoding="utf-8")
-    test_report = (ROOT / "TEST_REPORT_0.8.1-audit-fix1.md").read_text(encoding="utf-8")
-    assert "audit-remediation candidate" not in release_notes.lower()
-    assert "hardware pass" in test_report.lower()
-    assert "Do not inherit `${env:<base>.custom_usermods}`" in profiles
+    assert "release 0.8.2 / build 0.8.2-rc.2" in readme.lower()
+    assert "phone / ble" in readme.lower()
+    assert "wled audioreactive" in readme.lower()
+    assert "platformio_override.ini.c3-audio" in readme
+    release_notes = (ROOT / "RELEASE_NOTES_0.8.2-rc.2.md").read_text(encoding="utf-8")
+    test_report = (ROOT / "TEST_REPORT_0.8.2-rc.2.md").read_text(encoding="utf-8")
+    assert "carousel" in release_notes.lower()
+    assert "reset" in release_notes.lower()
+    assert "alarm" in release_notes.lower()
+    assert "schedule" in release_notes.lower()
+    assert "host" in test_report.lower()
+    assert "audioreactive" in architecture.lower()
+    assert "device assets" in protocol.lower()
+    assert "timesign" in protocol.lower()
+    assert "imageindex" in protocol.lower()
+    assert "platformio_override.ini.c3-audio" in profiles
     assert "NimBLE-Arduino" not in library.get("dependencies", {})
     assert "h2zero/NimBLE-Arduino" not in library.get("dependencies", {})
 
+
+def check_idot_display_fallback() -> None:
+    usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
+    adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
+    assert "if (carousel_.hasAssets()) carousel_.enter();" in usermod
+    assert "else adapter_.restoreClockFallback();" in usermod
+    assert "adapter_.pollDisplayEffectSelection();" in usermod
+    assert "displayEffectCallbackLeaseActive" in adapter
+    assert "Switching the public WLED segment mode to Static" in adapter
+    assert "displayEffectActivationRequested_ = true" in adapter
+    assert "strip.addEffect(\n    255," in adapter
+    assert "for (uint8_t i = 0; i < count; ++i)" in adapter
+    assert "strip.getSegment(i).mode == displayEffectId_" in adapter
+    assert "bootPresetReplay" not in usermod
+    assert "if (carousel_.hasAssets()) carousel_.enter();" in usermod
+    assert "else adapter_.restoreClockFallback();" in usermod
+
+
+
+def check_device_reset_contract() -> None:
+    protocol_h = (ROOT / "IDotMatrixProtocol.h").read_text(encoding="utf-8")
+    protocol_cpp = (ROOT / "IDotMatrixProtocol.cpp").read_text(encoding="utf-8")
+    carousel_h = (ROOT / "IDotMatrixCarousel.h").read_text(encoding="utf-8")
+    automation_h = (ROOT / "IDotMatrixAutomation.h").read_text(encoding="utf-8")
+    automation_cpp = (ROOT / "IDotMatrixAutomation.cpp").read_text(encoding="utf-8")
+    protocol_doc = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
+    assert "command == 0x03 && subcommand == 0x80" in protocol_cpp
+    assert "onDeviceReset()" in protocol_h
+    assert "onCarouselReset()" in protocol_h
+    assert "onAutomationReset()" in protocol_h
+    assert "resetPersistent" in carousel_h
+    assert "resetPersistent" in automation_h
+    assert 'schedulePrefs_->remove("flags")' in automation_cpp
+    assert "Device reset (`03 80`)" in protocol_doc
+    assert "not an ESP32/WLED reboot" in protocol_doc
+    assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-dev.*.md"))
+    assert not list(ROOT.glob("TEST_REPORT_0.9.0-dev.*.md"))
+    assert not list(ROOT.glob("ACK_AUDIT_0.9.0-dev.*.md"))
 
 def check_no_heap_free_inside_queue_spinlock() -> None:
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
@@ -109,6 +162,8 @@ def main() -> None:
     check_release_surface()
     check_markdown_links()
     check_documentation_contract()
+    check_idot_display_fallback()
+    check_device_reset_contract()
     check_no_heap_free_inside_queue_spinlock()
     check_repository_cleanliness()
     print("Release package checks passed.")

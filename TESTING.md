@@ -1,7 +1,8 @@
 # Testing
 
-This file defines the **0.8.1 stable regression procedure**. The classic ESP32
-0.8.0/0.7.1 regressions remain mandatory, and 0.8.1 adds a separate physical
+This file defines the **0.8.2-rc.2 regression procedure**. All 0.8.1 stable
+regressions remain mandatory; this build adds source-selection tests for WLED
+AudioReactive while preserving the separate physical
 ESP32-C3 IDF5/shared-RMT validation line.
 
 ## Host regression tests
@@ -317,6 +318,43 @@ The audible button is also a direct hardware validation path independent of alar
 6. Re-run a GIF from the stable regression set and both manual and scheduled
    buzzer tests to confirm that audio added no media or timing regression.
 
+## Audio source selection regression (0.8.2-rc.2)
+
+Use the normal C3 profile first, then the `platformio_override.ini.c3-audio`
+profile on the same pinned WLED commit.
+
+1. **Normal C3 build, Phone / BLE:** verify all ten Audio/Rhythm visualizers
+   behave exactly as in 0.8.1. `/json/info` must show
+   `audioSource=phone active=phone` and `audioReactive=absent`.
+2. **Audio profile, Phone / BLE:** enable WLED AudioReactive and confirm the
+   iDotMatrix visualizer still follows the phone stream. Diagnostics may report
+   AudioReactive as present, but the active source must remain `phone`.
+3. **Audio profile, WLED AudioReactive:** configure and enable the WLED
+   microphone, select the local source, then exercise at least one LEVEL and one
+   FFT visualizer. Cover all five visualizer modes if practical. The app must
+   still select the family/mode while the local microphone controls amplitude and
+   spectrum. Diagnostics must show `active=audioreactive` and
+   `audioReactive=data`.
+4. Stop/disable WLED AudioReactive while the explicit local source is selected.
+   The visualizer must become silent; it must **not** silently start following
+   phone amplitude. Re-enable AudioReactive and verify local response resumes.
+5. Select **Auto**. With AudioReactive running, verify local response and
+   `active=audioreactive`. Disable AudioReactive and verify the next phone audio
+   frames are used with `active=phone`; re-enable it and verify automatic return
+   to local data.
+6. While local audio is active, switch repeatedly between WLED effects, GIFs,
+   and Audio/Rhythm. Confirm normal WLED ownership/reclaim semantics and no LED
+   spikes, BLE disconnects, watchdogs or media errors.
+7. Stress C3 + AudioReactive with a heavy GIF and Web UI/WebSocket activity, then
+   record `freeheap`, `min`, `largest`, `gifProbe`, `gifCachedFrames`, reset
+   reason and observed FPS. Compare with the 0.8.1 baseline rather than judging
+   free heap alone.
+
+The host test `tests/test_audio_source.cpp` covers mode normalization and the
+16-band to 8-band scaling. `tests/test_wled_adapter.cpp` verifies that local
+audio overrides level/bands without changing BLE-selected visualizer family/mode
+and that returning to Phone mode restores the original semantics.
+
 ## Usermod settings regression (carried forward from 0.8.0)
 
 1. Verify that `ScreenType` has no inline description and shows an orange
@@ -424,3 +462,14 @@ Before tagging the release:
 6. verify the archive contains one root directory named `wled-usermod-idotmatrix`;
 7. exclude `.pio`, build products, caches and editor temporaries;
 8. perform a short C3 smoke test after any release-only code change.
+
+## Carousel hardware regression (0.8.2-rc.2)
+
+1. Upload a three-item Device Assets page and verify `carousel=playing` after the final transfer.
+2. Repeat the six-GIF page that failed on dev.4; verify all six slots are stored and no app error occurs.
+3. Upload all 12 slots with at least one TEXT item and verify mixed playback.
+4. Disconnect BLE while Carousel is active; playback must continue.
+5. Select a native WLED effect; Carousel must stop without deleting stored assets.
+6. Select `iDotMatrix Display`; the stored Carousel must resume.
+7. Configure `iDotMatrix Display` as the WLED boot effect, power-cycle, and verify stored Carousel startup without app reconnection.
+8. Later repeat the same behavior on native 64x64 hardware.

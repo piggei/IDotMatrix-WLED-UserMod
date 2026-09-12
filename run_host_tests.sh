@@ -16,6 +16,9 @@ $CXX $FLAGS -DIDOT_GIF_MAX_DIM=64 -DEXPECTED_SCREEN_MAX_DIM=64 -DEXPECTED_DECODE
 $CXX $FLAGS IDotMatrixProtocol.cpp tests/test_protocol.cpp -o "$TMP/idotmatrix_protocol_test"
 "$TMP/idotmatrix_protocol_test"
 
+$CXX $FLAGS IDotMatrixAudioSource.cpp tests/test_audio_source.cpp -o "$TMP/idotmatrix_audio_source_test"
+"$TMP/idotmatrix_audio_source_test"
+
 $CXX $FLAGS IDotMatrixRenderer.cpp tests/test_renderer.cpp -o "$TMP/idotmatrix_renderer_test"
 "$TMP/idotmatrix_renderer_test"
 
@@ -40,6 +43,8 @@ $CXX $FLAGS IDotMatrixFA02Assembler.cpp tests/test_fa02_assembler.cpp -o "$TMP/i
 
 $CXX $FLAGS IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp tests/test_compact_gif.cpp -o "$TMP/idotmatrix_compact_gif_test"
 "$TMP/idotmatrix_compact_gif_test"
+
+$CXX $FLAGS -Itests/media_stub -fsyntax-only IDotMatrixCarousel.cpp
 
 $CXX $FLAGS -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media_test"
 "$TMP/idotmatrix_media_test"

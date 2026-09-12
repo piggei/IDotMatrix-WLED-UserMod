@@ -8,6 +8,11 @@ void IDotMatrixProtocol::setScreenType(uint8_t screenType) {
     : 0x01;
 }
 
+void IDotMatrixProtocol::setDeviceReleaseVersion(uint8_t major, uint8_t minor) {
+  releaseMajor_ = major;
+  releaseMinor_ = minor;
+}
+
 void IDotMatrixProtocol::onConnected() {
   // The verified standalone emulator treats a new app connection as screen ON.
   events_.onScreenPower(true);
@@ -15,7 +20,7 @@ void IDotMatrixProtocol::onConnected() {
 
 void IDotMatrixProtocol::makeDeviceInfoReply(IDotMatrixReply& reply) const {
   const uint8_t response[] = {
-    0x09, 0x00, 0x01, 0x80, 0x04, 0x0E, 0x01, screenType_, 0x00
+    0x09, 0x00, 0x01, 0x80, releaseMajor_, releaseMinor_, 0x01, screenType_, 0x00
   };
   memcpy(reply.data, response, sizeof(response));
   reply.length = sizeof(response);
@@ -53,6 +58,38 @@ bool IDotMatrixProtocol::processFA02(
       settings.second = data[10];
       automationEvents_->onTimeSync(settings);
     }
+    makeCommandAck(command, subcommand, reply);
+    return true;
+  }
+
+  // Device reset: live protocol-state reset, not an ESP/WLED reboot.  The
+  // persistent iDotMatrix-owned Carousel, alarms and schedules are erased,
+  // transient iDotMatrix content is cleared, while WLED/global configuration
+  // and the current time authority remain untouched.
+  if (length == 4 && command == 0x03 && subcommand == 0x80) {
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselReset();
+    if (automationEvents_ != nullptr) automationEvents_->onAutomationReset();
+    events_.onDeviceReset();
+    makeCommandAck(command, subcommand, reply);
+    return true;
+  }
+
+  // Device Assets slot setup / clear. The official app sends one list of
+  // physical slots (normally 0..11) before downloading a page. The device has
+  // one 12-slot bank; app "pages" are alternative sets, not additional slots.
+  if (length >= 5 && command == 0x02 && subcommand == 0x01) {
+    const uint8_t count = data[4];
+    if (count <= 12 && length == size_t(5u + count)) {
+      if (carouselEvents_ != nullptr) carouselEvents_->onCarouselConfigure(data + 5, count);
+    }
+    makeCommandAck(command, subcommand, reply);
+    return true;
+  }
+
+  // Enter Device Assets / Carousel view. Playback is autonomous after this
+  // command and does not depend on the BLE connection remaining present.
+  if (length == 4 && command == 0x0A && subcommand == 0x01) {
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselEnter();
     makeCommandAck(command, subcommand, reply);
     return true;
   }
@@ -112,7 +149,9 @@ bool IDotMatrixProtocol::processFA02(
   }
 
   // Complete schedule activity: 23-byte metadata header followed by its media.
-  // The success status differs from ordinary ACKs: 03 accepted, 02 rejected.
+  // Original-hardware observation shows 0x03 is a transaction-termination status,
+  // not a generic success bit.  A recognized 05/80 activity therefore terminates
+  // with 0x03 even when validation/storage rejects the activity internally.
   if (length >= IDotMatrixScheduleActivitySettings::HEADER_SIZE &&
       command == 0x05 && subcommand == 0x80) {
     IDotMatrixScheduleActivitySettings settings;
@@ -139,9 +178,8 @@ bool IDotMatrixProtocol::processFA02(
       }
     }
 
-    const uint8_t response[] = {
-      0x05, 0x00, 0x05, 0x80, accepted ? uint8_t(0x03) : uint8_t(0x02)
-    };
+    (void)accepted;
+    const uint8_t response[] = {0x05, 0x00, 0x05, 0x80, 0x03};
     memcpy(reply.data, response, sizeof(response));
     reply.length = sizeof(response);
     return true;
@@ -149,6 +187,7 @@ bool IDotMatrixProtocol::processFA02(
 
   // Confirmed matrix power command: 05 00 07 01 STATE.
   if (length == 5 && command == 0x07 && subcommand == 0x01) {
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
     events_.onScreenPower(data[4] != 0x00);
     makeCommandAck(command, subcommand, reply);
     return true;
@@ -164,6 +203,7 @@ bool IDotMatrixProtocol::processFA02(
 
   // Confirmed full-screen RGB command: 07 00 02 02 R G B.
   if (length == 7 && command == 0x02 && subcommand == 0x02) {
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
     events_.onSolidColor(data[4], data[5], data[6]);
     makeCommandAck(command, subcommand, reply);
     return true;
@@ -200,6 +240,7 @@ bool IDotMatrixProtocol::processFA02(
       settings.colors[i].blue = expandChannel(data[offset + 2]);
     }
 
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
     events_.onLightEffect(settings);
     makeCommandAck(command, subcommand, reply);
     return true;
@@ -216,6 +257,7 @@ bool IDotMatrixProtocol::processFA02(
     settings.red = data[5];
     settings.green = data[6];
     settings.blue = data[7];
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
     events_.onClock(settings);
     makeCommandAck(command, subcommand, reply);
     return true;
@@ -228,6 +270,7 @@ bool IDotMatrixProtocol::processFA02(
     settings.mode = data[4];
     settings.minutes = data[5];
     settings.seconds = data[6];
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
     events_.onCountdown(settings);
     makeCommandAck(command, subcommand, reply);
     return true;
@@ -236,6 +279,7 @@ bool IDotMatrixProtocol::processFA02(
   // Confirmed stopwatch command: 05 00 09 80 MODE.
   // MODE: 0 reset, 1 start/restart, 2 pause, 3 resume.
   if (length == 5 && command == 0x09 && subcommand == 0x80) {
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
     events_.onStopwatch(data[4]);
     makeCommandAck(command, subcommand, reply);
     return true;
@@ -245,6 +289,7 @@ bool IDotMatrixProtocol::processFA02(
   if (length == 8 && command == 0x0A && subcommand == 0x80) {
     const uint16_t scoreA = uint16_t(data[4]) | (uint16_t(data[5]) << 8);
     const uint16_t scoreB = uint16_t(data[6]) | (uint16_t(data[7]) << 8);
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
     events_.onScoreboard(scoreA, scoreB);
     makeCommandAck(command, subcommand, reply);
     return true;
@@ -252,6 +297,7 @@ bool IDotMatrixProtocol::processFA02(
 
   // Confirmed DIY mode command: 05 00 04 01 STATE.
   if (length == 5 && command == 0x04 && subcommand == 0x01) {
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
     events_.onGraffitiMode(data[4] != 0x00);
     makeCommandAck(command, subcommand, reply);
     return true;
@@ -316,6 +362,7 @@ bool IDotMatrixProtocol::processAudioStream(
       if (rawMode >= 1 && rawMode <= 5) {
         settings.mode = rawMode - 1;
         settings.level = audioFrame_[4] > 12 ? 12 : audioFrame_[4];
+        if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
         events_.onAudio(settings);
         makeCommandAck(0x00, 0x02, reply);
       }
@@ -327,6 +374,7 @@ bool IDotMatrixProtocol::processAudioStream(
         for (uint8_t i = 0; i < 8; ++i) {
           settings.bands[i] = audioFrame_[5 + i] > 12 ? 12 : audioFrame_[5 + i];
         }
+        if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
         events_.onAudio(settings);
         makeCommandAck(0x01, 0x02, reply);
       }
@@ -404,6 +452,7 @@ bool IDotMatrixProtocol::processTextPayload(const uint8_t* data, size_t length) 
 }
 
 bool IDotMatrixProtocol::beginRawImage(size_t byteLength) {
+  if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
   return events_.onRawImageBegin(byteLength);
 }
 
@@ -434,6 +483,7 @@ bool IDotMatrixProtocol::processInlinePng(
   if (payloadLength != length - 9 || memcmp(data + 9, signature, sizeof(signature)) != 0) {
     return false;
   }
+  if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
   events_.onPngImage(data + 9, payloadLength);
   const uint8_t response[] = {0x05, 0x00, 0x00, 0x00, 0x03};
   memcpy(reply.data, response, sizeof(response));
@@ -442,6 +492,7 @@ bool IDotMatrixProtocol::processInlinePng(
 }
 
 bool IDotMatrixProtocol::beginGif(size_t byteLength) {
+  if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
   return events_.onGifBegin(byteLength);
 }
 
@@ -451,6 +502,31 @@ bool IDotMatrixProtocol::writeGif(size_t offset, const uint8_t* data, size_t len
 
 bool IDotMatrixProtocol::completeGif(bool crcValid) {
   return events_.onGifComplete(crcValid);
+}
+
+bool IDotMatrixProtocol::beginCarouselAsset(
+  uint8_t type, uint8_t slot, uint16_t dwellSeconds, size_t totalLength
+) {
+  return carouselEvents_ != nullptr &&
+    carouselEvents_->onCarouselAssetBegin(type, slot, dwellSeconds, totalLength);
+}
+
+bool IDotMatrixProtocol::writeCarouselAsset(
+  size_t offset, const uint8_t* data, size_t length
+) {
+  return carouselEvents_ != nullptr && carouselEvents_->onCarouselAssetData(offset, data, length);
+}
+
+bool IDotMatrixProtocol::completeCarouselAsset(bool crcValid) {
+  return carouselEvents_ != nullptr && carouselEvents_->onCarouselAssetComplete(crcValid);
+}
+
+void IDotMatrixProtocol::cancelCarouselAsset() {
+  if (carouselEvents_ != nullptr) carouselEvents_->onCarouselAssetCancel();
+}
+
+void IDotMatrixProtocol::suspendCarousel() {
+  if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
 }
 
 bool IDotMatrixProtocol::hasValidLength(const uint8_t* data, size_t length) {

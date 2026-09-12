@@ -19,8 +19,12 @@ void modeIDotMatrixDisplay() {
 
 bool IDotMatrixWLEDAdapter::registerDisplayEffect() {
   activeAdapter = this;
+
+  // Follow WLED's canonical User FX registration contract. id=255 asks WLED
+  // to allocate the first available custom-effect slot and returns the actual
+  // numeric ID. The returned ID is the only ID persisted/compared afterwards.
   displayEffectId_ = strip.addEffect(
-    0xFF,
+    255,
     &modeIDotMatrixDisplay,
     DISPLAY_EFFECT_DATA
   );
@@ -43,27 +47,123 @@ void IDotMatrixWLEDAdapter::loop(uint32_t now) {
   }
 }
 
-bool IDotMatrixWLEDAdapter::isDisplayEffectActive() const {
+uint8_t IDotMatrixWLEDAdapter::selectedEffectId() const {
+  if (displayEffectSegmentId_ != 0xFF && displayEffectSegmentId_ < strip.getSegmentsNum()) {
+    return strip.getSegment(displayEffectSegmentId_).mode;
+  }
+  return strip.getFirstSelectedSeg().mode;
+}
+
+Segment& IDotMatrixWLEDAdapter::controlSegment() {
+  if (displayEffectSegmentId_ != 0xFF && displayEffectSegmentId_ < strip.getSegmentsNum()) {
+    return strip.getSegment(displayEffectSegmentId_);
+  }
+  return strip.getFirstSelectedSeg();
+}
+
+bool IDotMatrixWLEDAdapter::pollDisplayEffectSelection() {
+  if (!isDisplayEffectRegistered()) {
+    displayEffectSelectedLast_ = false;
+    displayEffectSegmentId_ = 0xFF;
+    return false;
+  }
+
+  // Do not infer ownership from getFirstSelectedSeg(). The web UI, presets and
+  // 2D configurations can leave that helper pointing at a different segment.
+  // Scan the actual WLED segment table and treat Segment::mode as the source of
+  // truth for a user selecting iDotMatrix Display. This path is independent of
+  // BLE and does not require the custom-effect callback to have rendered yet.
+  uint8_t found = 0xFF;
+  const uint8_t count = strip.getSegmentsNum();
+  for (uint8_t i = 0; i < count; ++i) {
+    if (strip.getSegment(i).mode == displayEffectId_) {
+      found = i;
+      break;
+    }
+  }
+
+  const bool selected = found != 0xFF;
+  if (selected) {
+    displayEffectSegmentId_ = found;
+    if (!displayEffectSelectedLast_ || !hasLogicalContent()) {
+      displayEffectActivationRequested_ = true;
+    }
+  } else if (!displayEffectSelectedLast_) {
+    displayEffectSegmentId_ = 0xFF;
+  }
+  displayEffectSelectedLast_ = selected;
+  return selected;
+}
+
+bool IDotMatrixWLEDAdapter::isDisplayEffectSelected() const {
   if (!isDisplayEffectRegistered()) return false;
-  return strip.getFirstSelectedSeg().mode == displayEffectId_;
+  const uint8_t count = strip.getSegmentsNum();
+  for (uint8_t i = 0; i < count; ++i) {
+    if (strip.getSegment(i).mode == displayEffectId_) return true;
+  }
+  return false;
+}
+
+bool IDotMatrixWLEDAdapter::displayEffectCallbackLeaseActive(uint32_t now) const {
+  // Only a callback executed on WLED's live Segment is evidence that the
+  // iDotMatrix effect currently owns the segment. During an FX transition WLED
+  // also executes the old copied Segment; that callback must never extend
+  // ownership or re-claim the live segment.
+  if (!displayEffectObserved_ || !displayEffectLastCallbackWasLive_) return false;
+  return uint32_t(now - displayEffectLastCallbackMillis_) <= 300u;
+}
+
+bool IDotMatrixWLEDAdapter::isDisplayEffectActive() const {
+  // WLED can service the newly selected custom effect for a short transition
+  // window before Segment::mode/effectCurrent expose the new ID. Treat the
+  // real callback as temporary ownership until the main loop claims that exact
+  // segment and makes the public WLED state consistent.
+  return isDisplayEffectSelected() || displayEffectCallbackLeaseActive(millis());
+}
+
+bool IDotMatrixWLEDAdapter::takeDisplayEffectActivationRequest() {
+  if (!displayEffectActivationRequested_) return false;
+  displayEffectActivationRequested_ = false;
+  return true;
+}
+
+void IDotMatrixWLEDAdapter::claimDisplayEffectFromCallback() {
+  if (!isDisplayEffectRegistered() || !displayEffectLastCallbackWasLive_) return;
+  const uint8_t segId = displayEffectCallbackSegmentId_;
+  if (segId == 0xFF || segId >= strip.getSegmentsNum()) return;
+
+  displayEffectSegmentId_ = segId;
+  auto& segment = strip.getSegment(segId);
+  if (segment.mode != displayEffectId_) {
+    // The callback proves that WLED is servicing iDotMatrix Display even when
+    // its externally visible segment state is still the previous effect during
+    // the transition. Commit the same effect ID to the segment so Web UI, JSON
+    // state and presets all converge on the effect actually being rendered.
+    segment.setMode(displayEffectId_);
+    effectCurrent = displayEffectId_;
+    stateUpdated(CALL_MODE_DIRECT_CHANGE);
+  }
+  displayEffectSelectedLast_ = true;
+  strip.trigger();
+}
+
+bool IDotMatrixWLEDAdapter::hasLogicalContent() const {
+  return solidActive_ || lightEffectActive_ || audioActive_ || diySessionActive_ ||
+    clockActive_ || countdownActive_ || stopwatchActive_ || scoreboardActive_ ||
+    textActive_ || rawImageActive_ || gifActive_ || gifPending_ || gifStaging_;
+}
+
+bool IDotMatrixWLEDAdapter::hasActiveContent() const {
+  return hasLogicalContent() || renderer_.isVisible();
 }
 
 void IDotMatrixWLEDAdapter::syncWLEDControl() {
-  // Frame-cache preparation intentionally happens while a low-RAM WLED static
-  // effect is selected.  Do not interpret that staging state as the user
-  // taking ownership away from iDotMatrix.
-  if (gifPending_ && gifPrecache_ && strip.getFirstSelectedSeg().mode == FX_MODE_STATIC) return;
-
-  // iDotMatrix owns the framebuffer only while its dedicated WLED effect is
-  // selected. A user/API can switch the segment to another WLED effect without
-  // sending a BLE media command. In that case release all media state
-  // immediately so ordinary WLED effects regain the RAM they need.
+  // During a WLED transition the real iDotMatrix callback may already be
+  // running while Segment::mode still reports the previous native effect. Do
+  // not clear freshly activated content inside that proven callback window.
   if (isDisplayEffectActive()) return;
 
-  const bool hadIDotContent = solidActive_ || lightEffectActive_ || audioActive_ || diySessionActive_ ||
-    clockActive_ || countdownActive_ || stopwatchActive_ || scoreboardActive_ ||
-    textActive_ || rawImageActive_ || gifActive_ || gifPending_ || gifStaging_ ||
-    renderer_.isVisible();
+  const bool hadIDotContent = hasActiveContent();
   if (!hadIDotContent) return;
 
   clearContentState();
@@ -102,16 +202,14 @@ void IDotMatrixWLEDAdapter::restoreClockFallback() {
 void IDotMatrixWLEDAdapter::beginGifBlankStaging() {
   if (gifBlankStaging_) return;
 
-  auto& segment = strip.getFirstSelectedSeg();
+  auto& segment = controlSegment();
   gifStagingPrimaryColor_ = segment.colors[0];
   gifBlankStaging_ = true;
 
-  // Frame-cache preparation still uses WLED Static because it has the lowest
-  // runtime footprint on classic ESP32.  Temporarily make only the selected
-  // segment's primary colour black so the staging phase is visually blank
-  // without changing WLED's global brightness/power state or rewriting the
-  // global primary-colour setting. The original segment colour is restored
-  // before staging ends.
+  // Temporarily make only the selected segment's primary colour black so the
+  // staging phase is visually blank without changing WLED's selected effect,
+  // global brightness/power state, or global primary-colour setting. The
+  // original segment colour is restored before staging ends.
   segment.colors[0] = BLACK;
   segment.fill(BLACK);
 }
@@ -119,7 +217,7 @@ void IDotMatrixWLEDAdapter::beginGifBlankStaging() {
 void IDotMatrixWLEDAdapter::endGifBlankStaging() {
   if (!gifBlankStaging_) return;
 
-  auto& segment = strip.getFirstSelectedSeg();
+  auto& segment = controlSegment();
   segment.colors[0] = gifStagingPrimaryColor_;
   gifBlankStaging_ = false;
 }
@@ -138,12 +236,30 @@ void IDotMatrixWLEDAdapter::activateDisplayEffect() {
   // exact colour that was active before the GIF transfer.
   endGifBlankStaging();
 
-  auto& segment = strip.getFirstSelectedSeg();
+  auto& segment = controlSegment();
   if (segment.mode != displayEffectId_) {
     segment.setMode(displayEffectId_);
     effectCurrent = displayEffectId_;
     stateUpdated(CALL_MODE_DIRECT_CHANGE);
   }
+  strip.trigger();
+}
+
+void IDotMatrixWLEDAdapter::onDeviceReset() {
+  clearContentState();
+  countdownRunning_ = false;
+  countdownPaused_ = false;
+  countdownFinishPending_ = false;
+  countdownRemainingMs_ = 0;
+  countdownStartMillis_ = 0;
+  stopwatchRunning_ = false;
+  stopwatchElapsedMs_ = 0;
+  stopwatchStartMillis_ = 0;
+  scoreA_ = 0;
+  scoreB_ = 0;
+  displayEffectActivationRequested_ = false;
+  renderer_.fill(0, 0, 0);
+  renderer_.setVisible(false);
   strip.trigger();
 }
 
@@ -253,6 +369,28 @@ void IDotMatrixWLEDAdapter::onLightEffect(
   activateDisplayEffect();
 }
 
+void IDotMatrixWLEDAdapter::setAudioDataOverride(bool enabled) {
+  if (audioDataOverride_ == enabled) return;
+  audioDataOverride_ = enabled;
+  if (enabled) {
+    // Entering a local-audio source must never keep stale phone amplitude data.
+    // The visualizer family/mode is still selected by the app's command.
+    audioSettings_.level = 0;
+    for (uint8_t& band : audioSettings_.bands) band = 0;
+  }
+}
+
+void IDotMatrixWLEDAdapter::updateAudioSample(uint8_t level, const uint8_t bands[8]) {
+  audioSettings_.level = level > 12 ? 12 : level;
+  if (bands == nullptr) {
+    for (uint8_t& band : audioSettings_.bands) band = 0;
+    return;
+  }
+  for (uint8_t i = 0; i < 8; ++i) {
+    audioSettings_.bands[i] = bands[i] > 12 ? 12 : bands[i];
+  }
+}
+
 void IDotMatrixWLEDAdapter::onAudio(const IDotMatrixAudioSettings& settings) {
   solidActive_ = false;
   lightEffectActive_ = false;
@@ -271,9 +409,20 @@ void IDotMatrixWLEDAdapter::onAudio(const IDotMatrixAudioSettings& settings) {
   gifReplacingActiveGif_ = false;
   gifPreviousRendererVisible_ = false;
   stopMediaPlayback();
-  audioSettings_ = settings;
+
+  // Phone/BLE remains the compatibility default. When a local audio source is
+  // selected, BLE audio frames still choose LEVEL/FFT and the visualizer mode,
+  // but their live amplitude data is intentionally ignored.
+  if (audioDataOverride_) {
+    audioSettings_.fft = settings.fft;
+    audioSettings_.mode = settings.mode;
+  } else {
+    audioSettings_ = settings;
+  }
+
   audioLastRenderMillis_ = millis();
-  renderer_.renderAudio(settings.fft, settings.mode, settings.level, settings.bands,
+  renderer_.renderAudio(audioSettings_.fft, audioSettings_.mode,
+                        audioSettings_.level, audioSettings_.bands,
                         audioLastRenderMillis_);
   renderer_.setVisible(true);
   activateDisplayEffect();
@@ -665,13 +814,41 @@ bool IDotMatrixWLEDAdapter::onGifData(
   return media_ != nullptr && media_->writeGif(offset, data, length);
 }
 
+bool IDotMatrixWLEDAdapter::playStoredGif(const char* path) {
+  if (media_ == nullptr || !media_->queueStoredGif(path)) return false;
+
+  auto& segment = controlSegment();
+  gifPreviousEffect_ = segment.mode;
+  gifPreviousRendererVisible_ = renderer_.isVisible();
+  gifReplacingActiveGif_ = gifActive_ && segment.mode == displayEffectId_;
+  gifPending_ = true;
+  gifPrecache_ = media_->gifUsesFrameCache();
+  gifStaging_ = !gifPrecache_;
+  if (gifReplacingActiveGif_) gifActive_ = false;
+  renderer_.setVisible(false);
+
+  if (gifPrecache_) {
+    // Keep the dedicated iDotMatrix effect selected while the frame cache is
+    // prepared. Switching the public WLED segment mode to Static made WLED
+    // persist/report fx=0, so Web UI re-selection and boot presets lost the
+    // actual iDotMatrix ownership. The effect callback already renders black
+    // while renderer visibility is false, therefore no mode swap is needed.
+    activateDisplayEffect();
+    beginGifBlankStaging();
+    strip.trigger();
+  } else {
+    activateDisplayEffect();
+  }
+  return true;
+}
+
 bool IDotMatrixWLEDAdapter::onGifComplete(bool crcValid) {
   if (media_ == nullptr) return false;
 
   // Capture the content that owns the segment before completeGif() releases
   // an existing frame-cache playback.  A valid replacement may safely retire
   // the old GIF, but an invalid/CRC-failed transfer must leave it untouched.
-  auto& segment = strip.getFirstSelectedSeg();
+  auto& segment = controlSegment();
   const uint8_t previousEffect = segment.mode;
   const bool previousRendererVisible = renderer_.isVisible();
   const bool replacingActiveGif = gifActive_ && previousEffect == displayEffectId_;
@@ -688,17 +865,11 @@ bool IDotMatrixWLEDAdapter::onGifComplete(bool crcValid) {
   renderer_.setVisible(false);
 
   if (gifPrecache_) {
-    // LZW12/no-PSRAM builds predecode into LittleFS before iDotMatrix Display
-    // is allowed to own the segment.  WLED Static still provides the smallest
-    // runtime footprint. Its primary colour is blanked temporarily so
-    // the user sees an OFF/black panel instead of a distracting solid colour
-    // while the cache is being prepared.
+    // Predecode/cache without mutating Segment::mode. WLED must continue to
+    // expose the iDotMatrix effect ID so UI state, presets and boot restore
+    // remain stable while the display is temporarily blank during staging.
+    activateDisplayEffect();
     beginGifBlankStaging();
-    if (segment.mode != FX_MODE_STATIC) {
-      segment.setMode(FX_MODE_STATIC);
-      effectCurrent = FX_MODE_STATIC;
-      stateUpdated(CALL_MODE_DIRECT_CHANGE);
-    }
     strip.trigger();
   } else {
     // Validated 10/11-bit direct playback keeps the established staged effect
@@ -755,7 +926,7 @@ void IDotMatrixWLEDAdapter::syncGifPlayback(bool playing, bool failed) {
   renderer_.setVisible(false);
   stopMediaPlayback();
 
-  auto& segment = strip.getFirstSelectedSeg();
+  auto& segment = controlSegment();
   const uint8_t restoreEffect = replacingActiveGif ? FX_MODE_STATIC : gifPreviousEffect_;
   if (segment.mode == displayEffectId_ || (wasPrecache && segment.mode == FX_MODE_STATIC)) {
     if (segment.mode != restoreEffect) segment.setMode(restoreEffect);
@@ -767,6 +938,41 @@ void IDotMatrixWLEDAdapter::syncGifPlayback(bool playing, bool failed) {
 }
 
 void IDotMatrixWLEDAdapter::renderDisplayEffectFrame() {
+  const uint32_t now = millis();
+  const uint8_t current = strip.getCurrSegmentId();
+
+  // The effect callback is the strongest signal WLED can provide: if this
+  // function is being serviced, WLED has selected this effect for the current
+  // render pass. Do not require Segment::mode to agree in the same instant;
+  // hardware testing on the pinned WLED V5 base showed the callback can run
+  // while the externally visible segment mode still reports the previous mode.
+  displayEffectObserved_ = true;
+  displayEffectCallbackCount_++;
+  displayEffectCallbackSegmentId_ = current;
+  displayEffectCallbackContextMode_ = SEGMENT.mode;
+
+  // WLED renders both the new live Segment and an old copied Segment while an
+  // effect transition is active. getCurrSegmentId() is identical for both, so
+  // the segment index alone cannot tell whether this callback means
+  // "iDotMatrix selected" or merely "iDotMatrix is the effect being faded
+  // out". Compare the SEGMENT object itself with WLED's live segment table.
+  const bool liveCallback = current < strip.getSegmentsNum() &&
+    (&SEGMENT == &strip.getSegment(current));
+  displayEffectLastCallbackWasLive_ = liveCallback;
+
+  if (liveCallback) {
+    displayEffectLiveCallbackCount_++;
+    displayEffectLastCallbackMillis_ = now;
+    displayEffectSegmentId_ = current;
+    if (strip.getSegment(current).mode != displayEffectId_ || !hasLogicalContent()) {
+      displayEffectActivationRequested_ = true;
+    }
+  } else {
+    // Transition-old callbacks are diagnostic only. Treating them as an entry
+    // signal caused dev.14-dev.16 to re-claim iDotMatrix while WLED was
+    // actually fading away from it toward a native effect.
+    displayEffectOldCallbackCount_++;
+  }
   if (lightEffectActive_) {
     renderer_.renderLightEffect(millis());
   } else if (audioActive_) {

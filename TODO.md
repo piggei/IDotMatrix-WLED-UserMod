@@ -1,40 +1,35 @@
-# Roadmap after Release 0.8.1
+# 0.8.2 release-candidate status
 
-## 0.8.1 audit-remediation status
+- [x] Persistent 12-slot Carousel / mixed GIF+TEXT behaviour.
+- [x] Long-text viewport/paging behaviour on physical 16x16 hardware.
+- [x] Optional AudioReactive source integration.
+- [x] WLED `iDotMatrix Display` standalone policy: Carousel when stored, Clock otherwise.
+- [x] `03 80` live reset that erases Carousel, alarms and programs without rebooting WLED.
 
-Public release value: **0.8.1**  
-Released internal build: **0.8.1-audit-fix1**
+# 0.9 hardware line
 
-Completed in the released corrective build:
+Release 0.9 is intentionally reserved for the new-hardware phase: ESP32-S3/PSRAM, physical larger matrices, native 64x64 validation and HUB75 work. Items that require that hardware remain deferred until it is available.
 
-- [x] AUDIT-001 GIF promotion failure/recovery fix;
-- [x] AUDIT-002 transactional schedule/program replacement;
-- [x] boot-time stale/corrupt schedule metadata repair;
-- [x] GIF promotion failure-injection tests;
-- [x] behavioural `IDotMatrixAutomation` host regression suite;
-- [x] ASan/UBSan host test pass;
-- [x] release/build identifier separation;
-- [x] documentation consistency pass for LZW12, FA02 capacity, Usermod inheritance, time fallback, PNG wording and 0.8.1 references;
-- [x] final ESP32-C3 hardware smoke/stress test of build `0.8.1-audit-fix1`;
-- [x] package public Release 0.8.1 from the exact hardware-qualified build.
+# 0.8.2 completed convergence work
 
-The audit's lower-priority architectural hardening items are deliberately deferred
-to 0.9 unless a hardware test proves they are required: renderer failure-atomic
-reinitialization, wider FA02 synchronization refactoring, additional RX-drop
-diagnostics, and broader Preferences write-result plumbing. No wire-protocol or
-user-facing semantic change is planned for those items.
+The internal `0.9.0-dev.*` builds were a development sequence only. Their validated protocol and renderer work was folded into Release 0.8.2 before the release-candidate stage. The current identification is:
 
-## 0.9 priorities
+```text
+Release: 0.8.2
+Build:   0.8.2-rc.2
+```
 
-- bring up and hardware-validate ESP32-S3 targets, including PSRAM behavior;
-- evaluate native 64x64 and HUB75 output paths without conflating them with the BLE protocol layer;
-- implement the next iDotMatrix behavior changes only after the user-facing requirements are defined;
-- revisit build-profile consolidation once C3/S3 can share a proven WLED IDF5 base;
-- continue long-run memory, BLE reconnect, GIF replacement and Web UI stress testing;
-- evaluate whether the pinned C3 WLED development commit can be replaced by a future stable WLED release without regressing shared-RMT behavior.
+Completed in 0.8.2 include optional AudioReactive input, long-TEXT viewport behavior, persistent 12-slot Device Assets/Carousel support, WLED Carousel/Clock standalone selection, and live `03 80` reset semantics. Historical build-by-build details are retained in `HISTORY.md`.
 
-## Deferred cleanup
+# Next development steps
 
-- review optional feature/library pruning on the IDF5 profiles after the WLED module validator behavior stabilizes;
-- keep passive/PWM buzzer support out of scope unless it becomes a real hardware requirement;
-- retain experimental larger-profile/HUB75 wrappers as unsupported until physical hardware validation exists.
+- integrate protocol/function changes only after they are validated in the
+  standalone ESP32 emulator;
+- bring up ESP32-S3 when the new board arrives and establish PSRAM allocation
+  policy from real measurements;
+- validate native larger matrices, then evaluate the separate native WLED
+  HUB75-output work;
+- consider renderer failure-atomic reinitialization, broader FA02 synchronization
+  review, RX queue-drop diagnostics and wider Preferences write-result checking;
+- evaluate migration of classic ESP32 to a common IDF5 WLED base only as a
+  separate experiment, never as an assumption.

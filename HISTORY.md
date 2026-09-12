@@ -1,4 +1,119 @@
+## 0.8.2-rc.2 - 2026-09-12 - protocol convergence release candidate
+
+- Renumbered the pre-release line to public release 0.8.2; release 0.9 is reserved for the upcoming ESP32-S3/PSRAM/large-matrix/HUB75 hardware phase.
+- Carries forward the hardware-validated 16x16 TEXT traversal, persistent mixed GIF/TEXT Carousel, optional AudioReactive source, Device Info/ACK alignment and WLED standalone Carousel/Clock policy developed in the internal 0.9.0-dev builds.
+- Implements the confirmed `03 80` live reset as a persistent iDotMatrix-state purge: Carousel assets, alarms and programs/schedules are removed without rebooting WLED.
+- Preserves WLED/system configuration and time sources; the app-provided synchronized time remains available as fallback after reset.
+- Removes release-candidate packaging dependency on the internal 0.9.0-dev release-note/test-report files; their development history remains recorded below.
+
+> The `0.9.0-dev.*` entries below are historical internal development identifiers. Their resulting feature set was renumbered to 0.8.2 before release so that 0.9 can represent the new-hardware generation.
+
+## 0.9.0-dev.17 - 2026-09-12 - callback-driven WLED effect claim
+
+- stop switching the WLED segment to `FX_MODE_STATIC` while stored GIF frame caches are prepared;
+- keep `iDotMatrix Display` selected so Web UI state and boot presets retain the correct effect ID;
+- preserve temporary blank staging without changing public WLED effect ownership.
+
+## 0.9.0-dev.14 - 2026-09-12 - callback-authoritative display ownership
+
+- Returned custom-effect registration to WLED's documented `addEffect(255, ...)` path.
+- Treats the actual WLED effect callback as an authoritative activation signal even when the externally visible segment mode is temporarily stale.
+- Adds a 300 ms callback lease so Carousel/Clock content is not immediately cleared while WLED is actively servicing the iDotMatrix effect.
+- Standalone activation remains independent of BLE: callback or segment selection starts a stored Carousel, otherwise Clock.
+- Adds callback count/segment/lease diagnostics for hardware validation.
+
+## 0.9.0-dev.13 - 2026-09-12 - segment-driven standalone activation
+
+- Detects `iDotMatrix Display` by scanning all WLED segment modes instead of waiting for the effect callback or trusting `getFirstSelectedSeg()`.
+- Selecting the effect starts a stored Carousel immediately, or Clock if no Carousel exists.
+- Standalone startup is independent of BLE; Carousel metadata is loaded before the delayed NimBLE startup.
+- Adds `effectCurrent` to display-effect diagnostics for comparison with the authoritative per-segment mode.
+
+## 0.9.0-dev.12 - 2026-09-12 - canonical appended WLED effect
+
+- Stops registering `iDotMatrix Display` with `addEffect(255)`, which can consume a reserved built-in numeric slot.
+- Appends the Usermod effect at `strip.getModeCount()` so it has an unambiguous custom ID and increases WLED `fxcount`.
+- Removes the dev.11 boot-preset replay: WLED already queues the boot preset before Usermod setup and deserializes it after Usermods have registered their effects.
+- Treats the segment target mode as ownership and accepts callback entry only when that same segment still targets `iDotMatrix Display`, avoiding false activation from WLED transition callbacks.
+- Presets created with dev.6-dev.11 must be saved once again because the custom effect numeric ID intentionally changes in this build.
+
+## 0.9.0-dev.11 - 2026-09-12 - callback ownership and boot-preset replay
+
+- Treats the live `iDotMatrix Display` callback heartbeat as the authoritative
+  ownership signal, preventing `syncWLEDControl()` from immediately clearing a
+  Carousel/Clock that was started by that callback while `Segment::mode` still
+  reports a native effect.
+- Replays WLED's configured boot preset once after dynamic effect registration,
+  allowing boot presets that reference `iDotMatrix Display` to resolve after the
+  Usermod effect exists.
+- Adds `bootFxReplay=preset:<n> pending:<0|1> done:<0|1>` diagnostics.
+
+## 0.9.0-dev.10 - 2026-09-12 - iDotMatrix Display clock fallback
+
+- Hardware validation confirmed dev.5 Carousel playback on ESP32-C3 16x16, including mixed GIF/TEXT content.
+- Selecting `iDotMatrix Display` now resumes a stored Carousel when available.
+- If no Carousel is stored, `iDotMatrix Display` starts the local Clock instead of showing a black panel.
+- The same fallback applies when `iDotMatrix Display` is selected as the WLED boot effect.
+- 64x64 Carousel/TEXT validation remains pending future ESP32-S3/HUB75 hardware.
+
+## 0.9.0-dev.5 - 2026-09-12 - Carousel activation and multi-chunk fix
+
+- Hardware-driven fix after dev.4 stored Device Assets but did not start playback.
+- Added quiet-period auto-start after the final Device Assets transfer.
+- Latched Carousel metadata from the first Bulk chunk so continuation metadata cannot abort a multi-chunk asset.
+- Integrated stored Carousel startup with the WLED `iDotMatrix Display` boot effect.
+- Native WLED effect selection now suspends Carousel ownership.
+
 # History
+
+## 0.9.0-dev.4 - 2026-09-12 - Persistent Device Assets / Carousel
+
+- Added the original-hardware 12-slot Device Assets model (`0..11`).
+- Added persistent GIF and TEXT slot storage on LittleFS with per-slot dwell time.
+- Added `02/01` slot setup/clear and `0A/01` enter-carousel control handling.
+- Added autonomous carousel playback after BLE disconnect and optional resume after reboot.
+- Added Bulk metadata handling for `timeSign` (bytes 13-14 LE) and `imageIndex` (byte 15).
+- Kept live/preview media (`imageIndex` 12/13) transient and separate from the persistent bank.
+- 16x16 TEXT renderer from dev.3 was hardware validated; 64x64 validation remains deferred until hardware arrives.
+
+## 0.9.0-dev.3 - 2026-09-12 - Long TEXT viewport and paging
+
+- Added resolution-independent TEXT page capacity derived from logical matrix width and glyph width.
+- Kept LEFT/RIGHT as continuous full-line scrolling across the complete transmitted glyph stream.
+- Reworked UP/DOWN into a continuous vertical tape with a one-logical-pixel gap between pages, eliminating fully blank page transitions.
+- Added page traversal for stationary, Blink, Breathe, Snowflake and Laser modes so long strings no longer remain clipped to their first visible glyphs.
+- Preserved the animation epoch across page changes and retained the existing separation between movement cadence and visual refresh cadence.
+- Added host regressions for long-text traversal, short final pages, vertical no-blank transitions, effect-phase continuity and 16x16/64x64 viewport math.
+- Carried forward dev.2 Device Info and Schedule ACK corrections; multi-activity Schedule and buzzer event transitions were hardware-validated before starting this build.
+
+## 0.9.0-dev.2 - 2026-09-12 - Device identity and ACK semantics
+
+- Device Info now reports public release 0.9.0 as app-facing bytes `00 09`.
+- Internal build remains separate as `0.9.0-dev.2`.
+- Schedule activity `05 80` now always terminates with status `03` once recognized,
+  including internal rejection paths.
+- Added command-by-command ACK audit and regression coverage.
+
+## 0.9.0-dev.1 - 2026-09-10 - Optional WLED AudioReactive source
+
+- Started the 0.9 development line from the hardware-qualified 0.8.1
+  `audit-fix1` baseline without changing the established BLE wire protocol.
+- Added `IDotMatrixAudioSource` with three runtime modes: `Phone / BLE`,
+  `WLED AudioReactive`, and `Auto`; Phone remains the compatibility default.
+- Added WLED inter-Usermod data consumption for AudioReactive smoothed volume
+  and its 16 GEQ/FFT bins. No second I2S capture or FFT pipeline is created.
+- Added deterministic 16-to-8 band mapping by averaging adjacent GEQ pairs and
+  scaling AudioReactive's 0..255 output into the existing iDotMatrix 0..12
+  renderer domain.
+- Preserved BLE Audio/Rhythm frames as the selector for LEVEL/FFT family and
+  visualizer mode even when local microphone data supplies the live levels.
+- Added strict-local semantics (silence when AudioReactive data is unavailable)
+  and Auto fallback semantics (local data when available, otherwise Phone/BLE).
+- Added `platformio_override.ini.c3-audio`, which explicitly includes exactly
+  `audioreactive` plus iDotMatrix while leaving the normal C3 profile lightweight.
+- Added audio-source diagnostics, configuration UI, host tests and sanitizer
+  coverage. ESP32-S3/HUB75 and new protocol commands remain out of scope for
+  this first 0.9 build.
 
 ## 0.8.1-audit-fix1 - 2026-09-10 - Final released remediation build
 
@@ -335,9 +450,9 @@ and is published as the definitive 0.8.1 source archive.
 - Made GIF activation transactional: a completed BLE transfer no longer claims the WLED display effect before filesystem promotion, decoder allocation, and `AnimatedGIF::open()` have succeeded.
 - A failed GIF open/reserve check now leaves the current WLED effect untouched instead of reporting `content=gif` for a decoder that never started.
 - Added `gifPending=1` to `/json/info` while a received GIF is waiting for asynchronous promotion/open.
-- Keeps the safe full 4096-entry LZW12 dictionary and low-memory 64x64 rescale from dev.6.
+- Keeps the safe full 4096-entry LZW12 dictionary and low-memory 64x64 rescale from dev.7.
 
-## 0.7.1-dev.6 - safe LZW12
+## 0.7.1-dev.7 - safe LZW12
 
 - Restored the full 4096-entry LZW12 dictionary after hardware stress testing exposed RAM corruption with truncated 64x64 dictionaries.
 - Kept low-memory rescale and 1024-byte file I/O buffer.
@@ -403,7 +518,7 @@ The `0.8.0-dev.2` through `0.8.0-dev.8` entries below were internal development 
 - This specifically addresses `Error 8: Effect RAM depleted!` seen after playing a GIF and then browsing ordinary WLED effects.
 - Added a host regression test for WLED effect takeover without a BLE content command.
 
-## 0.8.0-dev.6 - 2026-09-04 - Dedicated 32x32 validation build
+## 0.8.0-dev.7 - 2026-09-04 - Dedicated 32x32 validation build
 
 - Kept the media/renderer implementation from dev.4 unchanged after the 16x16 LZW10 profile passed ten consecutive GIFs without reboot or WLED effect-RAM exhaustion.
 - Added `platformio_override.ini.32x32`, a normal BLE/iDotMatrix build with `IDOT_GIF_LZW11` enabled and HUB75 deliberately disabled.
@@ -757,7 +872,7 @@ rediscovered later.
 - Confirmed the two-push connection initialization from `.6` works correctly in
   the official app.
 
-## 0.6.0-dev.6 - 2026-09-02 - Robust app-state initialization
+## 0.6.0-dev.7 - 2026-09-02 - Robust app-state initialization
 
 - Found that the single 1.2-second device-info push was timing-sensitive: it
   initialized the app switch in `.4`, but not reliably in the later build.
