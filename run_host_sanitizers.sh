@@ -21,10 +21,16 @@ $CXX $FLAGS IDotMatrixBulkTransfer.cpp tests/test_bulk_transfer.cpp -o "$TMP/ido
 $CXX $FLAGS IDotMatrixFA02Assembler.cpp tests/test_fa02_assembler.cpp -o "$TMP/idotmatrix_fa02_san"
 "$TMP/idotmatrix_fa02_san"
 
+$CXX $FLAGS tests/test_ble_framing.cpp -o "$TMP/idotmatrix_ble_framing_san"
+"$TMP/idotmatrix_ble_framing_san"
+
 $CXX $FLAGS -DIDOT_AUTOMATION_HOST_TEST -Itests/automation_stub IDotMatrixProtocol.cpp IDotMatrixAutomation.cpp tests/test_automation.cpp -o "$TMP/idotmatrix_automation_san"
 "$TMP/idotmatrix_automation_san"
 
 $CXX $FLAGS -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media_san"
 "$TMP/idotmatrix_media_san"
+
+$CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media12_san"
+"$TMP/idotmatrix_media12_san"
 
 echo "ASan/UBSan host tests passed."

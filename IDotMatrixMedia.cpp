@@ -6,6 +6,7 @@
 #include <cstring>
 #include <new>
 #include <cstdlib>
+#include <cstdio>
 
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -24,6 +25,9 @@
 namespace {
 constexpr char GIF_PLAY[] = "/idot_play.gif";
 constexpr char GIF_CACHE[] = "/idot_cache.bin";
+constexpr char GIF_CACHE_NEW[] = "/idot_cache.new";
+constexpr char GIF_PLAY_BACKUP[] = "/idot_play.bak";
+constexpr char GIF_CACHE_BACKUP[] = "/idot_cache.bak";
 constexpr size_t GIF_CACHE_HEADER_BYTES = 8u;
 constexpr size_t GIF_CACHE_MAX_BYTES = 512u * 1024u;
 constexpr uint8_t GIF_CACHE_MAGIC[4] = {'I', 'D', 'C', '1'};
@@ -68,6 +72,42 @@ void freeMediaBuffer(void* buffer) {
 #endif
 }
 
+bool filesystemHasRoom(size_t additional, size_t reserve = 32768u) {
+#if defined(ARDUINO_ARCH_ESP32)
+  const size_t total = WLED_FS.totalBytes();
+  const size_t used = WLED_FS.usedBytes();
+  if (total == 0 || used > total) return false;
+  const size_t freeBytes = total - used;
+  return additional <= freeBytes && reserve <= freeBytes - additional;
+#else
+  (void)additional; (void)reserve;
+  return true;
+#endif
+}
+
+bool copyFsFile(const char* from, const char* to) {
+  File source = WLED_FS.open(from, "r");
+  File target = WLED_FS.open(to, "w");
+  if (!source || !target) {
+    if (source) source.close();
+    if (target) target.close();
+    return false;
+  }
+  uint8_t buffer[256];
+  bool ok = true;
+  const size_t total = source.size();
+  while (source.position() < total) {
+    const size_t remaining = total - source.position();
+    const size_t count = source.read(buffer, remaining < sizeof(buffer) ? remaining : sizeof(buffer));
+    if (count == 0 || target.write(buffer, count) != count) { ok = false; break; }
+  }
+  target.flush();
+  source.close();
+  target.close();
+  if (!ok) WLED_FS.remove(to);
+  return ok;
+}
+
 uint8_t paeth(uint8_t a, uint8_t b, uint8_t c) {
   const int value = int(a) + int(b) - int(c);
   const int da = abs(value - int(a));
@@ -78,7 +118,29 @@ uint8_t paeth(uint8_t a, uint8_t b, uint8_t c) {
 }
 
 IDotMatrixMedia::IDotMatrixMedia(IDotMatrixRenderer& renderer) : renderer_(renderer) {
+  recoverTransientStorage();
   activeMedia = this;
+}
+
+void IDotMatrixMedia::recoverTransientStorage() {
+  // A reset can interrupt the short commit window after the old live GIF/cache
+  // pair has been moved to .bak but before the candidate pair is fully
+  // promoted. Presence of either backup means the transaction did not reach
+  // its cleanup point; prefer the previous known-good generation.
+  const bool hasPlayBackup = WLED_FS.exists(GIF_PLAY_BACKUP);
+  const bool hasCacheBackup = WLED_FS.exists(GIF_CACHE_BACKUP);
+  if (hasPlayBackup || hasCacheBackup) {
+    WLED_FS.remove(GIF_PLAY);
+    WLED_FS.remove(GIF_CACHE);
+    if (hasPlayBackup) WLED_FS.rename(GIF_PLAY_BACKUP, GIF_PLAY);
+    if (hasCacheBackup) WLED_FS.rename(GIF_CACHE_BACKUP, GIF_CACHE);
+  } else {
+    WLED_FS.remove(GIF_PLAY_BACKUP);
+    WLED_FS.remove(GIF_CACHE_BACKUP);
+  }
+  WLED_FS.remove(GIF_CACHE_NEW);
+  WLED_FS.remove(GIF_RX[0]);
+  WLED_FS.remove(GIF_RX[1]);
 }
 
 IDotMatrixMedia::~IDotMatrixMedia() {
@@ -118,7 +180,10 @@ bool IDotMatrixMedia::beginGif(size_t byteLength) {
   cacheLowHeapMin_ = 0;
   gifProbeFree_ = 0;
   gifProbeLargest_ = 0;
-  if (byteLength < 6 || byteLength > 2u * 1024u * 1024u) {
+  if (byteLength < 6 || byteLength > 2u * 1024u * 1024u ||
+      !filesystemHasRoom(byteLength)) {
+    lastError_ = byteLength < 6 || byteLength > 2u * 1024u * 1024u
+      ? Error::GifInvalid : Error::GifCacheFull;
     return false;
   }
   rxSlot_ = nextRxSlot_ & 1u;
@@ -159,14 +224,11 @@ bool IDotMatrixMedia::completeGif(bool crcValid) {
     rxSlot_ = -1;
     return false;
   }
-  // A valid replacement is now durable in its RX slot.  On the no-PSRAM
-  // frame-cache path, release the currently playing GIF/cache immediately so
-  // the replacement starts from a clean filesystem/heap state.  Do this only
-  // after CRC/length validation so a bad transfer cannot destroy the content
-  // that is already being displayed.  Direct 10/11-bit and PSRAM playback
-  // retain their established replacement behaviour.
-  if (useFrameCache()) releasePlaybackResources();
-
+  // Keep the current playable source/cache intact until the replacement has
+  // passed decoder/cache validation. The no-PSRAM frame-cache path stages the
+  // new source directly from its RX file and commits it only after a complete
+  // cache exists. Direct-decoder profiles retain their established promotion
+  // path.
   pendingGifBytes_ = gifWritten_;
   if (pendingSlot_ >= 0) WLED_FS.remove(GIF_RX[uint8_t(pendingSlot_)]);
   pendingSlot_ = rxSlot_;
@@ -175,11 +237,10 @@ bool IDotMatrixMedia::completeGif(bool crcValid) {
   return true;
 }
 
-bool IDotMatrixMedia::queueStoredGif(const char* path) {
-  if (path == nullptr) return false;
+bool IDotMatrixMedia::queueStoredGif(const char* path, const char* cachePath) {
+  if (path == nullptr || path[0] == '\0') return false;
   cancelGifReceive();
   lastError_ = Error::None;
-  if (useFrameCache()) releasePlaybackResources();
 
   File source = WLED_FS.open(path, "r");
   if (!source || source.size() < 6 || source.size() > 2u * 1024u * 1024u) {
@@ -187,42 +248,28 @@ bool IDotMatrixMedia::queueStoredGif(const char* path) {
     lastError_ = Error::GifInvalid;
     return false;
   }
-  const size_t bytes = source.size();
-  rxSlot_ = nextRxSlot_ & 1u;
-  nextRxSlot_ ^= 1u;
-  if (rxSlot_ == pendingSlot_) rxSlot_ ^= 1;
-  const char* targetPath = GIF_RX[uint8_t(rxSlot_)];
-  WLED_FS.remove(targetPath);
-  File target = WLED_FS.open(targetPath, "w");
-  if (!target) {
-    source.close();
-    rxSlot_ = -1;
-    lastError_ = Error::GifCacheIo;
-    return false;
-  }
-  uint8_t buffer[256];
-  size_t copied = 0;
-  bool ok = true;
-  while (copied < bytes) {
-    const size_t remaining = bytes - copied;
-    const size_t got = source.read(buffer, remaining < sizeof(buffer) ? remaining : sizeof(buffer));
-    if (got == 0 || target.write(buffer, got) != got) { ok = false; break; }
-    copied += got;
-  }
-  target.flush();
   source.close();
-  target.close();
-  if (!ok || copied != bytes) {
-    WLED_FS.remove(targetPath);
-    rxSlot_ = -1;
-    lastError_ = Error::GifCacheIo;
+  if (!inspectGifFile(path)) {
+    lastError_ = Error::GifInvalid;
     return false;
   }
-  pendingGifBytes_ = bytes;
-  if (pendingSlot_ >= 0) WLED_FS.remove(GIF_RX[uint8_t(pendingSlot_)]);
-  pendingSlot_ = rxSlot_;
-  rxSlot_ = -1;
-  promotePending_ = true;
+
+  // Close the previous decoder/cache but preserve a Carousel-owned persistent
+  // cache on disk. Replaying an unchanged slot can then reopen it without any
+  // LittleFS rewrite or source-file copy.
+  releasePlaybackResources();
+  snprintf(gifPlayPath_, sizeof(gifPlayPath_), "%s", path);
+  if (cachePath != nullptr && cachePath[0] != '\0') {
+    snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", cachePath);
+    cachePersistent_ = true;
+  } else {
+    snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", GIF_CACHE);
+    cachePersistent_ = false;
+  }
+  pendingGifBytes_ = 0;
+  promotePending_ = false;
+  openPending_ = true;
+  openDelayLoops_ = 1;
   return true;
 }
 
@@ -254,12 +301,19 @@ void IDotMatrixMedia::loop(uint32_t now) {
       return;
     }
     openPending_ = false;
-    if (useFrameCache()) openGifForCache();
-    else openGif();
+    const bool opened = useFrameCache() ? openGifForCache() : openGif();
+    if (!opened && replacementStaging_) {
+      const Error failure = lastError_;
+      rollbackStagedCachedReplacement(now, failure);
+    }
     return;
   }
   if (cacheBuilding_) {
-    buildCacheFrame(now);
+    const bool progressed = buildCacheFrame(now);
+    if (!progressed && replacementStaging_) {
+      const Error failure = lastError_;
+      rollbackStagedCachedReplacement(now, failure);
+    }
     return;
   }
   if (!gifPlaying_ || int32_t(now - nextFrameAt_) < 0) return;
@@ -334,17 +388,40 @@ bool IDotMatrixMedia::promoteGif() {
     lastError_ = Error::GifInvalid;
     WLED_FS.remove(rx);
     pendingSlot_ = -1;
+    pendingGifBytes_ = 0;
     return false;
   }
+
+  if (useFrameCache()) {
+    // Stage from the durable RX file. The previous source/cache files are only
+    // closed, never removed, so any decoder/cache failure can reopen them.
+    replacementHadActive_ = gifPlaying_;
+    previousCachePersistent_ = cachePersistent_;
+    snprintf(previousGifPlayPath_, sizeof(previousGifPlayPath_), "%s", gifPlayPath_);
+    snprintf(previousGifCachePath_, sizeof(previousGifCachePath_), "%s", gifCachePath_);
+    destroyDecoder(true);
+    resetGifCache(false);
+    snprintf(gifPlayPath_, sizeof(gifPlayPath_), "%s", rx);
+    snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", GIF_CACHE_NEW);
+    cachePersistent_ = false;
+    WLED_FS.remove(GIF_CACHE_NEW);
+    replacementStaging_ = true;
+    gifPlaying_ = false;
+    lastError_ = Error::None;
+    return true;
+  }
+
+  // Direct decoder profiles can promote after header validation because the
+  // decoder itself is opened immediately on the next loop turn.
+  snprintf(gifPlayPath_, sizeof(gifPlayPath_), "%s", GIF_PLAY);
+  snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", GIF_CACHE);
+  cachePersistent_ = false;
   destroyDecoder(false);
-  WLED_FS.remove(GIF_PLAY);
-  bool promoted = WLED_FS.exists(rx) && WLED_FS.rename(rx, GIF_PLAY);
-  // Some ESP32 filesystem builds have shown sporadic rename failures.  Falling
-  // back to a streamed copy keeps the decoder path deterministic and never
-  // buffers the complete GIF in RAM.
+  WLED_FS.remove(gifPlayPath_);
+  bool promoted = WLED_FS.exists(rx) && WLED_FS.rename(rx, gifPlayPath_);
   if (!promoted && WLED_FS.exists(rx)) {
     File source = WLED_FS.open(rx, "r");
-    File target = WLED_FS.open(GIF_PLAY, "w");
+    File target = WLED_FS.open(gifPlayPath_, "w");
     if (source && target) {
       uint8_t buffer[256];
       promoted = true;
@@ -363,17 +440,102 @@ bool IDotMatrixMedia::promoteGif() {
     if (promoted) WLED_FS.remove(rx);
   }
   if (!promoted) {
-    // Promotion failed after both the direct rename and streamed-copy fallback.
-    // Publish a terminal media error so the WLED adapter can execute its GIF
-    // recovery path instead of leaving the transfer in an apparently healthy
-    // pending state.  The failed RX file is discarded only after every
-    // promotion strategy has been attempted.
     lastError_ = Error::GifCacheIo;
     WLED_FS.remove(rx);
   }
   pendingSlot_ = -1;
   pendingGifBytes_ = 0;
   return promoted;
+}
+
+bool IDotMatrixMedia::commitStagedCachedReplacement(uint32_t now) {
+  if (!replacementStaging_ || pendingSlot_ < 0 || !WLED_FS.exists(GIF_CACHE_NEW)) return false;
+  const char* rx = GIF_RX[uint8_t(pendingSlot_)];
+  if (!WLED_FS.exists(rx)) return false;
+
+  if (gifCacheReadFile) gifCacheReadFile.close();
+  WLED_FS.remove(GIF_PLAY_BACKUP);
+  WLED_FS.remove(GIF_CACHE_BACKUP);
+
+  const bool hadPlay = WLED_FS.exists(GIF_PLAY);
+  const bool hadCache = WLED_FS.exists(GIF_CACHE);
+  bool playBacked = !hadPlay || WLED_FS.rename(GIF_PLAY, GIF_PLAY_BACKUP);
+  bool cacheBacked = false;
+  if (playBacked) cacheBacked = !hadCache || WLED_FS.rename(GIF_CACHE, GIF_CACHE_BACKUP);
+  if (!playBacked || !cacheBacked) {
+    if (playBacked && hadPlay) WLED_FS.rename(GIF_PLAY_BACKUP, GIF_PLAY);
+    return false;
+  }
+
+  bool sourcePromoted = WLED_FS.rename(rx, GIF_PLAY);
+  if (!sourcePromoted && copyFsFile(rx, GIF_PLAY)) {
+    WLED_FS.remove(rx);
+    sourcePromoted = true;
+  }
+  bool cachePromoted = sourcePromoted && WLED_FS.rename(GIF_CACHE_NEW, GIF_CACHE);
+  if (sourcePromoted && !cachePromoted && copyFsFile(GIF_CACHE_NEW, GIF_CACHE)) {
+    WLED_FS.remove(GIF_CACHE_NEW);
+    cachePromoted = true;
+  }
+  if (!sourcePromoted || !cachePromoted) {
+    WLED_FS.remove(GIF_PLAY);
+    WLED_FS.remove(GIF_CACHE);
+    if (hadPlay) WLED_FS.rename(GIF_PLAY_BACKUP, GIF_PLAY);
+    if (hadCache) WLED_FS.rename(GIF_CACHE_BACKUP, GIF_CACHE);
+    return false;
+  }
+
+  snprintf(gifPlayPath_, sizeof(gifPlayPath_), "%s", GIF_PLAY);
+  snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", GIF_CACHE);
+  cachePersistent_ = false;
+  replacementStaging_ = false;
+  pendingSlot_ = -1;
+  pendingGifBytes_ = 0;
+
+  if (!openExistingGifCache(now)) {
+    // The staged cache was structurally valid before the rename; an unexpected
+    // reopen failure must still preserve the old committed pair.
+    WLED_FS.remove(GIF_PLAY);
+    WLED_FS.remove(GIF_CACHE);
+    if (hadPlay) WLED_FS.rename(GIF_PLAY_BACKUP, GIF_PLAY);
+    if (hadCache) WLED_FS.rename(GIF_CACHE_BACKUP, GIF_CACHE);
+    return false;
+  }
+
+  WLED_FS.remove(GIF_PLAY_BACKUP);
+  WLED_FS.remove(GIF_CACHE_BACKUP);
+  previousGifPlayPath_[0] = '\0';
+  previousGifCachePath_[0] = '\0';
+  replacementHadActive_ = false;
+  return true;
+}
+
+void IDotMatrixMedia::rollbackStagedCachedReplacement(uint32_t now, Error failure) {
+  if (!replacementStaging_) return;
+  resetGifCache(true);  // removes /idot_cache.new
+  if (pendingSlot_ >= 0) WLED_FS.remove(GIF_RX[uint8_t(pendingSlot_)]);
+  pendingSlot_ = -1;
+  pendingGifBytes_ = 0;
+  replacementStaging_ = false;
+
+  snprintf(gifPlayPath_, sizeof(gifPlayPath_), "%s",
+    previousGifPlayPath_[0] ? previousGifPlayPath_ : GIF_PLAY);
+  snprintf(gifCachePath_, sizeof(gifCachePath_), "%s",
+    previousGifCachePath_[0] ? previousGifCachePath_ : GIF_CACHE);
+  cachePersistent_ = previousCachePersistent_;
+  gifPlaying_ = false;
+
+  if (replacementHadActive_) {
+    if (useFrameCache() && WLED_FS.exists(gifCachePath_)) {
+      openExistingGifCache(now);
+    } else if (WLED_FS.exists(gifPlayPath_)) {
+      openGif();
+    }
+  }
+  replacementHadActive_ = false;
+  previousGifPlayPath_[0] = '\0';
+  previousGifCachePath_[0] = '\0';
+  lastError_ = failure;
 }
 
 bool IDotMatrixMedia::ensureDecoderStorage() {
@@ -422,15 +584,21 @@ bool IDotMatrixMedia::ensureDecoderStorage() {
 }
 
 bool IDotMatrixMedia::openGifForCache() {
-  resetGifCache();
-  if (!WLED_FS.exists(GIF_PLAY) || !inspectGifFile(GIF_PLAY)) {
+  resetGifCache(!cachePersistent_);
+  if (!WLED_FS.exists(gifPlayPath_) || !inspectGifFile(gifPlayPath_)) {
     lastError_ = Error::GifInvalid;
     return false;
   }
+  if (cachePersistent_ && WLED_FS.exists(gifCachePath_) && openExistingGifCache(millis())) {
+    ++cacheReuseCount_;
+    return true;
+  }
+  if (cachePersistent_) WLED_FS.remove(gifCachePath_);
+  ++cacheBuildCount_;
 
 #if IDOT_GIF_BITS >= 12 && defined(ARDUINO_ARCH_ESP32)
   if (!psramFound()) {
-    compactGifFile = WLED_FS.open(GIF_PLAY, "r");
+    compactGifFile = WLED_FS.open(gifPlayPath_, "r");
     if (!compactGifFile) {
       lastError_ = Error::GifDecoderOpen;
       return false;
@@ -473,7 +641,7 @@ bool IDotMatrixMedia::openGifForCache() {
     decoder_ = new (decoderStorage_) AnimatedGIF();
     decoder_->begin(LITTLE_ENDIAN_PIXELS);
     decoder_->setDrawType(GIF_DRAW_RAW);
-    if (!decoder_->open(GIF_PLAY, openFile, closeFile, readFile, seekFile, drawGif)) {
+    if (!decoder_->open(gifPlayPath_, openFile, closeFile, readFile, seekFile, drawGif)) {
       lastError_ = Error::GifDecoderOpen;
       destroyDecoder(true);
       return false;
@@ -493,8 +661,8 @@ bool IDotMatrixMedia::openGifForCache() {
     destroyDecoder(true);
     return false;
   }
-  WLED_FS.remove(GIF_CACHE);
-  gifCacheWriteFile = WLED_FS.open(GIF_CACHE, "w");
+  WLED_FS.remove(gifCachePath_);
+  gifCacheWriteFile = WLED_FS.open(gifCachePath_, "w");
   if (!gifCacheWriteFile) {
     lastError_ = Error::GifCacheIo;
     resetGifCache();
@@ -522,6 +690,50 @@ bool IDotMatrixMedia::openGifForCache() {
   gifPlaying_ = false;
   cachePlayback_ = false;
   restartPending_ = false;
+  return true;
+}
+
+bool IDotMatrixMedia::openExistingGifCache(uint32_t now) {
+  File probe = WLED_FS.open(gifCachePath_, "r");
+  if (!probe || probe.size() < GIF_CACHE_HEADER_BYTES) {
+    if (probe) probe.close();
+    return false;
+  }
+  uint8_t header[GIF_CACHE_HEADER_BYTES]{};
+  const size_t got = probe.read(header, sizeof(header));
+  const size_t total = probe.size();
+  probe.close();
+  if (got != sizeof(header) || memcmp(header, GIF_CACHE_MAGIC, 4) != 0 ||
+      header[4] != renderer_.width() || header[5] != renderer_.height()) return false;
+  const size_t frameBytes = size_t(header[6]) | (size_t(header[7]) << 8);
+  if (frameBytes == 0 || frameBytes != renderer_.animationFrameBytes()) return false;
+  const size_t recordBytes = 2u + frameBytes;
+  if (total <= GIF_CACHE_HEADER_BYTES ||
+      (total - GIF_CACHE_HEADER_BYTES) % recordBytes != 0) return false;
+  const size_t frames = (total - GIF_CACHE_HEADER_BYTES) / recordBytes;
+  if (frames == 0 || frames > 0xFFFFFFFFu) return false;
+
+  gifCacheReadFile = WLED_FS.open(gifCachePath_, "r");
+  if (!gifCacheReadFile || !gifCacheReadFile.seek(GIF_CACHE_HEADER_BYTES, SeekSet)) {
+    if (gifCacheReadFile) gifCacheReadFile.close();
+    return false;
+  }
+  if (!renderer_.beginAnimation()) {
+    gifCacheReadFile.close();
+    lastError_ = Error::GifCanvasOom;
+    return false;
+  }
+  cacheFrameBytes_ = frameBytes;
+  cacheBytes_ = total;
+  cachedFrames_ = uint32_t(frames);
+  cacheFrameIndex_ = 0;
+  cacheBuilding_ = false;
+  cachePlayback_ = true;
+  gifPlaying_ = true;
+  restartPending_ = false;
+  nextFrameAt_ = now;
+  lastError_ = Error::None;
+  renderer_.setVisible(false);
   return true;
 }
 
@@ -594,7 +806,8 @@ bool IDotMatrixMedia::buildCacheFrame(uint32_t now) {
   if (delayMs > 65535) delayMs = 65535;
 
   const size_t recordBytes = 2u + cacheFrameBytes_;
-  if (cacheBytes_ + recordBytes > GIF_CACHE_MAX_BYTES) {
+  if (cacheBytes_ + recordBytes > GIF_CACHE_MAX_BYTES ||
+      !filesystemHasRoom(recordBytes, 32768u)) {
     lastError_ = Error::GifCacheFull;
     resetGifCache();
     destroyDecoder(true);
@@ -634,13 +847,21 @@ bool IDotMatrixMedia::finalizeGifCache(uint32_t now) {
   } else {
     destroyDecoder(true);
   }
-  if (cachedFrames_ == 0 || !WLED_FS.exists(GIF_CACHE)) {
+  if (cachedFrames_ == 0 || !WLED_FS.exists(gifCachePath_)) {
     lastError_ = Error::GifCacheIo;
     resetGifCache();
     return false;
   }
 
-  gifCacheReadFile = WLED_FS.open(GIF_CACHE, "r");
+  if (replacementStaging_) {
+    if (!commitStagedCachedReplacement(now)) {
+      lastError_ = Error::GifCacheIo;
+      return false;
+    }
+    return true;
+  }
+
+  gifCacheReadFile = WLED_FS.open(gifCachePath_, "r");
   if (!gifCacheReadFile || !gifCacheReadFile.seek(GIF_CACHE_HEADER_BYTES, SeekSet)) {
     lastError_ = Error::GifCacheIo;
     resetGifCache();
@@ -686,7 +907,7 @@ bool IDotMatrixMedia::playCachedFrame(uint32_t now) {
   return true;
 }
 
-void IDotMatrixMedia::resetGifCache() {
+void IDotMatrixMedia::resetGifCache(bool removeFile) {
   compactDecoder_.close();
   compactCache_ = false;
   if (compactGifFile) compactGifFile.close();
@@ -698,11 +919,11 @@ void IDotMatrixMedia::resetGifCache() {
   cacheFrameIndex_ = 0;
   if (gifCacheWriteFile) gifCacheWriteFile.close();
   if (gifCacheReadFile) gifCacheReadFile.close();
-  WLED_FS.remove(GIF_CACHE);
+  if (removeFile) WLED_FS.remove(gifCachePath_);
 }
 
 bool IDotMatrixMedia::openGif() {
-  if (!WLED_FS.exists(GIF_PLAY) || !inspectGifFile(GIF_PLAY)) {
+  if (!WLED_FS.exists(gifPlayPath_) || !inspectGifFile(gifPlayPath_)) {
     lastError_ = Error::GifInvalid;
     return false;
   }
@@ -719,7 +940,7 @@ bool IDotMatrixMedia::openGif() {
   decoder_ = new (decoderStorage_) AnimatedGIF();
   decoder_->begin(LITTLE_ENDIAN_PIXELS);
   decoder_->setDrawType(GIF_DRAW_RAW);
-  if (!decoder_->open(GIF_PLAY, openFile, closeFile, readFile, seekFile, drawGif)) {
+  if (!decoder_->open(gifPlayPath_, openFile, closeFile, readFile, seekFile, drawGif)) {
     lastError_ = Error::GifDecoderOpen;
     destroyDecoder(false);
     return false;
@@ -761,18 +982,32 @@ void IDotMatrixMedia::destroyDecoder(bool releaseStorage) {
 
 void IDotMatrixMedia::releasePlaybackResources() {
   destroyDecoder(true);
-  resetGifCache();
+  resetGifCache(!cachePersistent_);
 }
 
 void IDotMatrixMedia::stopPlayback() {
   promotePending_ = false;
   openPending_ = false;
   openDelayLoops_ = 0;
+  const bool transientPlayback = !cachePersistent_;
+  if (replacementStaging_) {
+    resetGifCache(true);
+    replacementStaging_ = false;
+    replacementHadActive_ = false;
+  }
   if (pendingSlot_ >= 0) {
     WLED_FS.remove(GIF_RX[uint8_t(pendingSlot_)]);
     pendingSlot_ = -1;
   }
+  pendingGifBytes_ = 0;
   releasePlaybackResources();
+  if (transientPlayback) WLED_FS.remove(GIF_PLAY);
+  WLED_FS.remove(GIF_CACHE_NEW);
+  WLED_FS.remove(GIF_PLAY_BACKUP);
+  WLED_FS.remove(GIF_CACHE_BACKUP);
+  snprintf(gifPlayPath_, sizeof(gifPlayPath_), "%s", GIF_PLAY);
+  snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", GIF_CACHE);
+  cachePersistent_ = false;
 }
 
 

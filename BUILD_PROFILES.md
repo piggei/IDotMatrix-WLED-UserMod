@@ -1,6 +1,6 @@
 # Build profiles and hardware targets
 
-Version 0.8.2-rc.2 keeps the 0.8.1 hardware/media profile model and retains the
+Stable Release 0.8.2 keeps the 0.8.1 hardware/media profile model and retains the
 explicit optional AudioReactive profile for ESP32-C3. The two independent build
 choices remain:
 
@@ -63,7 +63,7 @@ where `<media-profile>` is `16x16`, `32x32`, or `64x64`.
 
 ### ESP32-C3 status
 
-ESP32-C3 4 MB / 16x16 is a **supported 0.8.1 target** through:
+ESP32-C3 4 MB / 16x16 is a **supported 0.8.2 target** through:
 
 ```text
 platformio_override.ini.c3
@@ -91,9 +91,9 @@ Hardware evidence behind the support decision:
 The final 0.8.1 stress snapshot retained about 74 KB free heap and a 64 KB
 largest contiguous block with `reset=poweron`.
 
-### ESP32-C3 AudioReactive development profile
+### ESP32-C3 AudioReactive optional profile
 
-The 0.9 line retains the second C3 override introduced for AudioReactive testing:
+0.8.2 also supplies a second supported C3 override for AudioReactive/local-microphone use:
 
 ```text
 platformio_override.ini.c3-audio
@@ -155,7 +155,7 @@ custom_usermods =
 
 Do not inherit `${env:<base>.custom_usermods}`. WLED base environments may gain
 additional Usermods over time, which would silently change memory and behaviour.
-The deliberate 0.8.2-rc.2 exception is `platformio_override.ini.c3-audio`,
+The deliberate 0.8.2 exception is `platformio_override.ini.c3-audio`,
 which explicitly lists **exactly** `audioreactive` plus iDotMatrix.
 
 ## Framework pinning
@@ -243,7 +243,7 @@ pio run -e esp32c3dev_idotmatrix_audio_16x16
 ```
 
 Expected `/json/info` markers for this development tree include
-`release=0.8.2`, `build=0.8.2-rc.2`, `RMT+BLE=ESP32-C3 shared-RMT`,
+`release=0.8.2`, `build=0.8.2`, `RMT+BLE=ESP32-C3 shared-RMT`,
 `framework=WLED IDF5/shared-RMT`, `wledBase=d55037f`, `nimble=2.x API`, and the
 new audio-source diagnostics.
 

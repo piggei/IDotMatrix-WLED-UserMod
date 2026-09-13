@@ -1,5 +1,5 @@
 ; WLED iDotMatrix Usermod - supported ESP32-C3 16x16 profile
-; Usermod build: 0.8.2-rc.2
+; Usermod build: 0.8.2
 ; Required WLED base commit:
 ;   d55037f7510541eddc390c8f3d01afc5787aa44a (2026-09-07)
 ;

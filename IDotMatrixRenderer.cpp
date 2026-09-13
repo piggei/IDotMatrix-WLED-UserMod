@@ -204,19 +204,36 @@ void drawSeparator(
   }
 }
 
+void drawClockSeparator(
+  Pixel* canvas,
+  int16_t x,
+  int16_t y,
+  const Pixel& value,
+  bool renderDate,
+  bool separatorVisible
+) {
+  // DD/MM always keeps its slash visible.  Only the HH:MM colon blinks.
+  if (renderDate || separatorVisible) drawSeparator(canvas, x, y, value, renderDate);
+}
+
 void drawTwoRows(
   Pixel* canvas,
   uint8_t top,
   uint8_t bottom,
   const Pixel& topColor,
   const Pixel& bottomColor,
-  bool renderDate
+  bool renderDate,
+  bool separatorVisible,
+  int8_t timeSeparatorShift = 0
 ) {
   drawDigit(canvas, top / 10, 6, 2, topColor);
   drawDigit(canvas, top % 10, 10, 2, topColor);
   drawDigit(canvas, bottom / 10, 6, 9, bottomColor);
   drawDigit(canvas, bottom % 10, 10, 9, bottomColor);
-  drawSeparator(canvas, 2, 9, bottomColor, renderDate);
+  // Date keeps the previously validated slash position.  The time colon can
+  // be micro-positioned independently, matching the emulator artwork.
+  const int16_t separatorX = renderDate ? 2 : (2 + timeSeparatorShift);
+  drawClockSeparator(canvas, separatorX, 9, bottomColor, renderDate, separatorVisible);
 }
 
 Pixel hsv(uint8_t hue) {
@@ -918,16 +935,20 @@ void IDotMatrixRenderer::renderClock(
     else if (top > 12) top -= 12;
   }
 
+  // One complete blink per second: 500 ms on, 500 ms off.  Date separators
+  // do not blink and remain continuously visible.
+  const bool separatorVisible = renderDate || ((animationMillis % 1000u) < 500u);
+
   switch (style & 0x07) {
     case 0:
       drawRainbowBorder(base, animationMillis);
-      drawTwoRows(base, top, bottom, selected, selected, renderDate);
+      drawTwoRows(base, top, bottom, selected, selected, renderDate, separatorVisible, 2);
       break;
     case 1: {
       const Pixel clockRed = color(255, 0, 0);
       drawDigit(base, top / 10, 2, 1, clockRed);
       drawDigit(base, top % 10, 6, 1, clockRed);
-      drawSeparator(base, 10, 1, clockRed, renderDate);
+      drawClockSeparator(base, 10, 1, clockRed, renderDate, separatorVisible);
       drawChristmasTree(base);
       drawDigit(base, bottom / 10, 7, 9, clockRed);
       drawDigit(base, bottom % 10, 11, 9, clockRed);
@@ -937,44 +958,47 @@ void IDotMatrixRenderer::renderClock(
       drawRacingBands(base);
       const Pixel orange = color(255, 170, 0);
       const Pixel white = color(255, 255, 255);
-      drawDigit(base, top / 10, 1, 5, orange);
-      drawDigit(base, top % 10, 5, 5, orange);
+      // Micro-positioning copied from the emulator follow-up: both hour
+      // digits and the first minute digit move one pixel left.  The separator
+      // and the second minute digit stay at their established coordinates.
+      drawDigit(base, top / 10, 0, 5, orange);
+      drawDigit(base, top % 10, 4, 5, orange);
       if (renderDate) {
         putPixel(base, 9, 5, white);
         putPixel(base, 9, 6, white);
         putPixel(base, 8, 7, white);
         putPixel(base, 8, 8, white);
-      } else {
+      } else if (separatorVisible) {
         putPixel(base, 8, 6, white);
         putPixel(base, 8, 8, white);
       }
-      drawDigit(base, bottom / 10, 10, 5, orange);
+      drawDigit(base, bottom / 10, 9, 5, orange);
       drawDigit(base, bottom % 10, 13, 5, orange);
       break;
     }
     case 3:
       for (Pixel& pixel : base) pixel = selected;
-      drawTwoRows(base, top, bottom, color(0, 0, 0), color(0, 0, 0), renderDate);
+      drawTwoRows(base, top, bottom, color(0, 0, 0), color(0, 0, 0), renderDate, separatorVisible, 2);
       break;
     case 4:
       drawDigit(base, top / 10, 2, 1, selected);
       drawDigit(base, top % 10, 6, 1, selected);
-      drawSeparator(base, 11, 1, selected, renderDate);
+      drawClockSeparator(base, renderDate ? 11 : 10, 1, selected, renderDate, separatorVisible);
       drawHourglass(base);
       drawDigit(base, bottom / 10, 6, 9, selected);
       drawDigit(base, bottom % 10, 10, 9, selected);
       break;
     case 5:
       drawBlueFrame(base, true);
-      drawTwoRows(base, top, bottom, color(255, 165, 0), color(255, 165, 0), renderDate);
+      drawTwoRows(base, top, bottom, color(255, 165, 0), color(255, 165, 0), renderDate, separatorVisible, 2);
       break;
     case 6:
-      drawTwoRows(base, top, bottom, selected, selected, renderDate);
+      drawTwoRows(base, top, bottom, selected, selected, renderDate, separatorVisible, 2);
       drawBlueFrame(base, false);
       break;
     case 7:
       drawQuadrantBorder(base);
-      drawTwoRows(base, top, bottom, selected, selected, renderDate);
+      drawTwoRows(base, top, bottom, selected, selected, renderDate, separatorVisible, 2);
       break;
   }
 

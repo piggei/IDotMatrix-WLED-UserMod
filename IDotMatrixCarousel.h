@@ -16,6 +16,7 @@ public:
 
   void begin();
   void loop(uint32_t now);
+  void onPlaybackFailure(uint32_t now);
 
   void resetPersistent();
   void configure(const uint8_t* slots, uint8_t count);
@@ -45,6 +46,10 @@ public:
   int8_t currentSlot() const { return currentSlot_; }
   uint16_t currentDwellSeconds() const;
   bool autoStartPending() const { return autoStartPending_; }
+  bool updateHoldActive() const { return updateHoldActive_; }
+  uint16_t failedMask() const { return failedMask_; }
+  int8_t lastFailedSlot() const { return lastFailedSlot_; }
+  bool lastResetOk() const { return lastResetOk_; }
 
 private:
   struct SlotMeta {
@@ -70,9 +75,13 @@ private:
   void clearFiles();
   bool playNext(uint32_t now, bool first);
   bool playSlot(uint8_t slot, uint32_t now);
+  void startUpdateHold(uint32_t now);
+  void touchUpdateHold(uint32_t now);
+  void endUpdateHold();
   int8_t findNextPlayable(int8_t from) const;
   static void slotPath(uint8_t slot, uint8_t type, char* out, size_t outSize);
   static void backupPath(uint8_t slot, uint8_t type, char* out, size_t outSize);
+  static void cachePath(uint8_t slot, char* out, size_t outSize);
   static bool copyFile(const char* from, const char* to);
 
   IDotMatrixProtocol& protocol_;
@@ -86,6 +95,9 @@ private:
   uint32_t nextSwitchAt_ = 0;
   bool autoStartPending_ = false;
   uint32_t autoStartAt_ = 0;
+  bool updateHoldActive_ = false;
+  uint32_t updateHoldDeadline_ = 0;
+  static constexpr uint32_t UPDATE_HOLD_TIMEOUT_MS = 8000u;
 
   bool rxOpen_ = false;
   uint8_t rxType_ = 0;
@@ -93,4 +105,7 @@ private:
   uint16_t rxDwell_ = 0;
   size_t rxExpected_ = 0;
   size_t rxWritten_ = 0;
+  uint16_t failedMask_ = 0;
+  int8_t lastFailedSlot_ = -1;
+  bool lastResetOk_ = true;
 };

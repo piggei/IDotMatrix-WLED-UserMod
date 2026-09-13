@@ -13,7 +13,7 @@ class Preferences;
 
 // Persistent alarm/program engine for the iDotMatrix protocol.  It deliberately
 // lives outside the renderer: schedules own time, metadata, filesystem payloads
-// and the optional buzzer, then reuse the same iDotMatrix Display paths as a
+// and the optional buzzer, then reuse the same iDotMatrix paths as a
 // normal app command when content actually has to be shown.
 class IDotMatrixAutomation final : public IDotMatrixAutomationEvents {
 public:
@@ -58,6 +58,7 @@ public:
   uint8_t configuredScheduleCount() const;
   bool scheduleUploadOpen() const { return scheduleUploadOpen_; }
   const char* lastErrorText() const;
+  bool lastResetOk() const { return lastResetOk_; }
 
 private:
   static constexpr uint8_t ALARM_CONTENT_GIF = 0x01;
@@ -194,4 +195,5 @@ private:
   bool alarmBuzzerOwned_ = false;
   bool scheduleBuzzerOwned_ = false;
   Error lastError_ = Error::None;
+  bool lastResetOk_ = true;
 };

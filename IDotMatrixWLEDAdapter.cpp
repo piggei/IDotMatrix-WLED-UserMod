@@ -6,7 +6,7 @@ namespace {
 IDotMatrixWLEDAdapter* activeAdapter = nullptr;
 
 const char DISPLAY_EFFECT_DATA[] PROGMEM =
-  "iDotMatrix Display@;;;2";
+  "iDotMatrix@;;;2";
 
 void modeIDotMatrixDisplay() {
   if (activeAdapter != nullptr) {
@@ -71,7 +71,7 @@ bool IDotMatrixWLEDAdapter::pollDisplayEffectSelection() {
   // Do not infer ownership from getFirstSelectedSeg(). The web UI, presets and
   // 2D configurations can leave that helper pointing at a different segment.
   // Scan the actual WLED segment table and treat Segment::mode as the source of
-  // truth for a user selecting iDotMatrix Display. This path is independent of
+  // truth for a user selecting iDotMatrix. This path is independent of
   // BLE and does not require the custom-effect callback to have rendered yet.
   uint8_t found = 0xFF;
   const uint8_t count = strip.getSegmentsNum();
@@ -135,7 +135,7 @@ void IDotMatrixWLEDAdapter::claimDisplayEffectFromCallback() {
   displayEffectSegmentId_ = segId;
   auto& segment = strip.getSegment(segId);
   if (segment.mode != displayEffectId_) {
-    // The callback proves that WLED is servicing iDotMatrix Display even when
+    // The callback proves that WLED is servicing iDotMatrix even when
     // its externally visible segment state is still the previous effect during
     // the transition. Commit the same effect ID to the segment so Web UI, JSON
     // state and presets all converge on the effect actually being rendered.
@@ -150,7 +150,8 @@ void IDotMatrixWLEDAdapter::claimDisplayEffectFromCallback() {
 bool IDotMatrixWLEDAdapter::hasLogicalContent() const {
   return solidActive_ || lightEffectActive_ || audioActive_ || diySessionActive_ ||
     clockActive_ || countdownActive_ || stopwatchActive_ || scoreboardActive_ ||
-    textActive_ || rawImageActive_ || gifActive_ || gifPending_ || gifStaging_;
+    textActive_ || rawImageActive_ || gifActive_ || gifPending_ || gifStaging_ ||
+    carouselUpdateHold_;
 }
 
 bool IDotMatrixWLEDAdapter::hasActiveContent() const {
@@ -186,6 +187,8 @@ void IDotMatrixWLEDAdapter::clearContentState() {
   gifPrecache_ = false;
   gifReplacingActiveGif_ = false;
   gifPreviousRendererVisible_ = false;
+  gifPreviousContentMask_ = 0;
+  carouselUpdateHold_ = false;
   textLoadReady_ = false;
   stopMediaPlayback();
   renderer_.setVisible(false);
@@ -193,6 +196,114 @@ void IDotMatrixWLEDAdapter::clearContentState() {
 
 void IDotMatrixWLEDAdapter::cancelAutomationContent() {
   clearContentState();
+}
+
+void IDotMatrixWLEDAdapter::beginCarouselPlayback() {
+  // Entering Device Assets transfers ownership of the iDotMatrix framebuffer
+  // immediately.  In particular, do not leave Clock active while a cold GIF
+  // frame cache is built: renderDisplayEffectFrame() would otherwise continue
+  // regenerating the clock canvas until syncGifPlayback() publishes the first
+  // GIF frame.  Clock settings themselves are retained, so the normal fallback
+  // can be restored if the Carousel has no playable slots.
+  clearContentState();
+}
+
+void IDotMatrixWLEDAdapter::beginCarouselUpdateHold() {
+  // Replacing a Carousel is an ownership transition, not an absence of
+  // iDotMatrix content.  Clear the previous dynamic renderer/media now, but
+  // retain a logical owner so pollDisplayEffectSelection() does not invoke the
+  // standalone Clock fallback while the new bank is being uploaded.
+  clearContentState();
+  carouselUpdateHold_ = true;
+  renderer_.fill(0, 0, 0);
+  renderer_.setVisible(false);
+  activateDisplayEffect();
+  strip.trigger();
+}
+
+void IDotMatrixWLEDAdapter::endCarouselUpdateHold() {
+  carouselUpdateHold_ = false;
+}
+
+void IDotMatrixWLEDAdapter::releaseCarouselMediaForStorageMutation() {
+  const bool gifOwnedDisplay = gifActive_ || gifPending_ || gifStaging_ || gifPrecache_;
+  if (!gifOwnedDisplay) return;
+
+  // The frame-cache backend keeps the currently playing cache file open.
+  // Deleting Carousel files before closing that handle made protocol Reset
+  // report a partial failure on hardware and left cache/source files behind.
+  // Release the media first, then retire only GIF-specific adapter state.
+  stopMediaPlayback();
+  gifActive_ = false;
+  gifPending_ = false;
+  gifStaging_ = false;
+  gifPrecache_ = false;
+  gifReplacingActiveGif_ = false;
+  gifPreviousRendererVisible_ = false;
+  clearGifContentSnapshot();
+  if (gifOwnedDisplay) renderer_.setVisible(false);
+}
+
+namespace {
+constexpr uint16_t GIF_PREV_SOLID = 1u << 0;
+constexpr uint16_t GIF_PREV_LIGHT = 1u << 1;
+constexpr uint16_t GIF_PREV_AUDIO = 1u << 2;
+constexpr uint16_t GIF_PREV_DIY = 1u << 3;
+constexpr uint16_t GIF_PREV_CLOCK = 1u << 4;
+constexpr uint16_t GIF_PREV_COUNTDOWN = 1u << 5;
+constexpr uint16_t GIF_PREV_STOPWATCH = 1u << 6;
+constexpr uint16_t GIF_PREV_SCOREBOARD = 1u << 7;
+constexpr uint16_t GIF_PREV_TEXT = 1u << 8;
+constexpr uint16_t GIF_PREV_RAW = 1u << 9;
+}
+
+void IDotMatrixWLEDAdapter::captureAndSuspendContentForGifStaging() {
+  gifPreviousContentMask_ = 0;
+  if (solidActive_) gifPreviousContentMask_ |= GIF_PREV_SOLID;
+  if (lightEffectActive_) gifPreviousContentMask_ |= GIF_PREV_LIGHT;
+  if (audioActive_) gifPreviousContentMask_ |= GIF_PREV_AUDIO;
+  if (diySessionActive_) gifPreviousContentMask_ |= GIF_PREV_DIY;
+  if (clockActive_) gifPreviousContentMask_ |= GIF_PREV_CLOCK;
+  if (countdownActive_) gifPreviousContentMask_ |= GIF_PREV_COUNTDOWN;
+  if (stopwatchActive_) gifPreviousContentMask_ |= GIF_PREV_STOPWATCH;
+  if (scoreboardActive_) gifPreviousContentMask_ |= GIF_PREV_SCOREBOARD;
+  if (textActive_) gifPreviousContentMask_ |= GIF_PREV_TEXT;
+  if (rawImageActive_) gifPreviousContentMask_ |= GIF_PREV_RAW;
+
+  // GIF cache generation reuses the renderer's framebuffer as its decode
+  // workspace.  No previous procedural owner may keep writing to that canvas
+  // while staging is in progress, otherwise Clock/Text/light/audio frames can
+  // be serialized into the GIF cache itself.  gifPending_ remains the logical
+  // owner marker so WLED keeps servicing the iDotMatrix display effect.
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
+  diySessionActive_ = false;
+  clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = false;
+}
+
+void IDotMatrixWLEDAdapter::restoreSuspendedContentAfterGifFailure() {
+  if (gifPreviousContentMask_ == 0) return;
+  solidActive_ = (gifPreviousContentMask_ & GIF_PREV_SOLID) != 0;
+  lightEffectActive_ = (gifPreviousContentMask_ & GIF_PREV_LIGHT) != 0;
+  audioActive_ = (gifPreviousContentMask_ & GIF_PREV_AUDIO) != 0;
+  diySessionActive_ = (gifPreviousContentMask_ & GIF_PREV_DIY) != 0;
+  clockActive_ = (gifPreviousContentMask_ & GIF_PREV_CLOCK) != 0;
+  countdownActive_ = (gifPreviousContentMask_ & GIF_PREV_COUNTDOWN) != 0;
+  stopwatchActive_ = (gifPreviousContentMask_ & GIF_PREV_STOPWATCH) != 0;
+  scoreboardActive_ = (gifPreviousContentMask_ & GIF_PREV_SCOREBOARD) != 0;
+  textActive_ = (gifPreviousContentMask_ & GIF_PREV_TEXT) != 0;
+  rawImageActive_ = (gifPreviousContentMask_ & GIF_PREV_RAW) != 0;
+  gifPreviousContentMask_ = 0;
+}
+
+void IDotMatrixWLEDAdapter::clearGifContentSnapshot() {
+  gifPreviousContentMask_ = 0;
 }
 
 void IDotMatrixWLEDAdapter::restoreClockFallback() {
@@ -230,6 +341,19 @@ void IDotMatrixWLEDAdapter::stopMediaPlayback() {
 void IDotMatrixWLEDAdapter::activateDisplayEffect() {
   if (!isDisplayEffectRegistered()) return;
 
+  // Match WLED's own direct-effect semantics: taking explicit iDotMatrix
+  // ownership terminates any active WLED playlist.  Do this through
+  // applyPreset(0), not unloadPlaylist() alone.  Playlist entries enqueue
+  // presets asynchronously and handlePresets() runs after the Usermod loop;
+  // unloadPlaylist() does not clear an already queued preset, so that preset
+  // could immediately overwrite iDotMatrix in the same main-loop cycle.
+  //
+  // In the pinned WLED base, preset index 0 is the internal "no preset
+  // pending" sentinel. applyPreset(0) first unloads the playlist and then
+  // clears the pending preset request, making the explicit iDotMatrix takeover
+  // authoritative without patching WLED core.
+  if (currentPlaylist >= 0) applyPreset(0, CALL_MODE_DIRECT_CHANGE);
+
   // Any transition back to the framebuffer effect ends the temporary black
   // Static staging state.  Restore the user's WLED primary colour first; the
   // display effect itself ignores it, but later WLED effects must see the
@@ -246,6 +370,7 @@ void IDotMatrixWLEDAdapter::activateDisplayEffect() {
 }
 
 void IDotMatrixWLEDAdapter::onDeviceReset() {
+  ++protocolResetCount_;
   clearContentState();
   countdownRunning_ = false;
   countdownPaused_ = false;
@@ -814,13 +939,14 @@ bool IDotMatrixWLEDAdapter::onGifData(
   return media_ != nullptr && media_->writeGif(offset, data, length);
 }
 
-bool IDotMatrixWLEDAdapter::playStoredGif(const char* path) {
-  if (media_ == nullptr || !media_->queueStoredGif(path)) return false;
+bool IDotMatrixWLEDAdapter::playStoredGif(const char* path, const char* cachePath) {
+  if (media_ == nullptr || !media_->queueStoredGif(path, cachePath)) return false;
 
   auto& segment = controlSegment();
   gifPreviousEffect_ = segment.mode;
   gifPreviousRendererVisible_ = renderer_.isVisible();
   gifReplacingActiveGif_ = gifActive_ && segment.mode == displayEffectId_;
+  captureAndSuspendContentForGifStaging();
   gifPending_ = true;
   gifPrecache_ = media_->gifUsesFrameCache();
   gifStaging_ = !gifPrecache_;
@@ -858,6 +984,7 @@ bool IDotMatrixWLEDAdapter::onGifComplete(bool crcValid) {
   gifPreviousEffect_ = previousEffect;
   gifPreviousRendererVisible_ = previousRendererVisible;
   gifReplacingActiveGif_ = replacingActiveGif;
+  captureAndSuspendContentForGifStaging();
   gifPending_ = true;
   gifPrecache_ = media_->gifUsesFrameCache();
   gifStaging_ = !gifPrecache_;
@@ -899,6 +1026,7 @@ void IDotMatrixWLEDAdapter::syncGifPlayback(bool playing, bool failed) {
     gifPrecache_ = false;
     gifReplacingActiveGif_ = false;
     gifPreviousRendererVisible_ = false;
+    clearGifContentSnapshot();
     renderer_.setVisible(true);
     return;
   }
@@ -906,13 +1034,12 @@ void IDotMatrixWLEDAdapter::syncGifPlayback(bool playing, bool failed) {
   if (!gifPending_ && !gifStaging_ && !gifPrecache_) return;
   if (!failed) return;
 
-  // Decoder/cache preparation failed.  If this was replacing an active GIF,
-  // the old cache/decoder has already been retired and cannot be restored; in
-  // that case leave WLED on Static instead of reviving an empty
-  // iDotMatrix Display effect.  That empty effect was the reason one transient
-  // failure could poison all following GIF replacements until the user
-  // manually selected a solid colour.  Non-GIF content (clock/text/image/DIY)
-  // remains restorable because its renderer canvas/state is still present.
+  // Decoder/cache preparation failed and no playable GIF is active. On the
+  // frame-cache path IDotMatrixMedia first attempts to reopen the previous
+  // committed GIF; in that successful rollback case `playing` is true and the
+  // branch above has already restored normal GIF ownership. Reaching this path
+  // means rollback itself was not playable, so fall back to Static for a GIF
+  // replacement instead of leaving an empty iDotMatrix effect.
   gifPending_ = false;
   gifStaging_ = false;
   const bool wasPrecache = gifPrecache_;
@@ -934,7 +1061,12 @@ void IDotMatrixWLEDAdapter::syncGifPlayback(bool playing, bool failed) {
     stateUpdated(CALL_MODE_DIRECT_CHANGE);
     strip.trigger();
   }
-  if (restorePreviousCanvas) renderer_.setVisible(true);
+  if (restorePreviousCanvas) {
+    restoreSuspendedContentAfterGifFailure();
+    renderer_.setVisible(true);
+  } else {
+    clearGifContentSnapshot();
+  }
 }
 
 void IDotMatrixWLEDAdapter::renderDisplayEffectFrame() {

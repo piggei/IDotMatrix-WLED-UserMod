@@ -61,6 +61,38 @@ static void advanceGifOpen(IDotMatrixMedia& media, uint32_t now) {
   for (int i = 0; i < 8 && !media.gifActive(); ++i) media.loop(now);
 }
 
+
+static void writeStubFile(const char* path, const uint8_t* data, size_t length) {
+  File file = WLED_FS.open(path, "w");
+  assert(file);
+  assert(file.write(data, length) == length);
+  file.close();
+}
+
+static void testTransientBootRecovery() {
+  WLED_FS.clear();
+  const uint8_t oldPlay[] = {'G','I','F','8','9','a'};
+  const uint8_t oldCache[] = {'I','D','C','1',16,16,0,3, 10,0, 1,2,3};
+  const uint8_t candidate[] = {'G','I','F','8','7','a'};
+  writeStubFile("/idot_play.bak", oldPlay, sizeof(oldPlay));
+  writeStubFile("/idot_cache.bak", oldCache, sizeof(oldCache));
+  writeStubFile("/idot_play.gif", candidate, sizeof(candidate));
+  writeStubFile("/idot_cache.new", candidate, sizeof(candidate));
+  writeStubFile("/idot_rx0.tmp", candidate, sizeof(candidate));
+
+  IDotMatrixRenderer renderer;
+  assert(renderer.begin(0x01));
+  {
+    IDotMatrixMedia media(renderer);
+    assert(WLED_FS.exists("/idot_play.gif"));
+    assert(WLED_FS.exists("/idot_cache.bin"));
+    assert(!WLED_FS.exists("/idot_play.bak"));
+    assert(!WLED_FS.exists("/idot_cache.bak"));
+    assert(!WLED_FS.exists("/idot_cache.new"));
+    assert(!WLED_FS.exists("/idot_rx0.tmp"));
+  }
+}
+
 static void testGifPromotionFailures() {
   const uint8_t gif[] = {'G', 'I', 'F', '8', '9', 'a'};
 
@@ -105,7 +137,7 @@ static void testGifPromotionFailures() {
     assert(media.completeGif(true));
     WLED_FS.failRename("/idot_rx0.tmp", "/idot_play.gif");
     WLED_FS.failOpenWrite("/idot_play.gif");
-    media.loop(300);
+    advanceGifOpen(media, 300);
     assert(!media.gifActive());
     assert(media.lastError() == IDotMatrixMedia::Error::GifCacheIo);
 
@@ -119,8 +151,41 @@ static void testGifPromotionFailures() {
   }
 }
 
+static void testPersistentCarouselCacheReuse() {
+#if IDOT_GIF_BITS >= 12
+  WLED_FS.clear();
+  const uint8_t gif[] = {'G', 'I', 'F', '8', '9', 'a'};
+  {
+    File source = WLED_FS.open("/idot_a0.gif", "w");
+    assert(source);
+    assert(source.write(gif, sizeof(gif)) == sizeof(gif));
+    source.close();
+  }
+
+  IDotMatrixRenderer renderer;
+  assert(renderer.begin(0x01));
+  IDotMatrixMedia media(renderer);
+  assert(media.queueStoredGif("/idot_a0.gif", "/idot_c0.bin"));
+  for (int i = 0; i < 12 && !media.gifActive(); ++i) media.loop(100);
+  assert(media.gifActive());
+  assert(media.gifCacheBuildCount() == 1);
+  assert(media.gifCacheReuseCount() == 0);
+  assert(WLED_FS.exists("/idot_c0.bin"));
+
+  media.stopPlayback();
+  assert(WLED_FS.exists("/idot_c0.bin"));
+  assert(media.queueStoredGif("/idot_a0.gif", "/idot_c0.bin"));
+  for (int i = 0; i < 6 && !media.gifActive(); ++i) media.loop(200);
+  assert(media.gifActive());
+  assert(media.gifCacheBuildCount() == 1);
+  assert(media.gifCacheReuseCount() == 1);
+#endif
+}
+
 int main() {
+  testTransientBootRecovery();
   testGifPromotionFailures();
+  testPersistentCarouselCacheReuse();
   WLED_FS.clear();
 
   IDotMatrixRenderer renderer;
@@ -164,23 +229,35 @@ int main() {
 #endif
 
 #if IDOT_GIF_BITS >= 12
-  // Replacing a cached GIF must retire the previous cache immediately after a
-  // fully valid transfer completes.  Repeated A/B-style replacements must not
-  // leave the old cache/read handle alive until the next decoder-open turn.
+  // If a replacement reaches commit but promotion still fails, the previous
+  // known-good committed GIF/cache pair is restored and remains playable.
+  WLED_FS.failRename("/idot_rx0.tmp", "/idot_play.gif");
+  WLED_FS.failRename("/idot_rx1.tmp", "/idot_play.gif");
+  WLED_FS.failOpenWrite("/idot_play.gif");
+  assert(media.beginGif(sizeof(gifA)));
+  assert(media.writeGif(0, gifA, sizeof(gifA)));
+  assert(media.completeGif(true));
+  for (int i = 0; i < 12; ++i) media.loop(9);
+  assert(media.gifActive());
+  assert(media.lastError() == IDotMatrixMedia::Error::GifCacheIo);
+  assert(WLED_FS.exists("/idot_play.gif"));
+  assert(WLED_FS.exists("/idot_cache.bin"));
+  WLED_FS.resetFailures();
+
+  // A valid replacement is staged without destroying the current cached GIF.
+  // Only after the replacement cache has been built and validated is the
+  // committed /idot_play.gif + /idot_cache.bin pair swapped.
   for (int cycle = 0; cycle < 12; ++cycle) {
     assert(media.beginGif(sizeof(gifA)));
     assert(media.writeGif(0, gifA, sizeof(gifA)));
     assert(media.completeGif(true));
-    assert(!media.gifActive());
-    assert(media.gifCachedFrames() == 0);
-    media.loop(uint32_t(10 + cycle));
-    media.loop(uint32_t(10 + cycle));
-    media.loop(uint32_t(10 + cycle));
-    for (int i = 0; i < 4 && !media.gifActive(); ++i) {
-      media.loop(uint32_t(10 + cycle));
-    }
     assert(media.gifActive());
     assert(media.gifCachedFrames() == 1);
+    for (int i = 0; i < 12; ++i) media.loop(uint32_t(10 + cycle));
+    assert(media.gifActive());
+    assert(media.gifCachedFrames() == 1);
+    assert(WLED_FS.exists("/idot_play.gif"));
+    assert(WLED_FS.exists("/idot_cache.bin"));
   }
 #endif
 

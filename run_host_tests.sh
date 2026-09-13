@@ -41,6 +41,18 @@ $CXX $FLAGS IDotMatrixBulkTransfer.cpp tests/test_bulk_transfer.cpp -o "$TMP/ido
 $CXX $FLAGS IDotMatrixFA02Assembler.cpp tests/test_fa02_assembler.cpp -o "$TMP/idotmatrix_fa02_test"
 "$TMP/idotmatrix_fa02_test"
 
+$CXX $FLAGS tests/test_ble_framing.cpp -o "$TMP/idotmatrix_ble_framing_test"
+"$TMP/idotmatrix_ble_framing_test"
+
+# Syntax-check both NimBLE API branches. The stubs deliberately exercise the
+# production callback signatures without claiming hardware behaviour.
+$CXX $FLAGS -Itests/ble_stub -fsyntax-only IDotMatrixBLEServer.cpp
+BLE_V1_STUB="$TMP/idotmatrix_ble_v1_stub"
+rm -rf "$BLE_V1_STUB"
+mkdir -p "$BLE_V1_STUB"
+cp tests/ble_stub/Arduino.h tests/ble_stub/NimBLEDevice.h "$BLE_V1_STUB/"
+$CXX $FLAGS -I"$BLE_V1_STUB" -fsyntax-only IDotMatrixBLEServer.cpp
+
 $CXX $FLAGS IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp tests/test_compact_gif.cpp -o "$TMP/idotmatrix_compact_gif_test"
 "$TMP/idotmatrix_compact_gif_test"
 

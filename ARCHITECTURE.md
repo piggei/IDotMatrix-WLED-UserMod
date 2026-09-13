@@ -1,10 +1,10 @@
 # Architecture
 
-This document describes the **0.8.2-rc.2 architecture**, built directly on the
-hardware-qualified 0.8.1 baseline. The first 0.9 development step adds a small
-audio-source abstraction for the existing Audio/Rhythm renderers while leaving
-BLE framing, media/GIF, automation and display ownership unchanged. ESP32-S3
-and HUB75 work remain outside this build.
+This document describes the **stable 0.8.2 architecture**, built directly on the
+hardware-qualified 0.8.1 baseline. Release 0.8.2 keeps the existing AudioReactive source
+integration and concentrates on transport ownership, persistent-media lifetime,
+Carousel recovery, filesystem bounds and diagnostics. ESP32-S3 and HUB75 work
+remain outside this build.
 
 ## Design goals
 
@@ -25,8 +25,10 @@ The main rules are:
 ### `IDotMatrixBLEServer`
 
 Owns NimBLE, the FA/AE GATT database, advertising, reconnection, delayed device
-information notifications, short-command queuing, and FA02 logical-packet
-reassembly. It requests MTU 517 so the official app can use large ATT payloads.
+information notifications, complete-ATT-write queuing, and FA02 logical-packet
+reassembly. NimBLE callbacks never own the FA02 assembler: they only enqueue
+bounded immutable writes/connection events; the WLED loop owns assembler state,
+allocation, timeout and transfer cancellation. It requests MTU 517 so the official app can use large ATT payloads.
 It does not render pixels or directly change WLED state.
 
 ### `IDotMatrixFA02Assembler`
@@ -42,7 +44,7 @@ poisoned by stale reassembly state.
 
 ### `IDotMatrixBulkTransfer`
 
-Validates the common bulk header, enforces sequential chunks, calculates CRC32,
+Validates the common bulk header, enforces sequential chunks, calculates CRC42,
 and exposes decoded chunk spans. TEXT is retained in a bounded buffer; RAW and
 GIF are streamed onward chunk by chunk.
 
@@ -83,7 +85,7 @@ Large pixel allocations prefer PSRAM when it is present.
 Owns compact PNG decoding, GIF RX/PLAY files, decoder lifetime, and the optional
 LittleFS frame cache.
 
-The GIF build profile is selected at compile time. In Release 0.8.1 the
+The GIF build profile is selected at compile time. In Release 0.8.2 the
 **supported 16x16 profiles compile `IDOT_GIF_LZW12`** and independently cap the
 visible protocol/UI profile with `IDOT_SCREEN_MAX_DIM=16`:
 
@@ -107,10 +109,13 @@ It is used only during cache construction and is destroyed before playback.
 ### `IDotMatrixWLEDAdapter`
 
 Is the WLED boundary. It maps power/brightness and app-content ownership to WLED.
-It registers one effect named `iDotMatrix Display`, reads WLED local time for
+It registers one effect named `iDotMatrix`, reads WLED local time for
 clocks, and applies WLED's configured 2D mapping/rescale when emitting pixels.
 App Solid and light effects stay in the renderer rather than being translated
-into native WLED effect/colour state.
+into native WLED effect/colour state. Explicit iDotMatrix ownership also terminates an active WLED playlist and clears
+any playlist preset already queued for asynchronous application before selecting
+the framebuffer effect. This mirrors WLED's direct-effect semantics while also
+accounting for WLED's deferred `handlePresets()` pass after the Usermod loop.
 
 It also owns GIF staging/recovery rules. On the classic-ESP32 frame-cache path,
 WLED `Static` is used internally while the cache is prepared because it has a
@@ -131,8 +136,8 @@ compact runtime status under `/json/info`.
 
 ### ESP32-C3 supported backend split
 
-Release 0.8.1 maintains the WLED 16.0.1/NimBLE 1.x path for classic ESP32 and
-adds a separate supported C3 path on pinned WLED commit `d55037f...`. Legacy
+Release 0.8.2 retains the WLED 16.0.1/NimBLE 1.x path for classic ESP32 and
+retains the separately qualified C3 path on pinned WLED commit `d55037f...`. Legacy
 IDF4 RMT builds produced physical LED spikes both with and without BLE, with BLE
 advertising making the fault much more visible. The IDF5 WLED backend uses
 `WLED_USE_SHARED_RMT`; on the tested C3 this eliminated the spikes through BLE
@@ -156,6 +161,7 @@ NimBLE 1.4.3; the C3 profile pins 2.5.1. Protocol parsing and rendering are shar
 | Countdown / stopwatch state | emulated-device state in `IDotMatrixWLEDAdapter` |
 | Scoreboard values | last valid app command |
 | Physical XY/serpentine mapping | WLED matrix configuration |
+| WLED playlist lifecycle | WLED; terminated and any queued playlist preset cancelled when iDotMatrix explicitly reclaims display ownership |
 
 ### Control-source isolation and user experience
 
@@ -167,8 +173,8 @@ misleading UI. For example, the app could still show a red strobe after the user
 changed the WLED strobe to blue. Both programs would be internally consistent,
 but the combined user experience would look desynchronized.
 
-In stable 0.8.1, **all app-originated visual content stays under one
-WLED effect: `iDotMatrix Display`**. That includes Solid colour and the seven
+In stable 0.8.2, **all app-originated visual content stays under one
+WLED effect: `iDotMatrix`**. That includes Solid colour and the seven
 standalone light effects in addition to graffiti, clock, text, images and GIFs.
 The WLED effect is only a framebuffer publisher; it does not expose the app
 content as a native WLED Solid/Strobe/etc. state.
@@ -176,9 +182,9 @@ content as a native WLED Solid/Strobe/etc. state.
 The resulting UX rule is deliberately simple:
 
 ```text
-use iDotMatrix app -> iDotMatrix Display publishes app framebuffer
+use iDotMatrix app -> iDotMatrix publishes app framebuffer
 select a WLED effect -> WLED takes the display as an explicit source change
-next supported iDotMatrix content command -> iDotMatrix Display takes it back
+next supported iDotMatrix content command -> iDotMatrix takes it back
 ```
 
 No attempt is made to synthesize a hybrid state such as "iDot effect + WLED
@@ -213,7 +219,7 @@ or frame-cache budgets that dominated 0.7.1.
 ### Timers and scoreboard
 
 Countdown, stopwatch, and scoreboard are also rendered locally under
-`iDotMatrix Display`; they never map to native WLED effects. Countdown and
+`iDotMatrix`; they never map to native WLED effects. Countdown and
 stopwatch share a small 16x16 `MM:SS` renderer, while scoreboard draws two
 2-digit fields and a separator. The artwork is scaled through the same
 logical/physical path already used by the clock, so no additional framebuffer is
@@ -225,7 +231,7 @@ running, WLED takes the panel but the emulated timer keeps advancing in the
 background. This matches the one-way-controller model better than freezing the
 timer invisibly: the iDotMatrix app has not been told that WLED took over and
 therefore still expects its timer state to be valid. A later pause/resume/start
-command from the app reclaims `iDotMatrix Display` using that retained state.
+command from the app reclaims `iDotMatrix` using that retained state.
 
 Countdown completion is the first implemented asynchronous app-facing event: the
 adapter latches a one-bit completion flag, the protocol converts it to
@@ -254,7 +260,7 @@ custom_usermods =
 ```
 
 They do not inherit `${env:<base>.custom_usermods}`. The explicit exception in
-0.8.2-rc.2 is `platformio_override.ini.c3-audio`, which deliberately contains:
+0.8.2 is `platformio_override.ini.c3-audio`, which deliberately contains:
 
 ```ini
 custom_usermods =
@@ -268,7 +274,7 @@ base Usermods.
 
 ## Current memory rules
 
-- four 64-byte queue slots for complete short commands;
+- four 517-byte queue slots for complete ATT writes (matching the configured maximum local MTU);
 - one 4112-byte inline FA02 reassembly buffer, with temporary dynamic storage for logical packets above 4112 bytes and an 8192-byte hard maximum;
 - one persistent RGB renderer canvas, sized to storage dimensions rather than automatically to logical dimensions;
 - standalone light effects reuse that canvas and add only a bounded 16-colour palette plus small timing/state fields;
@@ -309,7 +315,7 @@ not protocol semantics or LZW code validity.
 
 ### 16x16
 
-Release 0.8.1 no longer uses the old 10-bit decoder as the standard 16x16
+Release 0.8.2 does not use the old 10-bit decoder as the standard 16x16
 profile. The supported classic-ESP32 and ESP32-C3 16x16 overrides compile
 `IDOT_GIF_LZW12` and set `IDOT_SCREEN_MAX_DIM=16`. Decoder capability and
 advertised screen size are therefore separate: the logical/UI profile remains
@@ -349,11 +355,14 @@ BLE GIF transfer
     -> append delay + RGB frame to /idot_cache.bin
     -> release compact decoder/workspace
     -> open cache for reading
-    -> activate iDotMatrix Display
+    -> activate iDotMatrix
     -> cached playback
 ```
 
-The cache is capped at 512 KiB and is removed when GIF playback ends.
+The transient cache is capped at 512 KiB. Carousel GIFs instead use per-slot
+persistent cache files (`/idot_cN.bin`) that are reused across normal rotation
+and invalidated only when the slot changes, reset removes the bank, or validation
+fails.
 
 ## Compact-safe LZW12 workspace
 
@@ -415,19 +424,26 @@ A new GIF does not destroy a currently playing GIF while bytes are still being
 received. The replacement becomes a transaction boundary only after length and
 CRC validation succeed.
 
-For the frame-cache path:
+For the frame-cache path, 0.8.2 keeps the previous committed GIF recoverable until
+the candidate is fully prepared:
 
-1. receive new GIF into an alternating RX slot;
-2. validate length + CRC;
-3. only then retire the old cached playback/resources;
-4. promote and precache the new GIF from a clean media state.
+1. receive the candidate into an alternating RX slot and validate length + CRC;
+2. preserve the currently committed source/cache pair and build the candidate
+   cache as `/idot_cache.new`;
+3. only after the candidate cache is complete, move the current
+   `/idot_play.gif` and `/idot_cache.bin` to short-lived `.bak` files;
+4. promote the candidate source/cache pair;
+5. reopen the promoted cache successfully before deleting the backups;
+6. on any preparation or commit failure, discard the candidate and reopen the
+   previous source/cache pair.
 
-If the new validated replacement later fails to prepare, the old cache has
-already been retired and cannot safely be resurrected. Recovery therefore lands
-on WLED `Static` rather than an empty `iDotMatrix Display`. Restorable non-GIF
-content (clock/text/image/DIY) keeps its renderer state and can be restored.
+Thus a CRC-valid but undecodable GIF, a cache-build failure, or a commit failure
+does not destroy known-good playback. Carousel assets use their own persistent
+per-slot source/cache pair and do not pass through `/idot_play.gif`; a slot that
+fails asynchronously during decoder/cache preparation is quarantined for the
+current Carousel session and later valid slots are tried.
 
-This lifecycle change fixed the hardware pattern where repeated A/B GIF swaps
+This lifecycle also fixes the hardware pattern where repeated A/B GIF swaps
 would eventually stop working until the user manually selected Solid.
 
 ## Blank staging
@@ -441,7 +457,7 @@ flash between the previous content and the GIF.
 1. saves the selected segment's primary colour;
 2. temporarily sets the staging colour to black and blanks the segment;
 3. prepares the cache under WLED `Static`;
-4. restores the saved primary colour before `iDotMatrix Display` playback or failure recovery.
+4. restores the saved primary colour before `iDotMatrix` playback or failure recovery.
 
 Global WLED power/brightness is not toggled, so this is a transient presentation
 detail rather than a persistent OFF state.
@@ -558,7 +574,7 @@ LEVEL frames are six bytes; FFT uses a continuous sequence of 21-byte logical
 frames even when ATT writes split a logical frame. A 21-byte carry buffer in
 `IDotMatrixProtocol` performs resynchronisation and publishes only complete,
 valid frames from WLED's main loop. The wire protocol is unchanged in
-0.8.2-rc.2.
+0.8.2.
 
 `IDotMatrixAudioSource` adds source selection **after** BLE parsing. `Phone /
 BLE` preserves the 0.8.1 data path. `WLED AudioReactive` asks the registered
@@ -581,5 +597,5 @@ FFT bands. With local override enabled, incoming BLE frames update family/mode
 but cannot overwrite the locally supplied level/bands. All ten renderers draw a
 temporary 16x16 legacy canvas on the stack and scale it immediately into the
 existing renderer canvas. There is no persistent second framebuffer. Animated
-visualizers are refreshed at an 80 ms cadence while `iDotMatrix Display` owns
+visualizers are refreshed at an 80 ms cadence while `iDotMatrix` owns
 the selected segment; local AudioReactive data is sampled at a 40 ms cadence.

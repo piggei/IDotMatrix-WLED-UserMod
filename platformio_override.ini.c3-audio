@@ -1,5 +1,5 @@
-; WLED iDotMatrix Usermod - ESP32-C3 16x16 + AudioReactive development profile
-; Usermod build: 0.8.2-rc.2
+; WLED iDotMatrix Usermod - ESP32-C3 16x16 + AudioReactive supported optional profile
+; Usermod build: 0.8.2
 ; Required WLED base commit:
 ;   d55037f7510541eddc390c8f3d01afc5787aa44a (2026-09-07)
 ;

@@ -18,6 +18,19 @@ File carouselRxFile;
 bool validType(uint8_t type) {
   return type == IDotMatrixCarousel::TYPE_GIF || type == IDotMatrixCarousel::TYPE_TEXT;
 }
+
+bool carouselHasRoom(size_t additional, size_t reserve = 32768u) {
+#if defined(ARDUINO_ARCH_ESP32)
+  const size_t total = WLED_FS.totalBytes();
+  const size_t used = WLED_FS.usedBytes();
+  if (total == 0 || used > total) return false;
+  const size_t freeBytes = total - used;
+  return additional <= freeBytes && reserve <= freeBytes - additional;
+#else
+  (void)additional; (void)reserve;
+  return true;
+#endif
+}
 }
 
 IDotMatrixCarousel::IDotMatrixCarousel(
@@ -95,27 +108,66 @@ bool IDotMatrixCarousel::saveManifest() {
 }
 
 void IDotMatrixCarousel::begin() {
+  // Recover the manifest transaction deterministically. A valid final file wins;
+  // otherwise prefer the previous committed backup, then the fully-written temp.
   if (!loadManifest()) {
-    resetManifest();
-    saveManifest();
+    bool recovered = false;
+    if (WLED_FS.exists(MANIFEST_BACKUP)) {
+      WLED_FS.remove(MANIFEST_PATH);
+      recovered = WLED_FS.rename(MANIFEST_BACKUP, MANIFEST_PATH) && loadManifest();
+    }
+    if (!recovered && WLED_FS.exists(MANIFEST_TMP)) {
+      WLED_FS.remove(MANIFEST_PATH);
+      recovered = WLED_FS.rename(MANIFEST_TMP, MANIFEST_PATH) && loadManifest();
+    }
+    if (!recovered) {
+      resetManifest();
+      saveManifest();
+    }
   }
-  // Prune metadata whose backing file disappeared.
+  WLED_FS.remove(MANIFEST_TMP);
+  WLED_FS.remove(MANIFEST_BACKUP);
+  WLED_FS.remove(ASSET_RX);
+
+  // Reconcile slot files with the committed manifest. If power disappeared after
+  // staging the previous asset under its backup name, restore that known-good
+  // file before deciding that metadata is stale.
   bool dirty = false;
   for (uint8_t slot = 0; slot < SLOT_COUNT; ++slot) {
-    if (!manifest_.slots[slot].valid) continue;
-    char path[24];
+    if (!manifest_.slots[slot].valid) {
+      char orphan[24];
+      backupPath(slot, TYPE_GIF, orphan, sizeof(orphan)); WLED_FS.remove(orphan);
+      backupPath(slot, TYPE_TEXT, orphan, sizeof(orphan)); WLED_FS.remove(orphan);
+      cachePath(slot, orphan, sizeof(orphan)); WLED_FS.remove(orphan);
+      continue;
+    }
+    char path[24], backup[24];
     slotPath(slot, manifest_.slots[slot].type, path, sizeof(path));
+    backupPath(slot, manifest_.slots[slot].type, backup, sizeof(backup));
     File file = WLED_FS.open(path, "r");
-    const bool ok = file && file.size() == manifest_.slots[slot].bytes;
+    bool ok = file && file.size() == manifest_.slots[slot].bytes;
     if (file) file.close();
-    if (!ok) {
+    if (!ok && WLED_FS.exists(backup)) {
+      WLED_FS.remove(path);
+      if (WLED_FS.rename(backup, path)) {
+        file = WLED_FS.open(path, "r");
+        ok = file && file.size() == manifest_.slots[slot].bytes;
+        if (file) file.close();
+      }
+    }
+    if (ok) {
+      WLED_FS.remove(backup);
+    } else {
       manifest_.slots[slot] = SlotMeta{};
+      char cache[24];
+      cachePath(slot, cache, sizeof(cache));
+      WLED_FS.remove(cache);
       dirty = true;
     }
   }
   if (dirty) saveManifest();
   // Boot playback is deliberately decided by the WLED Usermod layer.  A
-  // stored Carousel starts at boot only when the dedicated iDotMatrix Display
+  // stored Carousel starts at boot only when the dedicated iDotMatrix
   // effect is the WLED boot effect (or is selected manually later).
 }
 
@@ -126,30 +178,68 @@ void IDotMatrixCarousel::clearFiles() {
     slotPath(slot, TYPE_TEXT, path, sizeof(path)); WLED_FS.remove(path);
     backupPath(slot, TYPE_GIF, path, sizeof(path)); WLED_FS.remove(path);
     backupPath(slot, TYPE_TEXT, path, sizeof(path)); WLED_FS.remove(path);
+    cachePath(slot, path, sizeof(path)); WLED_FS.remove(path);
   }
   WLED_FS.remove(ASSET_RX);
 }
 
+void IDotMatrixCarousel::startUpdateHold(uint32_t now) {
+  updateHoldActive_ = true;
+  updateHoldDeadline_ = now + UPDATE_HOLD_TIMEOUT_MS;
+  adapter_.beginCarouselUpdateHold();
+}
+
+void IDotMatrixCarousel::touchUpdateHold(uint32_t now) {
+  if (updateHoldActive_) updateHoldDeadline_ = now + UPDATE_HOLD_TIMEOUT_MS;
+}
+
+void IDotMatrixCarousel::endUpdateHold() {
+  if (!updateHoldActive_) return;
+  updateHoldActive_ = false;
+  updateHoldDeadline_ = 0;
+  adapter_.endCarouselUpdateHold();
+}
+
 void IDotMatrixCarousel::resetPersistent() {
   cancelAsset();
+  endUpdateHold();
+  // A Carousel GIF/cache may still be open even though the logical Carousel is
+  // about to be suspended. Release the media handle before unlinking owned
+  // files so LittleFS can actually remove them.
+  adapter_.releaseCarouselMediaForStorageMutation();
   suspend();
   clearFiles();
   WLED_FS.remove(MANIFEST_PATH);
   WLED_FS.remove(MANIFEST_TMP);
   WLED_FS.remove(MANIFEST_BACKUP);
   resetManifest();
+  failedMask_ = 0;
+  lastFailedSlot_ = -1;
   // Keep an explicit empty manifest so a later reboot cannot resurrect stale
   // metadata even if the reset was the last command received before power loss.
-  saveManifest();
+  lastResetOk_ = saveManifest();
+  for (uint8_t slot = 0; slot < SLOT_COUNT; ++slot) {
+    char path[24];
+    slotPath(slot, TYPE_GIF, path, sizeof(path)); if (WLED_FS.exists(path)) lastResetOk_ = false;
+    slotPath(slot, TYPE_TEXT, path, sizeof(path)); if (WLED_FS.exists(path)) lastResetOk_ = false;
+    cachePath(slot, path, sizeof(path)); if (WLED_FS.exists(path)) lastResetOk_ = false;
+  }
 }
 
 void IDotMatrixCarousel::configure(const uint8_t* slots, uint8_t count) {
   cancelAsset();
+  // Reconfiguration replaces the Carousel bank. Close a currently playing
+  // Carousel GIF/cache before deleting the previous bank for the same reason
+  // as protocol Reset. Non-GIF live content (Clock/Text/etc.) is preserved.
+  adapter_.releaseCarouselMediaForStorageMutation();
+  startUpdateHold(millis());
   playing_ = false;
   autoStartPending_ = false;
   resumeOnBoot_ = false;
   currentOrderPos_ = -1;
   currentSlot_ = -1;
+  failedMask_ = 0;
+  lastFailedSlot_ = -1;
   clearFiles();
   for (uint8_t i = 0; i < SLOT_COUNT; ++i) manifest_.slots[i] = SlotMeta{};
   configuredCount_ = count > SLOT_COUNT ? SLOT_COUNT : count;
@@ -164,7 +254,13 @@ void IDotMatrixCarousel::configure(const uint8_t* slots, uint8_t count) {
 
 void IDotMatrixCarousel::enter() {
   if (!hasAssets()) return;
+  endUpdateHold();
   autoStartPending_ = false;
+  // Device Assets owns the display as soon as the Carousel is entered.  This
+  // must happen before the first asynchronous GIF cache build, otherwise the
+  // previous Clock/light-effect renderer can keep updating the canvas during
+  // the staging window and bleed into the first Carousel item.
+  adapter_.beginCarouselPlayback();
   playing_ = true;
   resumeOnBoot_ = true;
   currentOrderPos_ = -1;
@@ -174,6 +270,7 @@ void IDotMatrixCarousel::enter() {
 }
 
 void IDotMatrixCarousel::suspend() {
+  endUpdateHold();
   playing_ = false;
   autoStartPending_ = false;
   currentOrderPos_ = -1;
@@ -194,10 +291,12 @@ bool IDotMatrixCarousel::beginAsset(
   size_t totalLength
 ) {
   cancelAsset();
+  touchUpdateHold(millis());
   // A new asset belongs to the same app-side page upload.  Do not let the
   // previous slot's quiet-period timer start playback between two transfers.
   autoStartPending_ = false;
-  if (!validType(type) || slot >= SLOT_COUNT || totalLength == 0) return false;
+  if (!validType(type) || slot >= SLOT_COUNT || totalLength == 0 ||
+      !carouselHasRoom(totalLength)) return false;
   WLED_FS.remove(ASSET_RX);
   carouselRxFile = WLED_FS.open(ASSET_RX, "w");
   if (!carouselRxFile) return false;
@@ -291,6 +390,12 @@ bool IDotMatrixCarousel::completeAsset(bool crcValid) {
   }
   WLED_FS.remove(backup);
   if (backedUpOther) WLED_FS.remove(oldOtherBackup);
+  char cache[24];
+  cachePath(rxSlot_, cache, sizeof(cache));
+  WLED_FS.remove(cache);
+  failedMask_ &= uint16_t(~(uint16_t(1u) << rxSlot_));
+  if (lastFailedSlot_ == int8_t(rxSlot_)) lastFailedSlot_ = -1;
+  touchUpdateHold(millis());
   requestAutoStart(millis());
   return true;
 }
@@ -338,7 +443,9 @@ bool IDotMatrixCarousel::playSlot(uint8_t slot, uint32_t now) {
   slotPath(slot, manifest_.slots[slot].type, path, sizeof(path));
   bool shown = false;
   if (manifest_.slots[slot].type == TYPE_GIF) {
-    shown = adapter_.playStoredGif(path);
+    char cache[24];
+    cachePath(slot, cache, sizeof(cache));
+    shown = adapter_.playStoredGif(path, cache);
   } else if (manifest_.slots[slot].type == TYPE_TEXT) {
     File file = WLED_FS.open(path, "r");
     if (file && file.size() <= 4096u) {
@@ -351,23 +458,44 @@ bool IDotMatrixCarousel::playSlot(uint8_t slot, uint32_t now) {
   if (shown) {
     currentSlot_ = int8_t(slot);
     const uint32_t dwell = manifest_.slots[slot].dwellSeconds == 0 ? 5u : manifest_.slots[slot].dwellSeconds;
-    nextSwitchAt_ = now + dwell * 1000u;
+    // A stored GIF may need an asynchronous cold-cache build on first use.
+    // Start its dwell only once playback is actually visible; otherwise cache
+    // preparation consumes part (or all) of the configured display time.
+    nextSwitchAt_ = manifest_.slots[slot].type == TYPE_GIF ? 0 : now + dwell * 1000u;
   }
   return shown;
 }
 
 bool IDotMatrixCarousel::playNext(uint32_t now, bool first) {
-  if (!playing_) return false;
-  const int8_t next = findNextPlayable(first ? -1 : currentOrderPos_);
-  if (next < 0) {
-    playing_ = false;
-    return false;
+  if (!playing_ || configuredCount_ == 0) return false;
+  const int8_t start = first ? -1 : currentOrderPos_;
+  for (uint8_t step = 1; step <= configuredCount_; ++step) {
+    const uint8_t pos = uint8_t((int(start) + step + configuredCount_) % configuredCount_);
+    const uint8_t slot = manifest_.order[pos];
+    if (slot >= SLOT_COUNT || !manifest_.slots[slot].valid) continue;
+    if ((failedMask_ & (uint16_t(1u) << slot)) != 0) continue;
+    currentOrderPos_ = int8_t(pos);
+    if (playSlot(slot, now)) return true;
+    failedMask_ |= uint16_t(1u) << slot;
+    lastFailedSlot_ = int8_t(slot);
+    currentSlot_ = -1;
   }
-  currentOrderPos_ = next;
-  return playSlot(manifest_.order[uint8_t(next)], now);
+  playing_ = false;
+  nextSwitchAt_ = 0;
+  // The dedicated iDotMatrix effect falls back to Clock when no
+  // Carousel asset can be played, matching the standalone selection policy.
+  adapter_.restoreClockFallback();
+  return false;
 }
 
 void IDotMatrixCarousel::loop(uint32_t now) {
+  // If the app abandons a Carousel replacement before sending any complete
+  // asset, do not leave the display blank forever.  Active bulk reception and
+  // the normal auto-start window suppress this fail-safe.
+  if (updateHoldActive_ && !playing_ && !autoStartPending_ && !rxOpen_ &&
+      int32_t(now - updateHoldDeadline_) >= 0) {
+    endUpdateHold();
+  }
   if (!playing_ && autoStartPending_ && int32_t(now - autoStartAt_) >= 0) {
     enter();
   }
@@ -376,7 +504,32 @@ void IDotMatrixCarousel::loop(uint32_t now) {
     playNext(now, true);
     return;
   }
+  if (nextSwitchAt_ == 0 && currentSlot_ < SLOT_COUNT &&
+      manifest_.slots[uint8_t(currentSlot_)].type == TYPE_GIF) {
+    if (adapter_.isGifPending()) return;
+    if (adapter_.isGifActive()) {
+      const uint32_t dwell = currentDwellSeconds() == 0 ? 5u : currentDwellSeconds();
+      nextSwitchAt_ = now + dwell * 1000u;
+    }
+    return;
+  }
   if (int32_t(now - nextSwitchAt_) >= 0) playNext(now, false);
+}
+
+void IDotMatrixCarousel::onPlaybackFailure(uint32_t now) {
+  if (!playing_ || currentSlot_ < 0) return;
+  const uint8_t failed = uint8_t(currentSlot_);
+  if (failed < SLOT_COUNT) {
+    failedMask_ |= uint16_t(1u) << failed;
+    lastFailedSlot_ = int8_t(failed);
+  }
+  currentSlot_ = -1;
+  nextSwitchAt_ = 0;
+
+  // Continue from the failed slot's order position. A slot that passes the
+  // cheap header inspection but fails later decoder/cache preparation must
+  // not be retried every dwell cycle or starve later valid assets.
+  playNext(now, false);
 }
 
 void IDotMatrixCarousel::slotPath(uint8_t slot, uint8_t type, char* out, size_t outSize) {
@@ -385,6 +538,10 @@ void IDotMatrixCarousel::slotPath(uint8_t slot, uint8_t type, char* out, size_t 
 
 void IDotMatrixCarousel::backupPath(uint8_t slot, uint8_t type, char* out, size_t outSize) {
   snprintf(out, outSize, type == TYPE_TEXT ? "/idot_b%u.txt" : "/idot_b%u.gif", unsigned(slot));
+}
+
+void IDotMatrixCarousel::cachePath(uint8_t slot, char* out, size_t outSize) {
+  snprintf(out, outSize, "/idot_c%u.bin", unsigned(slot));
 }
 
 bool IDotMatrixCarousel::copyFile(const char* from, const char* to) {

@@ -1,6 +1,6 @@
 # Testing
 
-This file defines the **0.8.2-rc.2 regression procedure**. All 0.8.1 stable
+This file defines the **0.8.2 regression procedure**. All 0.8.1 stable
 regressions remain mandatory; this build adds source-selection tests for WLED
 AudioReactive while preserving the separate physical
 ESP32-C3 IDF5/shared-RMT validation line.
@@ -15,14 +15,15 @@ From the repository root with a C++11 compiler and zlib development files:
 
 The suite covers protocol framing/ACKs, power/brightness/RGB, DIY/graffiti,
 clock/text rendering, all seven light effects, countdown, stopwatch, scoreboard,
-Audio/Rhythm framing/rendering, buzzer timing, 2D mapping, bulk CRC32, RAW
+Audio/Rhythm framing/rendering, buzzer timing, 2D mapping, bulk CRC42, RAW
 publication, FA02 fragmentation, compact PNG decode, GIF RX/promotion/playback,
 WLED ownership, repeat-GIF replacement, build-profile normalization, compact
 LZW12/cache behavior, partition geometry, the NimBLE 1.x/2.x source bridge and
 the supported C3 profile contract.
 
-Release build `0.8.1-audit-fix1` also adds behavioural `IDotMatrixAutomation`
-coverage and explicit failure injection. The host tests verify:
+The current host suite also includes behavioural `IDotMatrixAutomation`
+coverage, the 0.8.2 BLE-routing/ownership regressions, persistent Carousel-cache reuse, and
+explicit failure injection. The host tests verify:
 
 - GIF promotion by direct rename;
 - rename failure with successful streamed-copy fallback;
@@ -50,7 +51,7 @@ media regressions with AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## WLED build validation
 
-0.8.1 has two release build families:
+0.8.2 retains two supported build families from the 0.8.1 baseline:
 
 **Classic ESP32** — WLED 16.0.1, supplied legacy overrides, NimBLE 1.4.3.
 
@@ -69,7 +70,7 @@ pio run -e esp32c3dev_idotmatrix_16x16 -t clean
 pio run -e esp32c3dev_idotmatrix_16x16
 ```
 
-Expected common facts: `release=0.8.1`, `build=0.8.1-audit-fix1`, AnimatedGIF 1.4.7, no-OTA partitioning,
+Expected common facts for this release: `release=0.8.2`, `build=0.8.2`, AnimatedGIF 1.4.7, no-OTA partitioning,
 only the iDotMatrix custom Usermod, and no dependency on `esp-nimble-cpp` or
 `ESP32 BLE Arduino`. The C3 build must additionally prove ESP-IDF 5,
 `WLED_USE_SHARED_RMT`, NimBLE 2.x and the pinned WLED base marker.
@@ -99,7 +100,7 @@ Use a classic ESP32, a WLED 16x16 2D matrix, and I2S LED output.
 
 1. Flash by USB/serial and reboot.
 2. Confirm WLED remains reachable over Wi-Fi for at least 15 seconds.
-3. Confirm `/json/info` reports `release=0.8.1`, `build=0.8.1-audit-fix1`, and BLE advertising.
+3. Confirm `/json/info` reports `release=0.8.2`, `build=0.8.2`, and BLE advertising.
 4. Connect with the official iDotMatrix app.
 5. Verify power OFF/ON and brightness changes.
 6. Verify red, green, blue, white, and black full-screen colours.
@@ -145,8 +146,8 @@ Use:
 After reboot, confirm:
 
 ```text
-release=0.8.1
-build=0.8.1-audit-fix1
+release=0.8.2
+build=0.8.2
 profile=64x64
 canvas=16x16
 gifDecoder=compact12/cache
@@ -211,10 +212,10 @@ cache predecode is the high-pressure phase.
 ## Light-effect and Usermod policy regression (carried forward from 0.8.0)
 
 The seven app light effects are intentionally rendered by the Usermod and must
-remain under `iDotMatrix Display`. For the stable hardware regression:
+remain under `iDotMatrix`. For the stable hardware regression:
 
-1. start from a normal WLED effect and verify `/json/info` reports `release=0.8.1` and `build=0.8.1-audit-fix1`;
-2. in the iDotMatrix app select Solid and verify WLED shows `iDotMatrix Display`,
+1. start from a normal WLED effect and verify `/json/info` reports `release=0.8.2` and `build=0.8.2`;
+2. in the iDotMatrix app select Solid and verify WLED shows `iDotMatrix`,
    not native WLED `Solid`;
 3. select each of the seven light effects and compare motion, palette and speed
    against the standalone ESP32 reference; for effects 3, 4 and 5 specifically,
@@ -223,11 +224,15 @@ remain under `iDotMatrix Display`. For the stable hardware regression:
    WLED Web UI remains responsive;
 5. while an iDotMatrix light effect is running, select a normal WLED effect and
    verify it takes over immediately;
-6. return to the iDotMatrix app and change/select an effect, verifying that
-   `iDotMatrix Display` reclaims the matrix without reboot or stale WLED colour;
-7. finish with the existing GIF/clock/image replacement sequence to confirm the
+6. start a WLED playlist, then return to the iDotMatrix app and change/select an
+   effect; verify the playlist is terminated, `iDotMatrix` becomes selected
+   immediately, remains selected past the playlist's former next-step time, and
+   no already queued or later playlist preset steals the display;
+7. restart the playlist manually from WLED and confirm normal WLED playlist
+   playback resumes until the next explicit iDotMatrix content command;
+8. finish with the existing GIF/clock/image replacement sequence to confirm the
    stable media lifecycle and memory behaviour are unchanged;
-8. for every supplied override, confirm `custom_usermods` contains only the
+9. for every supplied override, confirm `custom_usermods` contains only the
    external iDotMatrix symlink and does not inherit `${env:<base>.custom_usermods}`;
 9. if additional Usermods are added manually, repeat the memory/media stress test
    because the distributed profiles intentionally avoid unvalidated heap pressure.
@@ -235,8 +240,8 @@ remain under `iDotMatrix Display`. For the stable hardware regression:
 Expected diagnostics while a light effect is active include:
 
 ```text
-release=0.8.1
-build=0.8.1-audit-fix1
+release=0.8.2
+build=0.8.2
 lightEffect=<0..6> speed=<0..100> colors=<n>
 content=light
 ```
@@ -247,9 +252,9 @@ close to the established non-GIF baseline.
 ## Countdown / stopwatch / scoreboard regression (carried forward from 0.8.0)
 
 After the light-effect test, verify the three app tools while WLED
-continues to show the single `iDotMatrix Display` effect:
+continues to show the single `iDotMatrix` effect:
 
-1. confirm `/json/info` reports `release=0.8.1` and `build=0.8.1-audit-fix1`;
+1. confirm `/json/info` reports `release=0.8.2` and `build=0.8.2`;
 2. start a countdown longer than five seconds and verify the orange timer icon above white `MM:SS`;
 3. let it enter the final five seconds and verify the digits/separator turn red;
 4. pause and resume the countdown and verify the remaining time is preserved;
@@ -257,7 +262,7 @@ continues to show the single `iDotMatrix Display` effect:
 6. start the stopwatch, pause it, wait, and resume it; paused time must not be counted;
 7. while countdown or stopwatch is running, select a normal WLED effect, wait a
    few seconds, then issue a timer command from the iDotMatrix app; the timer
-   must have continued in the background and `iDotMatrix Display` must reclaim
+   must have continued in the background and `iDotMatrix` must reclaim
    the panel;
 8. set scoreboard values for both sides and verify team A is blue, the separator
    white, and team B red;
@@ -305,20 +310,20 @@ The audible button is also a direct hardware validation path independent of alar
 ## Audio / Rhythm regression (carried forward from 0.8.0)
 
 1. Start from the clock and select Audio/Rhythm effect 1. WLED must switch to
-   `iDotMatrix Display`, the breakdancer must appear, and `/json/info` must show
+   `iDotMatrix`, the breakdancer must appear, and `/json/info` must show
    `content=audio LEVEL mode=1`.
 2. Test all five LEVEL modes and verify that their animation reacts to sound.
 3. Test all five FFT modes; `/json/info` must report modes 1 through 5 and the
    display must continue updating across BLE write boundaries without returning
    to the clock.
 4. Select a normal WLED effect and verify that it takes control. Generate new
-   audio data and verify that `iDotMatrix Display` is selected again.
+   audio data and verify that `iDotMatrix` is selected again.
 5. Repeat at least one LEVEL and one FFT mode with logical profiles 32x32 and
    64x64-lite mapped to the physical 16x16 matrix.
 6. Re-run a GIF from the stable regression set and both manual and scheduled
    buzzer tests to confirm that audio added no media or timing regression.
 
-## Audio source selection regression (0.8.2-rc.2)
+## Audio source selection regression (0.8.2)
 
 Use the normal C3 profile first, then the `platformio_override.ini.c3-audio`
 profile on the same pinned WLED commit.
@@ -392,7 +397,7 @@ and that returning to Phone mode restores the original semantics.
 - Interrupt/cancel a media transfer and then send a normal command.
 - Disconnect during a transfer, reconnect, and verify the next valid command.
 - Send a CRC-invalid replacement GIF and confirm the currently playing GIF is not destroyed before validation.
-- Force a post-validation GIF preparation failure; recovery must not select an empty `iDotMatrix Display`.
+- Force a post-validation GIF preparation failure; recovery must not select an empty `iDotMatrix`.
 - Change WLED effect from the Web UI while GIF staging is active; the saved primary colour must be restored.
 - Change `deviceName` or `screenType`; verify `/json/info` reports that a restart is required until reboot.
 - Configure a digital RMT bus and verify the Usermod refuses to start BLE rather than entering the known Bluetooth/RMT reboot loop.
@@ -449,27 +454,62 @@ Recorded release-line evidence from the dev.3 hardware run:
 The earlier IDF4 dev.1/dev.2 A/B experiments are retained in `HISTORY.md`; they
 are intentionally absent from the stable package profiles.
 
-## 0.8.1 final packaging check
+## 0.8.2 packaging check
 
 Before tagging the release:
 
 1. run `./run_host_tests.sh`;
 2. run `./run_host_sanitizers.sh` where ASan/UBSan are available;
-3. confirm `library.json` reports release `0.8.1` and runtime diagnostics report
-   `release=0.8.1` plus `build=0.8.1-audit-fix1`;
-4. confirm only `platformio_override.ini.c3` represents the supported C3 path;
+3. confirm `library.json` reports release `0.8.2` and runtime diagnostics report
+   `release=0.8.2` plus `build=0.8.2`;
+4. confirm `platformio_override.ini.c3` remains the supported minimal C3 path and
+   `platformio_override.ini.c3-audio` is clearly identified as the optional
+   AudioReactive variant;
 5. verify all local Markdown links;
-6. verify the archive contains one root directory named `wled-usermod-idotmatrix`;
+6. verify the archive contains one root directory named `IDotMatrix-WLED-UserMod-0.8.2`;
 7. exclude `.pio`, build products, caches and editor temporaries;
 8. perform a short C3 smoke test after any release-only code change.
 
-## Carousel hardware regression (0.8.2-rc.2)
+## Carousel hardware regression (0.8.2)
 
 1. Upload a three-item Device Assets page and verify `carousel=playing` after the final transfer.
 2. Repeat the six-GIF page that failed on dev.4; verify all six slots are stored and no app error occurs.
 3. Upload all 12 slots with at least one TEXT item and verify mixed playback.
 4. Disconnect BLE while Carousel is active; playback must continue.
 5. Select a native WLED effect; Carousel must stop without deleting stored assets.
-6. Select `iDotMatrix Display`; the stored Carousel must resume.
-7. Configure `iDotMatrix Display` as the WLED boot effect, power-cycle, and verify stored Carousel startup without app reconnection.
+6. Select `iDotMatrix`; the stored Carousel must resume.
+7. Configure `iDotMatrix` as the WLED boot effect, power-cycle, and verify stored Carousel startup without app reconnection.
 8. Later repeat the same behavior on native 64x64 hardware.
+
+
+## 0.8.2 transition/transport/storage qualification additions
+
+These checks are stable-release qualification requirements and are distinct from host
+syntax/build tests:
+
+1. start LEVEL or FFT audio, then immediately send protocol reset (`03 80`);
+   confirm the reset is processed rather than consumed as audio;
+2. repeat audio -> Carousel configure (`02 01`) and audio -> Carousel enter
+   (`0A 01`);
+3. disconnect during fragmented FA02, reconnect, and verify the next complete
+   command succeeds; confirm `bleRx` timeout/drop counters are sensible;
+4. leave a fragmented FA02 or bulk transfer incomplete for more than five
+   seconds and verify deterministic cleanup and subsequent recovery;
+5. store at least two Carousel GIFs, rotate through them repeatedly, and verify
+   `gifCacheStats` shows cache reuse rather than one rebuild per revisit;
+6. make the first Carousel slot unplayable while a later slot is valid; playback
+   must advance and `carouselFailed` must identify the failed slot without a hot
+   loop;
+7. replace an active cached GIF with a candidate that fails during cache
+   preparation/commit; the previous known-good GIF must remain recoverable and
+   `mediaError` must expose the failure;
+8. reset the iDotMatrix device state and verify Carousel, alarms and schedules
+   are absent afterward while WLED remains running; `protocolReset` must report
+   `status:ok carousel:ok automation:ok` or an explicit partial failure identifying the failing subsystem;
+9. power-cycle with deliberately created feature-owned `.tmp`/`.bak` states and
+   verify boot recovery converges to the last committed manifest/program media;
+10. for future rebuilds or platform changes, repeat an uninterrupted 24-48 hour C3 soak as final confidence evidence.
+
+Test reports must label results as **host behavioural**, **syntax/build**,
+**sanitizer**, **firmware compile**, **hardware functional**, or **hardware
+soak**. A syntax-only Carousel compile is not behavioural Carousel coverage.

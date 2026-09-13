@@ -1,6 +1,6 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by 0.8.2-rc.2. The
+This document describes the protocol subset implemented by stable Release 0.8.2. The
 BLE wire protocol is carried forward unchanged from the stable 0.8.1
 WLED iDotMatrix Usermod. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
@@ -26,6 +26,15 @@ reference.
 
 Manufacturer data: `54 52 00 70 SCREEN_TYPE`.
 
+### Compatibility/security note
+
+The observed original-device profile uses writable GATT characteristics without
+pairing or application authentication, and 0.8.2 compatibility mode preserves
+that behaviour. Nearby BLE peers may therefore issue supported commands. CRC42
+checks media integrity only; it is not an authentication mechanism. Mandatory
+pairing/encryption is intentionally not added in 0.8.2 because that would change
+the captured wire/client contract.
+
 | Screen type | Logical resolution |
 |---|---|
 | `01` | 16x16 |
@@ -34,9 +43,14 @@ Manufacturer data: `54 52 00 70 SCREEN_TYPE`.
 
 ## Framing and ACK
 
-FA02 commands start with a 16-bit little-endian total length. Version 0.6.1
-requires one complete command per queued BLE write and validates declared length
-against received length.
+FA02 normal commands start with a 16-bit little-endian total length. 0.8.2 queues
+each complete ATT write unchanged from the NimBLE callback, then performs all
+FA02 reassembly and protocol dispatch in the normal WLED loop. Logical packets
+may span multiple ATT writes; one ATT write may also finish one packet and begin
+the next. The logical-packet maximum is 8192 bytes. Audio/Rhythm frames keep
+their captured fixed-family stream framing, but a recognized normal command
+(reset, Carousel control, bulk, etc.) terminates audio-stream routing and is
+processed normally.
 
 Standard ACK on FA03:
 
@@ -131,7 +145,7 @@ brightness-state message is known, so WLED changes do not update the app slider.
 ACK: `05 00 02 02 01`
 
 **WLED mapping:** fill the Usermod RGB canvas and select the
-registered `iDotMatrix Display` effect. The command no longer rewrites WLED's
+registered `iDotMatrix` effect. The command no longer rewrites WLED's
 primary colour or exposes native WLED `Solid`; this deliberately keeps app state
 and WLED state separate because the official app has no confirmed reverse state
 synchronization path.
@@ -157,7 +171,7 @@ ACK: `05 00 03 02 01`
   but no partial effect state is published.
 
 **WLED mapping:** all seven effects are rendered locally into the same bounded RGB
-canvas used by other app content, and the single `iDotMatrix Display` WLED effect
+canvas used by other app content, and the single `iDotMatrix` WLED effect
 publishes that framebuffer. No native WLED effect is selected or modified. This
 is intentional: a WLED-side effect selection is treated as a source change, not
 as an edit to the app's unsynchronized light-effect state.
@@ -196,7 +210,7 @@ LENlo LENhi 05 01 UNKNOWN R G B X0 Y0 X1 Y1 ...
 - the reference sends no FA03 acknowledgement for these pixel packets.
 
 **WLED mapping:** accepted pixels update a three-byte-per-pixel logical RGB
-framebuffer. The Usermod selects its registered `iDotMatrix Display` 2D
+framebuffer. The Usermod selects its registered `iDotMatrix` 2D
 effect, which copies the canvas while WLED services the current segment and has
 valid virtual XY state. A valid pixel packet also selects the effect. No
 physical serpentine mapping is duplicated in this module.
@@ -221,7 +235,7 @@ storage up to the 8192-byte logical-packet maximum before protocol dispatch.
 ACK: `05 00 06 01 01`
 
 **WLED mapping:** the command stores the display options and selects the custom
-`iDotMatrix Display` effect. The shared effect reads WLED local time and draws into the
+`iDotMatrix` effect. The shared effect reads WLED local time and draws into the
 same logical RGB canvas used by other iDotMatrix content. The eight currently
 known styles use the hand-tuned 16x16 artwork from the standalone reference and
 are scaled to a 32x32 or 64x64 logical profile.
@@ -257,7 +271,7 @@ asynchronously on FA03:
 The Usermod keeps countdown state independent of native WLED display ownership.
 Selecting a WLED effect hides the timer but does not rewrite or stop its emulated
 device state; a later pause/resume/start command from the app reclaims
-`iDotMatrix Display`.
+`iDotMatrix`.
 
 ## Stopwatch
 
@@ -277,7 +291,7 @@ ACK: `05 00 09 80 01`
 - `3`: resume from the preserved elapsed time.
 
 The visible output uses the same white 16x16 `MM:SS` renderer as countdown and
-remains under `iDotMatrix Display`. Stopwatch state also remains independent of
+remains under `iDotMatrix`. Stopwatch state also remains independent of
 native WLED effect selection.
 
 ## Scoreboard
@@ -293,7 +307,7 @@ ACK: `05 00 0A 80 01`
 Both scores are little-endian 16-bit values on the wire. The verified reference
 artwork renders only the last two decimal digits of each value (`score % 100`):
 team A in blue, a white separator, and team B in red. The framebuffer remains
-owned by `iDotMatrix Display`; no native WLED colour/effect state is modified.
+owned by `iDotMatrix`; no native WLED colour/effect state is modified.
 
 When date display is enabled, the integration preserves the experimentally
 verified emulator presentation: 30 seconds of `HH:MM`, followed by 5 seconds of
@@ -332,7 +346,7 @@ the 16x16-only build.
 | 3 | 1 | fixed `00` in confirmed packets |
 | 4 | 1 | unknown |
 | 5 | 4 | complete payload size, little-endian |
-| 9 | 4 | complete-payload CRC32, little-endian |
+| 9 | 4 | complete-payload CRC42, little-endian |
 | 13 | 3 | unknown header fields |
 | 16 | remaining | payload chunk |
 
@@ -360,8 +374,9 @@ therefore observed no chunks; 0.6.3-dev.2 follows the source implementation.
 One dedicated FA02 assembler provides **4112 bytes of permanent inline storage**
 for the observed 4096-byte payload chunk plus 16-byte header. The maximum logical
 FA02 packet is **8192 bytes**; packets above 4112 bytes use temporary dynamic
-reassembly storage. The callback only performs bounded copies; logical-packet
-dispatch, CRC32, and notification happen in the normal Usermod loop. TEXT is
+reassembly storage. The NimBLE callback only copies a complete ATT write into a bounded queue;
+assembler ownership, allocation, timeout, logical-packet dispatch, CRC42, and
+notification all happen in the normal Usermod loop. TEXT is
 bounded to 4096 payload bytes; RAW is bounded to the 12288 bytes required by a
 64x64 RGB frame. GIF is streamed to LittleFS and capped at 2 MiB here.
 
@@ -402,11 +417,11 @@ logical FA02 packet size**; 4112 bytes is only the permanent inline capacity.
 ## GIF payload
 
 **Confirmed by the reference:** common type `0x01` contains a standard
-`GIF87a` or `GIF89a` stream. CRC32 covers the complete compressed payload. The
+`GIF87a` or `GIF89a` stream. CRC42 covers the complete compressed payload. The
 WLED integration writes chunks to an RX file and starts playback only after a
 valid completion and deferred RX-to-PLAY promotion.
 
-Release 0.8.1 accepts GIF dimensions up to both the active logical screen profile
+Release 0.8.2 accepts GIF dimensions up to both the active logical screen profile
 and the compiled decoder capability. The supported 16x16 classic/C3 profiles
 compile `IDOT_GIF_LZW12` but set `IDOT_SCREEN_MAX_DIM=16`, so only 16x16 is
 advertised/accepted there while the complete legal 4096-code LZW12 space remains
@@ -429,7 +444,7 @@ declared size must match the active logical profile:
 
 Each pixel is `R G B`; pixels advance left-to-right and rows top-to-bottom.
 The WLED mapping is intentionally separate from the protocol order: the
-logical image is published only after valid CRC32, then the existing display
+logical image is published only after valid CRC42, then the existing display
 effect lets WLED apply its configured matrix mapping or the optional rescale.
 
 ## TEXT payload and glyph records
@@ -462,7 +477,7 @@ the leftmost pixel within each byte. Mixed glyph sizes in one payload have not
 been observed and are not supported.
 
 **WLED mapping:** the app-supplied bitmap is stored by the independent renderer
-and selects the existing `iDotMatrix Display` effect. The global colour,
+and selects the existing `iDotMatrix` effect. The global colour,
 background, speed, movement, and effects are rendered locally. SimSun and
 SimHei require no WLED font library because the official app rasterizes them
 before transmission.
@@ -483,7 +498,7 @@ logical frame: a 33-byte write can contain one full frame followed by 12 bytes
 of the next. The audio parser therefore carries at most one 21-byte partial
 frame across writes and can publish multiple complete frames from a stream.
 
-Every valid audio frame selects `iDotMatrix Display`, cancels the previous
+Every valid audio frame selects `iDotMatrix`, cancels the previous
 app-originated visual mode, and renders into the existing RGB canvas. Selecting
 a normal WLED effect releases audio state; a later audio frame reclaims the
 display. No audio feedback is sent from WLED to the app.
@@ -548,7 +563,7 @@ It is a **live iDotMatrix protocol reset**, not an ESP32/WLED reboot. The Usermo
 - stops active alarm/program/buzzer ownership and clears transient iDotMatrix display content;
 - preserves WLED configuration, Wi-Fi/BLE operation, system time and the last valid app time synchronization.
 
-The normal acknowledgement is `05 00 03 80 01`. If `iDotMatrix Display` remains selected after reset, the normal no-Carousel standalone policy may subsequently show the Clock fallback.
+The normal acknowledgement is `05 00 03 80 01`. If `iDotMatrix` remains selected after reset, the normal no-Carousel standalone policy may subsequently show the Clock fallback.
 
 ## Device Assets / Carousel
 
@@ -564,7 +579,7 @@ Original-hardware observations confirm one persistent Device Assets bank with 12
 
 ### Bulk metadata
 
-The normal 16-byte Bulk header is also used for Device Assets. In addition to data type, total length and CRC32:
+The normal 16-byte Bulk header is also used for Device Assets. In addition to data type, total length and CRC42:
 
 ```text
 bytes 13..14  timeSign   uint16 little-endian dwell time in seconds
@@ -595,3 +610,9 @@ Playback continues without a BLE connection. A later transient display command
 suspends runtime Carousel playback but does not delete the stored bank. WLED
 controls boot behavior: a stored Carousel starts at boot when `iDotMatrix
 Display` is the selected WLED boot effect.
+
+On the no-PSRAM frame-cache backend, persistent GIF slots use a per-slot cache
+(`/idot_cN.bin`). A cache survives normal Carousel rotation and is invalidated
+when its slot is replaced or reset, avoiding repeated flash rewrites for
+unchanged content. A slot that cannot be started is quarantined for the current
+bank generation so later valid slots are not starved.

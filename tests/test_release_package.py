@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-candidate and critical-section regression checks for 0.8.2-rc.2."""
+"""Stable release and critical-section regression checks for 0.8.2."""
 
 from __future__ import annotations
 
@@ -15,16 +15,21 @@ def check_versioning() -> None:
     assert library["version"] == "0.8.2"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     assert 'IDOTMATRIX_RELEASE = "0.8.2"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.8.2-rc.2"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.8.2"' in usermod
     assert "IDotMatrixAudioSource" in usermod
+    adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
+    assert '"iDotMatrix@;;;2"' in adapter
+    assert '"iDotMatrix Display@;;;2"' not in adapter
+    assert "if (currentPlaylist >= 0) applyPreset(0, CALL_MODE_DIRECT_CHANGE);" in adapter
 
 
 def check_release_surface() -> None:
     required = [
         "platformio_override.ini.c3",
         "platformio_override.ini.c3-audio",
-        "RELEASE_NOTES_0.8.2-rc.2.md",
-        "TEST_REPORT_0.8.2-rc.2.md",
+        "RELEASE_NOTES_0.8.2.md",
+        "TEST_REPORT_0.8.2.md",
+        "HARDWARE_TEST_CHECKLIST_0.8.2.md",
         "RELEASE_NOTES_0.8.1.md",
         "AUDIT_REMEDIATION_0.8.1.md",
         "TEST_REPORT_0.8.1-audit-fix1.md",
@@ -33,12 +38,17 @@ def check_release_surface() -> None:
         "IDotMatrixCarousel.h",
         "IDotMatrixCarousel.cpp",
         "tests/test_audio_source.cpp",
+        "tests/test_ble_framing.cpp",
+        "IDotMatrixBLEFraming.h",
         "run_host_tests.sh",
         "run_host_sanitizers.sh",
     ]
     for name in required:
         assert (ROOT / name).is_file(), f"missing development file: {name}"
     assert not list(ROOT.glob("platformio_override.ini.c3-dev*"))
+    assert not list(ROOT.glob("RELEASE_NOTES_0.8.2-rc.*.md"))
+    assert not list(ROOT.glob("TEST_REPORT_0.8.2-rc.*.md"))
+    assert not list(ROOT.glob("HARDWARE_TEST_CHECKLIST_0.8.2-rc.*.md"))
 
 
 def check_markdown_links() -> None:
@@ -66,6 +76,8 @@ def check_documentation_contract() -> None:
     assert "supported 16x16 profiles compile `IDOT_GIF_LZW12`" in architecture
     assert "default: 10-bit/16x16" not in architecture
     assert "do not inherit `${env:<base>.custom_usermods}`" in architecture
+    assert "four 517-byte queue slots" in architecture
+    assert "/idot_cache.new" in architecture
 
     assert "4112 bytes of permanent inline storage" in protocol
     assert "8192-byte logical-packet maximum" in protocol
@@ -73,12 +85,19 @@ def check_documentation_contract() -> None:
     assert "not a general-purpose PNG" in protocol
     assert "LZW10/default" not in protocol
 
-    assert "release 0.8.2 / build 0.8.2-rc.2" in readme.lower()
+    assert "release 0.8.2 / build 0.8.2" in readme.lower()
     assert "phone / ble" in readme.lower()
     assert "wled audioreactive" in readme.lower()
     assert "platformio_override.ini.c3-audio" in readme
-    release_notes = (ROOT / "RELEASE_NOTES_0.8.2-rc.2.md").read_text(encoding="utf-8")
-    test_report = (ROOT / "TEST_REPORT_0.8.2-rc.2.md").read_text(encoding="utf-8")
+    assert "BLE compatibility/security" in readme
+    assert "unauthenticated" in readme
+    assert "per-slot frame cache" in readme
+    assert "current stable release" in readme.lower()
+    assert "`idotmatrix` wled effect" in readme.lower()
+    assert "terminates the active wled playlist" in readme.lower()
+    assert "queued" in readme.lower() and "preset" in readme.lower()
+    release_notes = (ROOT / "RELEASE_NOTES_0.8.2.md").read_text(encoding="utf-8")
+    test_report = (ROOT / "TEST_REPORT_0.8.2.md").read_text(encoding="utf-8")
     assert "carousel" in release_notes.lower()
     assert "reset" in release_notes.lower()
     assert "alarm" in release_notes.lower()
@@ -86,6 +105,8 @@ def check_documentation_contract() -> None:
     assert "host" in test_report.lower()
     assert "audioreactive" in architecture.lower()
     assert "device assets" in protocol.lower()
+    assert "compatibility/security note" in protocol.lower()
+    assert "complete ATT write" in protocol
     assert "timesign" in protocol.lower()
     assert "imageindex" in protocol.lower()
     assert "platformio_override.ini.c3-audio" in profiles
@@ -108,6 +129,11 @@ def check_idot_display_fallback() -> None:
     assert "bootPresetReplay" not in usermod
     assert "if (carousel_.hasAssets()) carousel_.enter();" in usermod
     assert "else adapter_.restoreClockFallback();" in usermod
+    carousel = (ROOT / "IDotMatrixCarousel.cpp").read_text(encoding="utf-8")
+    assert "adapter_.beginCarouselPlayback();" in carousel
+    assert "nextSwitchAt_ = manifest_.slots[slot].type == TYPE_GIF ? 0" in carousel
+    assert "captureAndSuspendContentForGifStaging();" in adapter
+    assert "GIF_PREV_TEXT" in adapter
 
 
 
@@ -145,6 +171,60 @@ def check_no_heap_free_inside_queue_spinlock() -> None:
         assert "faAssembler_.reset();" not in block
 
 
+
+def check_fa02_single_owner_contract() -> None:
+    source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
+    callback = source.split("void IDotMatrixBLEServer::enqueueFromCallback", 1)[1].split("bool IDotMatrixBLEServer::dequeue", 1)[0]
+    assert "faAssembler_" not in callback
+    assert "bulkTransfer_" not in callback
+    assert "processAudioStream" not in callback
+    assert "packet.length = static_cast<uint16_t>(value.length())" in callback
+    framing = (ROOT / "IDotMatrixBLEFraming.h").read_text(encoding="utf-8")
+    assert "command == 0x03 && subcommand == 0x80" in framing
+    assert "command == 0x02 && subcommand == 0x01" in framing
+    assert "command == 0x0A && subcommand == 0x01" in framing
+
+def check_rc4_media_contract() -> None:
+    media = (ROOT / "IDotMatrixMedia.cpp").read_text(encoding="utf-8")
+    carousel = (ROOT / "IDotMatrixCarousel.cpp").read_text(encoding="utf-8")
+    adapter_h = (ROOT / "IDotMatrixWLEDAdapter.h").read_text(encoding="utf-8")
+    assert "GIF_CACHE_NEW" in media
+    assert "commitStagedCachedReplacement" in media
+    assert "rollbackStagedCachedReplacement" in media
+    assert "playStoredGif(path, cache)" in carousel
+    assert "failedMask_" in carousel
+    assert "cachePath(rxSlot_" in carousel
+    # RC4 regression: Carousel owns the framebuffer before the first cold GIF
+    # becomes visible, and GIF dwell starts only after asynchronous staging.
+    assert "beginCarouselPlayback" in adapter_h
+    assert "adapter_.beginCarouselPlayback();" in carousel
+    assert "manifest_.slots[slot].type == TYPE_GIF ? 0" in carousel
+    assert "if (adapter_.isGifPending()) return;" in carousel
+    assert "if (adapter_.isGifActive())" in carousel
+    # RC5 regression: close open Carousel GIF/cache media before unlinking the
+    # Carousel bank on reset/reconfigure. The release helper must be called
+    # before clearFiles() in both paths.
+    assert "releaseCarouselMediaForStorageMutation" in adapter_h
+    reset_body = carousel.split("void IDotMatrixCarousel::resetPersistent()", 1)[1].split("void IDotMatrixCarousel::configure", 1)[0]
+    configure_body = carousel.split("void IDotMatrixCarousel::configure", 1)[1].split("void IDotMatrixCarousel::enter", 1)[0]
+    assert reset_body.index("releaseCarouselMediaForStorageMutation") < reset_body.index("clearFiles()")
+    assert configure_body.index("releaseCarouselMediaForStorageMutation") < configure_body.index("clearFiles()")
+
+
+def check_rc7_carousel_update_hold_contract() -> None:
+    carousel = (ROOT / "IDotMatrixCarousel.cpp").read_text(encoding="utf-8")
+    adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
+    adapter_h = (ROOT / "IDotMatrixWLEDAdapter.h").read_text(encoding="utf-8")
+    assert "beginCarouselUpdateHold" in adapter_h
+    assert "carouselUpdateHold_" in adapter
+    assert "carouselUpdateHold_" in adapter.split("bool IDotMatrixWLEDAdapter::hasLogicalContent() const", 1)[1].split("}", 1)[0]
+    configure_body = carousel.split("void IDotMatrixCarousel::configure", 1)[1].split("void IDotMatrixCarousel::enter", 1)[0]
+    assert configure_body.index("releaseCarouselMediaForStorageMutation") < configure_body.index("startUpdateHold") < configure_body.index("clearFiles()")
+    enter_body = carousel.split("void IDotMatrixCarousel::enter", 1)[1].split("void IDotMatrixCarousel::suspend", 1)[0]
+    assert enter_body.index("endUpdateHold") < enter_body.index("beginCarouselPlayback")
+    assert "UPDATE_HOLD_TIMEOUT_MS = 8000u" in (ROOT / "IDotMatrixCarousel.h").read_text(encoding="utf-8")
+
+
 def check_repository_cleanliness() -> None:
     forbidden_dirs = {".pio", "__pycache__", ".pytest_cache"}
     forbidden_suffixes = {".o", ".obj", ".elf", ".pyc", ".swp", ".tmp", ".log"}
@@ -165,6 +245,9 @@ def main() -> None:
     check_idot_display_fallback()
     check_device_reset_contract()
     check_no_heap_free_inside_queue_spinlock()
+    check_fa02_single_owner_contract()
+    check_rc4_media_contract()
+    check_rc7_carousel_update_hold_contract()
     check_repository_cleanliness()
     print("Release package checks passed.")
 

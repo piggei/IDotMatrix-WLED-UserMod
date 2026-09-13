@@ -32,7 +32,7 @@
 #endif
 
 static constexpr const char* IDOTMATRIX_RELEASE = "0.8.2";
-static constexpr const char* IDOTMATRIX_BUILD = "0.8.2-rc.2";
+static constexpr const char* IDOTMATRIX_BUILD = "0.8.2";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x08;
 
@@ -474,7 +474,7 @@ public:
     serviceAudioSource(millis());
     ble_.loop();
 
-    // Selecting iDotMatrix Display means: stored Carousel first, otherwise
+    // Selecting iDotMatrix means: stored Carousel first, otherwise
     // Clock. No BLE connection or app command is required.
     if (adapter_.takeDisplayEffectActivationRequest()) {
       // A real WLED invocation is authoritative even if the transition has not
@@ -498,14 +498,16 @@ public:
     // change before servicing media so dynamic decoder RAM is released at once.
     adapter_.syncWLEDControl();
     media_.loop(millis());
-    adapter_.syncGifPlayback(
-      media_.gifActive(),
-      media_.lastError() != IDotMatrixMedia::Error::None
-    );
+    const bool mediaFailed = media_.lastError() != IDotMatrixMedia::Error::None;
+    const bool carouselMediaFailed =
+      carousel_.playing() && carousel_.currentSlot() >= 0 && mediaFailed &&
+      (adapter_.isGifPending() || adapter_.isGifActive());
+    adapter_.syncGifPlayback(media_.gifActive(), mediaFailed);
+    if (carouselMediaFailed) carousel_.onPlaybackFailure(millis());
 
     // Conversely, selecting a native WLED effect must stop autonomous Carousel
     // ownership.  During GIF frame-cache staging WLED Static is temporary and
-    // gifPending keeps the Carousel alive until iDotMatrix Display is restored.
+    // gifPending keeps the Carousel alive until iDotMatrix is restored.
     if (carousel_.playing() && !adapter_.isDisplayEffectActive() &&
         !adapter_.isGifPending()) {
       carousel_.suspend();
@@ -647,6 +649,12 @@ public:
       unsigned(carousel_.currentDwellSeconds())
     );
     info.add(carouselLine);
+    if (carousel_.failedMask() != 0) {
+      char failedLine[72];
+      snprintf(failedLine, sizeof(failedLine), "carouselFailed=0x%03X last=%d",
+        unsigned(carousel_.failedMask()), int(carousel_.lastFailedSlot()));
+      info.add(failedLine);
+    }
     if (automation_.scheduleUploadOpen()) info.add(F("scheduleUpload=staging"));
     if (strcmp(automation_.lastErrorText(), "none") != 0) {
       info.add(String(F("automationError=")) + automation_.lastErrorText());
@@ -662,12 +670,37 @@ public:
         F(" low=") + media_.gifCacheLowHeapMin() +
         F(" guard=") + media_.gifCacheRuntimeReserve());
     }
+    if (media_.gifCacheBuildCount() > 0 || media_.gifCacheReuseCount() > 0) {
+      info.add(String(F("gifCacheStats=build:")) + media_.gifCacheBuildCount() +
+        F(" reuse:") + media_.gifCacheReuseCount());
+    }
+    if (ble_.rxDropped() || ble_.rxOversize() || ble_.rxMalformed() ||
+        ble_.reassemblyTimeouts() || ble_.bulkTimeouts()) {
+      char rxLine[128];
+      snprintf(rxLine, sizeof(rxLine),
+        "bleRx=drop:%lu oversize:%lu malformed:%lu faTimeout:%lu bulkTimeout:%lu",
+        static_cast<unsigned long>(ble_.rxDropped()),
+        static_cast<unsigned long>(ble_.rxOversize()),
+        static_cast<unsigned long>(ble_.rxMalformed()),
+        static_cast<unsigned long>(ble_.reassemblyTimeouts()),
+        static_cast<unsigned long>(ble_.bulkTimeouts()));
+      info.add(rxLine);
+    }
+    if (adapter_.protocolResetCount() > 0) {
+      const bool carouselResetOk = carousel_.lastResetOk();
+      const bool automationResetOk = automation_.lastResetOk();
+      info.add(String(F("protocolReset=count:")) + adapter_.protocolResetCount() +
+        F(" status:") + ((carouselResetOk && automationResetOk) ? F("ok") : F("partial")) +
+        F(" carousel:") + (carouselResetOk ? F("ok") : F("fail")) +
+        F(" automation:") + (automationResetOk ? F("ok") : F("fail")));
+    }
     if (bleRestartRequired_) info.add(F("Restart required after name/profile change"));
     if (media_.lastError() != IDotMatrixMedia::Error::None) {
       info.add(String(F("mediaError=")) + media_.lastErrorText());
     }
 #if defined(ARDUINO_ARCH_ESP32)
-    info.add(String(F("reset=")) + resetReasonText(bootResetReason_));
+    info.add(String(F("bootReset=")) + resetReasonText(bootResetReason_) +
+      F(" code=") + int(bootResetReason_));
     info.add(String(F("heap=")) + ESP.getFreeHeap() +
       F(" min=") + ESP.getMinFreeHeap() +
       F(" largest=") + heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));

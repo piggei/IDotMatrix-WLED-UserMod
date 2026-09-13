@@ -25,7 +25,7 @@ public:
   bool beginGif(size_t byteLength) override;
   bool writeGif(size_t offset, const uint8_t* data, size_t length) override;
   bool completeGif(bool crcValid) override;
-  bool queueStoredGif(const char* path) override;
+  bool queueStoredGif(const char* path, const char* cachePath = nullptr) override;
   void cancelGifReceive();
   bool gifUsesFrameCache() const override { return useFrameCache(); }
   void stopPlayback() override;
@@ -42,6 +42,8 @@ public:
   static constexpr uint32_t gifCacheLowHeapTimeoutMs() { return 2000u; }
   bool gifCaching() const { return cacheBuilding_; }
   uint32_t gifCachedFrames() const { return cachedFrames_; }
+  uint32_t gifCacheBuildCount() const { return cacheBuildCount_; }
+  uint32_t gifCacheReuseCount() const { return cacheReuseCount_; }
   uint32_t gifCacheWaitCount() const { return cacheLowHeapWaitCount_; }
   size_t gifCacheLowHeapMin() const { return cacheLowHeapMin_; }
   static constexpr uint8_t gifMaxDimension() { return IDOT_GIF_MAX_DIM; }
@@ -60,13 +62,17 @@ public:
   Error lastError() const { return lastError_; }
 
 private:
+  void recoverTransientStorage();
   bool promoteGif();
+  bool commitStagedCachedReplacement(uint32_t now);
+  void rollbackStagedCachedReplacement(uint32_t now, Error failure);
   bool openGif();
   bool openGifForCache();
+  bool openExistingGifCache(uint32_t now);
   bool buildCacheFrame(uint32_t now);
   bool finalizeGifCache(uint32_t now);
   bool playCachedFrame(uint32_t now);
-  void resetGifCache();
+  void resetGifCache(bool removeFile = true);
   void releasePlaybackResources();
   bool useFrameCache() const;
   bool inspectGifFile(const char* path);
@@ -112,4 +118,14 @@ private:
   Error lastError_ = Error::None;
   size_t gifProbeFree_ = 0;
   size_t gifProbeLargest_ = 0;
+  char gifPlayPath_[40] = "/idot_play.gif";
+  char gifCachePath_[40] = "/idot_cache.bin";
+  bool cachePersistent_ = false;
+  uint32_t cacheBuildCount_ = 0;
+  uint32_t cacheReuseCount_ = 0;
+  bool replacementStaging_ = false;
+  bool replacementHadActive_ = false;
+  bool previousCachePersistent_ = false;
+  char previousGifPlayPath_[40] = "/idot_play.gif";
+  char previousGifCachePath_[40] = "/idot_cache.bin";
 };

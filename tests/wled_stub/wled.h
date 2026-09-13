@@ -17,6 +17,10 @@ extern uint8_t testHour;
 extern uint8_t testMinute;
 extern uint8_t testDay;
 extern uint8_t testMonth;
+extern int16_t currentPlaylist;
+extern uint32_t unloadPlaylistCount;
+extern uint32_t applyPresetCount;
+extern uint8_t pendingPreset;
 
 #define PROGMEM
 
@@ -127,3 +131,5 @@ inline uint8_t month(time_t) { return testMonth; }
 void toggleOnOff();
 void stateUpdated(uint8_t callMode);
 void colorUpdated(uint8_t callMode);
+void unloadPlaylist();
+bool applyPreset(uint8_t index, uint8_t callMode = CALL_MODE_DIRECT_CHANGE);

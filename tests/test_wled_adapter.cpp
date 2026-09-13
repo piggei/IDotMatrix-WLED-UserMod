@@ -17,6 +17,10 @@ uint8_t testHour = 23;
 uint8_t testMinute = 45;
 uint8_t testDay = 2;
 uint8_t testMonth = 9;
+int16_t currentPlaylist = -1;
+uint32_t unloadPlaylistCount = 0;
+uint32_t applyPresetCount = 0;
+uint8_t pendingPreset = 0;
 TestStrip strip;
 
 class TestMediaSink final : public IDotMatrixMediaSink {
@@ -26,8 +30,14 @@ public:
   bool writeGif(size_t, const uint8_t*, size_t) override { return true; }
   bool completeGif(bool crcValid) override { return crcValid; }
   bool gifUsesFrameCache() const override { return cacheMode; }
+  bool queueStoredGif(const char*, const char* = nullptr) override {
+    ++storedQueueCount;
+    return queueStoredOk;
+  }
   void stopPlayback() override { ++stopCount; }
   bool cacheMode = false;
+  bool queueStoredOk = true;
+  uint32_t storedQueueCount = 0;
   uint32_t stopCount = 0;
 };
 
@@ -50,6 +60,26 @@ void colorUpdated(uint8_t callMode) {
   assert(callMode == CALL_MODE_DIRECT_CHANGE);
   strip.segmentRef().colors[0] = RGBW32(colPri[0], colPri[1], colPri[2], colPri[3]);
   ++colorUpdateCount;
+}
+
+void unloadPlaylist() {
+  ++unloadPlaylistCount;
+  currentPlaylist = -1;
+}
+
+bool applyPreset(uint8_t index, uint8_t callMode) {
+  assert(callMode == CALL_MODE_DIRECT_CHANGE);
+  ++applyPresetCount;
+  unloadPlaylist();
+  pendingPreset = index;
+  return true;
+}
+
+static void simulateHandlePresets() {
+  if (pendingPreset == 0) return;
+  pendingPreset = 0;
+  strip.segmentRef().setMode(42);
+  effectCurrent = 42;
 }
 
 int main() {
@@ -96,6 +126,36 @@ int main() {
   assert(strip.segmentRef().colorAt(0, 0) == RGBW32(0x12, 0x34, 0x56, 0));
   assert(strip.segmentRef().colorAt(15, 15) == RGBW32(0x12, 0x34, 0x56, 0));
 
+  // WLED processes playlist presets asynchronously after the Usermod loop.
+  // Reproduce the real failure mode: a playlist preset is already queued while
+  // the panel still shows a native WLED effect. Explicit iDotMatrix ownership
+  // must both stop the playlist and cancel that pending preset before selecting
+  // the framebuffer effect.
+  const uint32_t triggerCountBeforePlaylistRegression = stripTriggerCount;
+  strip.segmentRef().setMode(42);
+  effectCurrent = 42;
+  currentPlaylist = 7;
+  pendingPreset = 23;
+  adapter.onSolidColor(0x12, 0x34, 0x56);
+  assert(currentPlaylist == -1);
+  assert(unloadPlaylistCount == 1);
+  assert(applyPresetCount == 1);
+  assert(pendingPreset == 0);
+  assert(adapter.isDisplayEffectSelected());
+  assert(effectCurrent == 200);
+  // The later WLED handlePresets() pass now has nothing left to apply and must
+  // not steal the segment back.
+  simulateHandlePresets();
+  assert(adapter.isDisplayEffectSelected());
+  assert(effectCurrent == 200);
+  // Once stopped, later iDotMatrix frames/content updates do not touch playlist
+  // state again.
+  adapter.onSolidColor(0x12, 0x34, 0x56);
+  assert(unloadPlaylistCount == 1);
+  assert(applyPresetCount == 1);
+  // Keep legacy trigger-count assertions below focused on their original paths.
+  stripTriggerCount = triggerCountBeforePlaylistRegression;
+
   adapter.onGraffitiMode(true);
   assert(adapter.isDiySessionActive());
   assert(!adapter.isSolidActive());
@@ -118,7 +178,7 @@ int main() {
   assert(!adapter.isDiySessionActive());
   assert(renderer.isVisible());
 
-  // Every app-originated visual mode remains under iDotMatrix Display.
+  // Every app-originated visual mode remains under iDotMatrix.
   adapter.onSolidColor(1, 2, 3);
   assert(adapter.isSolidActive());
   assert(renderer.isVisible());
@@ -243,7 +303,7 @@ int main() {
   // In style 3 the date slash is black over the selected background.
   assert(strip.segmentRef().colorAt(3, 9) == BLACK);
 
-  // Countdown uses the same iDotMatrix Display framebuffer. Its state keeps
+  // Countdown uses the same iDotMatrix framebuffer. Its state keeps
   // running even if WLED temporarily takes the panel, because the BLE app has
   // no reverse channel telling it that another source was selected.
   IDotMatrixCountdownSettings countdown{};
@@ -419,7 +479,7 @@ int main() {
   assert(!mediaAdapter.isGifActive());
   assert(!mediaAdapter.isDisplayEffectActive());
   assert(strip.segmentRef().mode == 42);
-  // LZW12/no-PSRAM frame-cache preparation must keep iDotMatrix Display
+  // LZW12/no-PSRAM frame-cache preparation must keep iDotMatrix
   // selected while the decoder/cache is prepared, so WLED UI/presets retain
   // the dedicated effect ID throughout the transient blank staging phase.
   TestMediaSink cacheMedia;
@@ -453,7 +513,7 @@ int main() {
   assert(cacheMedia.stopCount == 1);
 
   // A transient failure while replacing an already active cached GIF must not
-  // restore an empty iDotMatrix Display effect.  The old cache is retired once
+  // restore an empty iDotMatrix effect.  The old cache is retired once
   // the replacement transfer is valid, so failure recovery must land on
   // WLED Static.  A following GIF can then stage cleanly without the user
   // manually selecting a solid colour.
@@ -503,6 +563,91 @@ int main() {
   assert(clockAdapter.isClockActive());
   assert(clockAdapter.isDisplayEffectActive());
   assert(renderer.isVisible());
+
+  // Entering Carousel must take framebuffer ownership immediately.  A cold
+  // stored-GIF cache can take noticeable time to build; Clock must not keep
+  // rendering during that asynchronous staging window.
+  clockAdapter.beginCarouselPlayback();
+  assert(!clockAdapter.isClockActive());
+  assert(!renderer.isVisible());
+  clockAdapter.restoreClockFallback();
+  assert(clockAdapter.isClockActive());
+  assert(renderer.isVisible());
+
+  // RC6 regression: replacing one Carousel with another must retain logical
+  // iDotMatrix ownership while the old bank has been removed and the first new
+  // asset is still uploading. Otherwise the standalone policy sees an empty
+  // iDotMatrix effect and flashes Clock for the upload gap.
+  // Prime the selection edge first so only a true empty-content regression can
+  // request another standalone activation.
+  clockAdapter.pollDisplayEffectSelection();
+  (void)clockAdapter.takeDisplayEffectActivationRequest();
+  clockAdapter.beginCarouselUpdateHold();
+  assert(clockAdapter.isCarouselUpdateHoldActive());
+  assert(clockAdapter.hasLogicalContent());
+  assert(!clockAdapter.isClockActive());
+  assert(!renderer.isVisible());
+  clockAdapter.pollDisplayEffectSelection();
+  assert(!clockAdapter.takeDisplayEffectActivationRequest());
+  clockAdapter.endCarouselUpdateHold();
+  assert(!clockAdapter.isCarouselUpdateHoldActive());
+  assert(!clockAdapter.hasLogicalContent());
+  clockAdapter.pollDisplayEffectSelection();
+  assert(clockAdapter.takeDisplayEffectActivationRequest());
+  clockAdapter.restoreClockFallback();
+  assert(clockAdapter.isClockActive());
+  assert(renderer.isVisible());
+
+  // Every stored GIF staging transition must take exclusive ownership of the
+  // framebuffer, not only the initial Carousel entry.  This reproduces the
+  // hardware regression where an animated/rainbow text item immediately
+  // before a GIF kept rendering while the GIF cache was built, contaminating
+  // the cached frames with text pixels.
+  IDotMatrixTextSettings stagingText{};
+  stagingText.glyphCount = 1;
+  stagingText.glyphWidth = 8;
+  stagingText.glyphHeight = 16;
+  stagingText.glyphBytes = 16;
+  stagingText.colorMode = 2;
+  uint8_t stagingGlyph[16];
+  for (uint8_t& value : stagingGlyph) value = 0xFF;
+  assert(clockAdapter.onTextBegin(stagingText));
+  clockAdapter.onTextGlyph(0, stagingGlyph, sizeof(stagingGlyph));
+  clockAdapter.onTextComplete();
+  assert(clockAdapter.isTextActive());
+  assert(renderer.isVisible());
+  assert(clockAdapter.playStoredGif("/slot.gif", "/slot.cache"));
+  assert(clockMedia.storedQueueCount == 1);
+  assert(clockAdapter.isGifPending());
+  assert(!clockAdapter.isTextActive());
+  assert(!clockAdapter.isClockActive());
+  assert(!renderer.isVisible());
+  // A preparation failure restores the logical previous owner.
+  clockAdapter.syncGifPlayback(false, true);
+  assert(clockAdapter.isTextActive());
+  assert(renderer.isVisible());
+
+  // RC5 regression: Carousel storage mutation must close a currently queued
+  // GIF/cache before the Carousel deletes its files, without disturbing an
+  // unrelated live Clock/Text renderer when no GIF owns the media backend.
+  clockAdapter.onClock(clockSettings);
+  const uint32_t stopBeforeClockMutation = clockMedia.stopCount;
+  clockAdapter.releaseCarouselMediaForStorageMutation();
+  assert(clockMedia.stopCount == stopBeforeClockMutation);
+  assert(clockAdapter.isClockActive());
+  assert(renderer.isVisible());
+
+  assert(clockAdapter.playStoredGif("/reset-slot.gif", "/reset-slot.cache"));
+  assert(clockAdapter.isGifPending());
+  const uint32_t stopBeforeGifMutation = clockMedia.stopCount;
+  clockAdapter.releaseCarouselMediaForStorageMutation();
+  assert(clockMedia.stopCount == stopBeforeGifMutation + 1);
+  assert(!clockAdapter.isGifPending());
+  assert(!clockAdapter.isGifActive());
+  assert(!renderer.isVisible());
+
+  clockAdapter.onClock(clockSettings);
+  assert(clockAdapter.isClockActive());
   assert(clockAdapter.onGifComplete(true));
   assert(strip.segmentRef().mode == clockAdapter.displayEffectId());
   assert(strip.segmentRef().colors[0] == BLACK);

@@ -1,4 +1,5 @@
 #include "IDotMatrixBLEServer.h"
+#include "IDotMatrixBLEFraming.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -12,32 +13,7 @@ constexpr char AE_SERVICE_UUID[] = "0000ae00-0000-1000-8000-00805f9b34fb";
 constexpr char AE01_UUID[]       = "0000ae01-0000-1000-8000-00805f9b34fb";
 constexpr char AE02_UUID[]       = "0000ae02-0000-1000-8000-00805f9b34fb";
 
-bool startsAudioFrame(const std::string& value) {
-  if (value.length() < 4) return false;
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(value.data());
-  return (data[0] == 0x06 && data[1] == 0x00 && data[2] == 0x00 && data[3] == 0x02) ||
-    (data[0] == 0x21 && data[1] == 0x00 && data[2] == 0x01 && data[3] == 0x02);
 }
-
-bool startsKnownNonAudioFrame(const std::string& value) {
-  if (value.length() < 4) return false;
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(value.data());
-  const uint8_t command = data[2], subcommand = data[3];
-  return (command == 0x01 && subcommand == 0x80) ||
-    (command == 0x00 && subcommand == 0x80) ||
-    (command == 0x07 && (subcommand == 0x80 || subcommand == 0x01)) ||
-    (command == 0x05 && (subcommand == 0x80 || subcommand == 0x01)) ||
-    (command == 0x04 && (subcommand == 0x80 || subcommand == 0x01)) ||
-    (command == 0x02 && subcommand == 0x02) ||
-    (command == 0x03 && subcommand == 0x02) ||
-    (command == 0x06 && subcommand == 0x01) ||
-    (command == 0x08 && subcommand == 0x80) ||
-    (command == 0x09 && subcommand == 0x80) ||
-    (command == 0x0A && subcommand == 0x80) ||
-    (command == 0x00 && subcommand == 0x00);
-}
-}
-
 bool IDotMatrixBLEServer::begin(const char* deviceName, uint8_t screenType) {
   if (initialized_) return true;
 
@@ -114,27 +90,31 @@ bool IDotMatrixBLEServer::begin(const char* deviceName, uint8_t screenType) {
 void IDotMatrixBLEServer::loop() {
   if (!initialized_) return;
 
-  // Apply WLED state changes from its main loop, never from the NimBLE task.
+  // Connection callbacks only publish flags. All protocol lifetime changes are
+  // performed here in the WLED task, including FA02 assembler destruction.
+  bool haveConnectionEvent = false;
+  bool newConnectedState = connected_;
+  portENTER_CRITICAL(&queueMux_);
   if (connectionEventPending_) {
+    haveConnectionEvent = true;
+    newConnectedState = pendingConnectedState_;
     connectionEventPending_ = false;
+    if (!newConnectedState) rxHead_ = rxTail_ = rxCount_ = 0;
+  }
+  portEXIT_CRITICAL(&queueMux_);
+  if (haveConnectionEvent) {
+    connected_ = newConnectedState;
     if (connected_) {
       protocol_.onConnected();
       deviceInfoPushesRemaining_ = 2;
       deviceInfoPushAt_ = millis() + 1200;
     } else {
-      bulkTransfer_.reset();
-      if (carouselTransferReady_) protocol_.cancelCarouselAsset();
-      carouselTransferReady_ = false;
-      protocol_.completeRawImage(false);
-      protocol_.completeGif(false);
-      rawTransferReady_ = false;
-      gifTransferReady_ = false;
-      portENTER_CRITICAL(&queueMux_);
-      uint8_t* detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
+      faAssembler_.reset();
       audioStreamActive_ = false;
       protocol_.resetAudioStream();
-      portEXIT_CRITICAL(&queueMux_);
-      free(detachedFaBuffer);
+      abortTransfers();
+      restartAdvertising_ = true;
+      restartAdvertisingAt_ = millis() + 300;
     }
   }
 
@@ -156,44 +136,24 @@ void IDotMatrixBLEServer::loop() {
   }
 
   RxPacket packet;
-  while (dequeue(packet)) {
-    processPacket(packet);
-  }
+  while (dequeue(packet)) processPacket(packet);
 
-  // Never let an abandoned fragmented media packet poison the characteristic
-  // indefinitely.  A reconnect used to be the only way to clear this state.
+  const uint32_t now = millis();
   if (faAssembler_.expected() > 0 && !faAssembler_.complete() &&
-      uint32_t(millis() - reassemblyLastWriteAt_) >= 5000u) {
-    portENTER_CRITICAL(&queueMux_);
-    uint8_t* detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
-    portEXIT_CRITICAL(&queueMux_);
-    free(detachedFaBuffer);
-    bulkTransfer_.reset();
-    if (carouselTransferReady_) protocol_.cancelCarouselAsset();
-    carouselTransferReady_ = false;
-    protocol_.completeRawImage(false);
-    protocol_.completeGif(false);
-    rawTransferReady_ = false;
-    gifTransferReady_ = false;
+      uint32_t(now - reassemblyLastWriteAt_) >= 5000u) {
+    ++reassemblyTimeouts_;
+    faAssembler_.reset();
+    abortTransfers();
   }
 
-  // The standalone reference assembles FA02 fragments until the length in the
-  // first two bytes is complete, then dispatches the logical packet. The app
-  // waits for an ACK before starting its next bulk packet, so one hand-off slot
-  // is sufficient and avoids a multi-slot 4 KiB queue.
-  if (faAssembler_.complete()) {
-    IDotMatrixReply reply;
-    processFA02Complete(faAssembler_.data(), faAssembler_.expected(), reply);
-    portENTER_CRITICAL(&queueMux_);
-    uint8_t* detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
-    portEXIT_CRITICAL(&queueMux_);
-    free(detachedFaBuffer);
-    if (reply.available()) sendFA03(reply.data, reply.length);
+  if (bulkTransfer_.isActive() && bulkLastProgressAt_ != 0 &&
+      uint32_t(now - bulkLastProgressAt_) >= 5000u) {
+    ++bulkTimeouts_;
+    abortTransfers();
   }
 
-  // Some device events (currently countdown completion) are reported by
-  // the real display asynchronously on FA03 rather than as a direct command ACK.
-  // Poll after all command processing so normal ACK ordering always wins.
+  // Some device events (currently countdown completion) are reported by the
+  // real display asynchronously on FA03 rather than as a direct command ACK.
   IDotMatrixReply asyncReply;
   if (protocol_.pollAsyncReply(asyncReply) && asyncReply.available()) {
     sendFA03(asyncReply.data, asyncReply.length);
@@ -255,16 +215,17 @@ void IDotMatrixBLEServer::WriteCallbacks::onWrite(NimBLECharacteristic* characte
 #endif
 
 void IDotMatrixBLEServer::onConnect() {
-  connected_ = true;
-  advertising_ = false;
+  portENTER_CRITICAL(&queueMux_);
+  pendingConnectedState_ = true;
   connectionEventPending_ = true;
+  portEXIT_CRITICAL(&queueMux_);
 }
 
 void IDotMatrixBLEServer::onDisconnect() {
-  connected_ = false;
+  portENTER_CRITICAL(&queueMux_);
+  pendingConnectedState_ = false;
   connectionEventPending_ = true;
-  restartAdvertising_ = true;
-  restartAdvertisingAt_ = millis() + 300;
+  portEXIT_CRITICAL(&queueMux_);
 }
 
 void IDotMatrixBLEServer::onMTUChange(uint16_t mtu) {
@@ -276,108 +237,24 @@ void IDotMatrixBLEServer::enqueueFromCallback(NimBLECharacteristic* characterist
 
   const std::string value = characteristic->getValue();
   if (value.empty()) return;
-
-  const RxChannel channel = characteristic == ae01_ ? RxChannel::AE01 : RxChannel::FA02;
-
-  if (channel == RxChannel::FA02) {
-    const bool audioStart = startsAudioFrame(value);
-    const bool leaveAudio = audioStreamActive_ && startsKnownNonAudioFrame(value) && !audioStart;
-    if (leaveAudio) audioStreamActive_ = false;
-    if (audioStart || audioStreamActive_) {
-      audioStreamActive_ = true;
-      portENTER_CRITICAL(&queueMux_);
-      if (rxCount_ < RX_QUEUE_SIZE) {
-        RxPacket& packet = rxQueue_[rxHead_];
-        packet.channel = RxChannel::AudioFA02;
-        packet.length = static_cast<uint8_t>(value.length() > RX_PACKET_MAX
-          ? RX_PACKET_MAX : value.length());
-        memcpy(packet.data, value.data(), packet.length);
-        rxHead_ = (rxHead_ + 1) % RX_QUEUE_SIZE;
-        ++rxCount_;
-      }
-      portEXIT_CRITICAL(&queueMux_);
-      return;
-    }
-  }
-
-  // The rare alarm/program packet can be larger than the normal 4 KiB bulk
-  // packet. Reserve its temporary heap buffer before entering the spinlock: an
-  // allocator must never run while interrupts are held off.
-  if (channel == RxChannel::FA02 && faAssembler_.expected() == 0) {
-    if (value.length() < 2) return;
-    const uint16_t declaredLength = uint16_t(uint8_t(value[0])) |
-      (uint16_t(uint8_t(value[1])) << 8);
-    if (declaredLength == 0 || declaredLength > BULK_PACKET_MAX ||
-        !faAssembler_.ensureCapacity(declaredLength)) return;
-  }
-
-  portENTER_CRITICAL(&queueMux_);
-  if (channel == RxChannel::FA02) {
-    if (faAssembler_.complete()) {
-      portEXIT_CRITICAL(&queueMux_);
-      return;
-    }
-
-    if (faAssembler_.expected() == 0) {
-      const uint16_t declaredLength = uint16_t(uint8_t(value[0])) |
-        (uint16_t(uint8_t(value[1])) << 8);
-
-      // Preserve the original four-entry queue for complete short commands so
-      // rapid power/brightness/colour writes do not contend for the bulk slot.
-      if (declaredLength <= RX_PACKET_MAX && value.length() >= declaredLength) {
-        if (rxCount_ >= RX_QUEUE_SIZE) {
-          portEXIT_CRITICAL(&queueMux_);
-          return;
-        }
-        RxPacket& packet = rxQueue_[rxHead_];
-        packet.channel = RxChannel::FA02;
-        packet.length = static_cast<uint8_t>(declaredLength);
-        memcpy(packet.data, value.data(), declaredLength);
-        rxHead_ = (rxHead_ + 1) % RX_QUEUE_SIZE;
-        ++rxCount_;
-        // A short command never uses the assembler. Detach any prepared heap
-        // capacity while locked, then release it only after interrupts resume.
-        uint8_t* detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
-        portEXIT_CRITICAL(&queueMux_);
-        free(detachedFaBuffer);
-        return;
-      }
-
-    }
-
-    const IDotMatrixFA02Assembler::Result result = faAssembler_.append(
-      reinterpret_cast<const uint8_t*>(value.data()),
-      value.length()
-    );
-    uint8_t* detachedFaBuffer = nullptr;
-    if (result == IDotMatrixFA02Assembler::Result::Invalid) {
-      // append() resets logical state without freeing. Detach heap storage while
-      // locked, then release it after the critical section.
-      detachedFaBuffer = faAssembler_.resetAndDetachDynamic();
-    } else if (result == IDotMatrixFA02Assembler::Result::Busy) {
-      // Overlapping fragments are discarded; the app can retry.
-    } else if (result == IDotMatrixFA02Assembler::Result::Accumulating) {
-      reassemblyLastWriteAt_ = millis();
-      // Do not emit a protocol ACK for an ATT fragment.  The verified standalone
-      // emulator only ACKs after the complete logical FA02 packet is assembled.
-    }
+  if (value.length() > RX_PACKET_MAX) {
+    portENTER_CRITICAL(&queueMux_);
+    ++rxOversize_;
     portEXIT_CRITICAL(&queueMux_);
-    free(detachedFaBuffer);
     return;
   }
 
-  // AE01 is retained because it belongs to the emulated GATT database, but the
-  // BUILD 80 reference only logs it. No implemented content path uses it.
+  const RxChannel channel = characteristic == ae01_ ? RxChannel::AE01 : RxChannel::FA02;
+  portENTER_CRITICAL(&queueMux_);
   if (rxCount_ >= RX_QUEUE_SIZE) {
+    ++rxDropped_;
     portEXIT_CRITICAL(&queueMux_);
     return;
   }
 
   RxPacket& packet = rxQueue_[rxHead_];
   packet.channel = channel;
-  packet.length = static_cast<uint8_t>(value.length() > RX_PACKET_MAX
-    ? RX_PACKET_MAX
-    : value.length());
+  packet.length = static_cast<uint16_t>(value.length());
   memcpy(packet.data, value.data(), packet.length);
   rxHead_ = (rxHead_ + 1) % RX_QUEUE_SIZE;
   ++rxCount_;
@@ -399,20 +276,89 @@ bool IDotMatrixBLEServer::dequeue(RxPacket& packet) {
 }
 
 void IDotMatrixBLEServer::processPacket(const RxPacket& packet) {
-  if (packet.channel == RxChannel::AudioFA02) {
-    IDotMatrixReply reply;
-    protocol_.processAudioStream(packet.data, packet.length, reply);
-    if (reply.available()) sendFA03(reply.data, reply.length);
-  } else if (packet.channel == RxChannel::FA02) {
+  if (packet.channel == RxChannel::FA02) {
+    processFA02Write(packet.data, packet.length);
+    return;
+  }
+
+  IDotMatrixReply reply;
+  processAE01(packet.data, packet.length, reply);
+  if (reply.available()) sendFA03(reply.data, reply.length);
+}
+
+void IDotMatrixBLEServer::processFA02Write(const uint8_t* data, size_t length) {
+  if (data == nullptr || length == 0) return;
+
+  const bool audioStart = idotStartsAudioFrame(data, length);
+  if (audioStreamActive_ && idotStartsKnownNonAudioFrame(data, length) && !audioStart) {
+    audioStreamActive_ = false;
     protocol_.resetAudioStream();
+  }
+  if (audioStart || audioStreamActive_) {
+    audioStreamActive_ = true;
     IDotMatrixReply reply;
-    processFA02Complete(packet.data, packet.length, reply);
+    protocol_.processAudioStream(data, length, reply);
     if (reply.available()) sendFA03(reply.data, reply.length);
-  } else {
+    return;
+  }
+
+  // The WLED loop is the sole owner of faAssembler_. A single ATT write may
+  // finish one logical packet and already contain bytes of the next, so consume
+  // it in bounded slices rather than silently discarding trailing bytes.
+  size_t offset = 0;
+  while (offset < length) {
+    size_t needed = 0;
+    if (faAssembler_.expected() == 0) {
+      if (length - offset < 2) {
+        ++rxMalformed_;
+        faAssembler_.reset();
+        return;
+      }
+      const uint16_t declaredLength = uint16_t(data[offset]) |
+        (uint16_t(data[offset + 1]) << 8);
+      if (declaredLength == 0 || declaredLength > BULK_PACKET_MAX ||
+          !faAssembler_.ensureCapacity(declaredLength)) {
+        ++rxMalformed_;
+        faAssembler_.reset();
+        return;
+      }
+      needed = declaredLength;
+      reassemblyLastWriteAt_ = millis();
+    } else {
+      needed = size_t(faAssembler_.expected()) - faAssembler_.received();
+    }
+    const size_t available = length - offset;
+    const size_t take = needed < available ? needed : available;
+    const IDotMatrixFA02Assembler::Result result = faAssembler_.append(data + offset, take);
+    offset += take;
+
+    if (result == IDotMatrixFA02Assembler::Result::Invalid ||
+        result == IDotMatrixFA02Assembler::Result::Busy) {
+      ++rxMalformed_;
+      faAssembler_.reset();
+      return;
+    }
+    if (result == IDotMatrixFA02Assembler::Result::Accumulating) {
+      reassemblyLastWriteAt_ = millis();
+      return;
+    }
+
     IDotMatrixReply reply;
-    processAE01(packet.data, packet.length, reply);
+    processFA02Complete(faAssembler_.data(), faAssembler_.expected(), reply);
+    faAssembler_.reset();
     if (reply.available()) sendFA03(reply.data, reply.length);
   }
+}
+
+void IDotMatrixBLEServer::abortTransfers() {
+  bulkTransfer_.reset();
+  bulkLastProgressAt_ = 0;
+  if (carouselTransferReady_) protocol_.cancelCarouselAsset();
+  carouselTransferReady_ = false;
+  protocol_.completeRawImage(false);
+  protocol_.completeGif(false);
+  rawTransferReady_ = false;
+  gifTransferReady_ = false;
 }
 
 void IDotMatrixBLEServer::processFA02Complete(
@@ -428,6 +374,8 @@ void IDotMatrixBLEServer::processFA02Complete(
   }
   IDotMatrixBulkResult bulkResult;
   if (bulkTransfer_.processPacket(data, length, bulkResult)) {
+    if (bulkResult.began || bulkResult.chunkLength > 0) bulkLastProgressAt_ = millis();
+    if (bulkResult.completed || bulkResult.aborted) bulkLastProgressAt_ = 0;
     const bool carouselAsset =
       (bulkResult.type == 0x01 || bulkResult.type == 0x03) && bulkResult.imageIndex < 12;
 

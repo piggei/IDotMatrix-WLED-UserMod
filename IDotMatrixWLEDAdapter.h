@@ -56,7 +56,7 @@ public:
   bool onGifBegin(size_t byteLength) override;
   bool onGifData(size_t offset, const uint8_t* data, size_t length) override;
   bool onGifComplete(bool crcValid) override;
-  bool playStoredGif(const char* path);
+  bool playStoredGif(const char* path, const char* cachePath = nullptr);
 
   void renderDisplayEffectFrame();
   bool isDiySessionActive() const { return diySessionActive_; }
@@ -95,6 +95,22 @@ public:
   // display paths. These helpers let the scheduler release that content
   // explicitly, including a GIF still in low-RAM precache staging.
   void cancelAutomationContent();
+  // Carousel ownership is explicit: as soon as Device Assets playback starts,
+  // stop updating the previously active iDotMatrix mode (notably Clock) while
+  // the first GIF is still being prepared asynchronously.
+  void beginCarouselPlayback();
+  // While the official app replaces a Carousel bank there is a short period
+  // where the old files have been retired but the first new asset is not yet
+  // playable. Keep iDotMatrix ownership during that gap so the standalone
+  // Clock fallback cannot flash on screen between two Carousels.
+  void beginCarouselUpdateHold();
+  void endCarouselUpdateHold();
+  bool isCarouselUpdateHoldActive() const { return carouselUpdateHold_; }
+  // Before Carousel storage is erased/reconfigured, release any GIF/cache file
+  // that may still be open in the shared media backend. This deliberately
+  // affects GIF ownership only, so configuring Carousel while Clock/Text is
+  // displayed does not clear unrelated live content.
+  void releaseCarouselMediaForStorageMutation();
   void restoreClockFallback();
   uint8_t displayEffectId() const { return displayEffectId_; }
   bool isClockActive() const { return clockActive_; }
@@ -123,6 +139,7 @@ public:
   uint8_t textSpeed() const { return renderer_.textSpeed(); }
   bool rescaleEnabled() const { return rescaleEnabled_; }
   bool dimensionsMatch() const { return dimensionsMatch_; }
+  uint32_t protocolResetCount() const { return protocolResetCount_; }
 
 private:
   void activateDisplayEffect();
@@ -131,6 +148,9 @@ private:
   void renderStopwatch(uint32_t now, bool force = false);
   void beginGifBlankStaging();
   void endGifBlankStaging();
+  void captureAndSuspendContentForGifStaging();
+  void restoreSuspendedContentAfterGifFailure();
+  void clearGifContentSnapshot();
   void stopMediaPlayback();
   void renderCanvasToSegment();
   Segment& controlSegment();
@@ -156,6 +176,8 @@ private:
   bool gifReplacingActiveGif_ = false;
   bool gifPreviousRendererVisible_ = false;
   bool gifBlankStaging_ = false;
+  bool carouselUpdateHold_ = false;
+  uint16_t gifPreviousContentMask_ = 0;
   uint32_t gifStagingPrimaryColor_ = 0;
   uint8_t gifPreviousEffect_ = 0;
   bool textLoadReady_ = false;
@@ -191,4 +213,5 @@ private:
   uint16_t scoreB_ = 0;
   uint16_t targetWidth_ = 0;
   uint16_t targetHeight_ = 0;
+  uint32_t protocolResetCount_ = 0;
 };

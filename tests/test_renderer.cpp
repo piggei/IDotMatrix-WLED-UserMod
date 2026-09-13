@@ -8,6 +8,14 @@ static void expectBlack(const IDotMatrixRenderer::Pixel* pixel) {
   assert(pixel->red == 0 && pixel->green == 0 && pixel->blue == 0);
 }
 
+static void expectPixel(
+  const IDotMatrixRenderer::Pixel* pixel,
+  uint8_t red, uint8_t green, uint8_t blue
+) {
+  assert(pixel != nullptr);
+  assert(pixel->red == red && pixel->green == green && pixel->blue == blue);
+}
+
 static size_t countNonBlack(const IDotMatrixRenderer& renderer) {
   size_t count = 0;
   for (uint8_t y = 0; y < renderer.height(); ++y) {
@@ -39,6 +47,49 @@ int main() {
   assert(pixel != nullptr);
   assert(pixel->red == 0x12 && pixel->green == 0x34 && pixel->blue == 0x56);
   assert(!renderer.setPixel(16, 15, 1, 2, 3));
+
+  // RC7 clock artwork regression. Styles 0/3/5/6/7 move the HH:MM colon
+  // two pixels to the right, style 4 moves it one pixel left, and every time
+  // colon blinks at 1 Hz (500 ms on / 500 ms off). DD/MM separators remain
+  // continuously visible at their previously validated coordinates.
+  renderer.renderClock(18, 28, 18, 8, 0, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(4, 10), 40, 50, 60);
+  expectBlack(renderer.pixel(2, 10));
+  renderer.renderClock(18, 28, 18, 8, 0, true, false, 40, 50, 60, 700);
+  expectBlack(renderer.pixel(4, 10));
+  renderer.renderClock(18, 28, 18, 8, 0, true, true, 40, 50, 60, 700);
+  expectPixel(renderer.pixel(3, 9), 40, 50, 60); // date slash never blinks/moves
+
+  // Style 2: both hour digits and only the first minute digit move one pixel
+  // left. The separator and the second minute digit keep their old positions.
+  renderer.renderClock(88, 88, 18, 8, 2, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(0, 5), 255, 170, 0);
+  expectPixel(renderer.pixel(4, 5), 255, 170, 0);
+  expectPixel(renderer.pixel(9, 5), 255, 170, 0);
+  expectPixel(renderer.pixel(13, 5), 255, 170, 0);
+  expectPixel(renderer.pixel(8, 6), 255, 255, 255);
+  renderer.renderClock(88, 88, 18, 8, 2, true, false, 40, 50, 60, 700);
+  expectBlack(renderer.pixel(8, 6));
+
+  // Style 4 keeps the digits fixed but moves the time colon x=11 -> x=10.
+  renderer.renderClock(18, 28, 18, 8, 4, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(10, 2), 40, 50, 60);
+  expectBlack(renderer.pixel(11, 2));
+  renderer.renderClock(18, 28, 18, 8, 4, true, false, 40, 50, 60, 700);
+  expectBlack(renderer.pixel(10, 2));
+
+  // The remaining shifted styles share the same helper but use different
+  // foreground/background artwork; verify their new colon coordinate too.
+  renderer.renderClock(18, 28, 18, 8, 3, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(4, 10), 0, 0, 0);
+  renderer.renderClock(18, 28, 18, 8, 3, true, false, 40, 50, 60, 700);
+  expectPixel(renderer.pixel(4, 10), 40, 50, 60);
+  renderer.renderClock(18, 28, 18, 8, 5, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(4, 10), 255, 165, 0);
+  renderer.renderClock(18, 28, 18, 8, 6, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(4, 10), 40, 50, 60);
+  renderer.renderClock(18, 28, 18, 8, 7, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(4, 10), 40, 50, 60);
 
   renderer.fill(9, 8, 7);
   pixel = renderer.pixel(0, 0);

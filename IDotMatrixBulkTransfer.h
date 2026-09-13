@@ -41,6 +41,9 @@ public:
   const uint8_t* textPayload() const { return textPayload_; }
   size_t textPayloadLength() const { return textPayloadLength_; }
   uint8_t activeType() const { return activeType_; }
+  bool isActive() const { return active_; }
+  uint32_t receivedSize() const { return receivedSize_; }
+  uint32_t expectedSize() const { return expectedSize_; }
 
 private:
   static uint32_t updateCRC32(uint32_t crc, const uint8_t* data, size_t length);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static regression checks for the 0.8.2-rc.2 build profiles."""
+"""Static regression checks for the 0.8.2 stable build profiles."""
 
 from __future__ import annotations
 
@@ -199,7 +199,7 @@ def check_nimble_api_bridge() -> None:
     assert "ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
     assert "ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
     assert 'IDOTMATRIX_RELEASE = "0.8.2"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.8.2-rc.2"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.8.2"' in usermod
     assert "RMT+BLE=ESP32-C3 shared-RMT" in usermod
     assert "UsermodManager::getUMData(&data, USERMOD_ID_AUDIOREACTIVE)" in usermod
 

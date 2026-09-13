@@ -83,42 +83,49 @@ void IDotMatrixAutomation::resetPersistent() {
   alarmBuzzerOwned_ = false;
   scheduleBuzzerOwned_ = false;
   adapter_.cancelAutomationContent();
+  lastResetOk_ = true;
 
   for (uint8_t slot = 0; slot < IDotMatrixAlarmSettings::SLOT_COUNT; ++slot) {
     if (alarmPrefs_ != nullptr) {
       char key[8];
       snprintf(key, sizeof(key), "a%u", unsigned(slot));
       alarmPrefs_->remove(key);
+      if (alarmPrefs_->getBytesLength(key) != 0) lastResetOk_ = false;
     }
     alarms_[slot] = AlarmSlot{};
     alarms_[slot].lastTriggerMinuteKey = 0xFFFFFFFFu;
     char path[20];
     alarmPath(slot, path, sizeof(path));
     WLED_FS.remove(path);
+    if (WLED_FS.exists(path)) lastResetOk_ = false;
   }
 
   scheduleGlobalFlags_ = 0;
-  if (schedulePrefs_ != nullptr) schedulePrefs_->remove("flags");
+  if (schedulePrefs_ != nullptr) {
+    schedulePrefs_->remove("flags");
+    if (schedulePrefs_->getBytesLength("flags") != 0) lastResetOk_ = false;
+  }
   for (uint8_t index = 0; index < IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES; ++index) {
     if (schedulePrefs_ != nullptr) {
       char key[8];
       snprintf(key, sizeof(key), "s%u", unsigned(index));
       schedulePrefs_->remove(key);
+      if (schedulePrefs_->getBytesLength(key) != 0) lastResetOk_ = false;
     }
     scheduleActivities_[index] = ScheduleActivity{};
     char path[20];
-    schedulePath(index, path, sizeof(path)); WLED_FS.remove(path);
-    scheduleTempPath(index, path, sizeof(path)); WLED_FS.remove(path);
-    scheduleBackupPath(index, path, sizeof(path)); WLED_FS.remove(path);
+    schedulePath(index, path, sizeof(path)); WLED_FS.remove(path); if (WLED_FS.exists(path)) lastResetOk_ = false;
+    scheduleTempPath(index, path, sizeof(path)); WLED_FS.remove(path); if (WLED_FS.exists(path)) lastResetOk_ = false;
+    scheduleBackupPath(index, path, sizeof(path)); WLED_FS.remove(path); if (WLED_FS.exists(path)) lastResetOk_ = false;
   }
 
-  // Reset scheduling edge state only.  The last valid application time sync is
+  // Reset scheduling edge state only. The last valid application time sync is
   // intentionally retained; WLED/system time remains authoritative when valid.
   lastAlarmCheckAt_ = 0;
   scheduleReceivedMask_ = 0;
   scheduleUploadDirty_ = false;
   scheduleLastRxMs_ = 0;
-  lastError_ = Error::None;
+  lastError_ = lastResetOk_ ? Error::None : Error::FileWrite;
 }
 
 void IDotMatrixAutomation::loadPersistence() {
@@ -154,17 +161,32 @@ void IDotMatrixAutomation::loadPersistence() {
     const size_t storedBytes = schedulePrefs_->getBytesLength(key);
     if (storedBytes == sizeof(ScheduleActivity)) {
       schedulePrefs_->getBytes(key, &scheduleActivities_[index], sizeof(ScheduleActivity));
+      char tempPath[20], path[20], backupPath[20];
+      scheduleTempPath(index, tempPath, sizeof(tempPath));
+      schedulePath(index, path, sizeof(path));
+      scheduleBackupPath(index, backupPath, sizeof(backupPath));
+      // An upload temp is never committed at boot. The committed NVS metadata
+      // decides whether final or backup media is authoritative.
+      WLED_FS.remove(tempPath);
       if (scheduleActivities_[index].configured) {
-        // A persisted schedule is usable only when its media is present with
-        // the expected size.  This also repairs stale metadata left by older
-        // non-transactional replacement failures.
-        char path[20];
-        schedulePath(index, path, sizeof(path));
         File file = WLED_FS.open(path, "r");
-        const bool mediaValid = file &&
+        bool mediaValid = file &&
           uint32_t(file.size()) == scheduleActivities_[index].mediaSize;
         if (file) file.close();
-        if (!mediaValid) clearScheduleMeta(index);
+        if (!mediaValid && WLED_FS.exists(backupPath)) {
+          WLED_FS.remove(path);
+          if (WLED_FS.rename(backupPath, path)) {
+            file = WLED_FS.open(path, "r");
+            mediaValid = file &&
+              uint32_t(file.size()) == scheduleActivities_[index].mediaSize;
+            if (file) file.close();
+          }
+        }
+        if (mediaValid) WLED_FS.remove(backupPath);
+        else clearScheduleMeta(index);
+      } else {
+        WLED_FS.remove(path);
+        WLED_FS.remove(backupPath);
       }
     } else if (storedBytes != 0) {
       schedulePrefs_->remove(key);

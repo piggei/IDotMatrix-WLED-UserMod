@@ -32,9 +32,16 @@ public:
   bool isConnected() const { return connected_; }
   uint8_t screenType() const { return screenType_; }
   const char* deviceName() const { return deviceName_; }
+  uint32_t rxDropped() const { return rxDropped_; }
+  uint32_t rxOversize() const { return rxOversize_; }
+  uint32_t rxMalformed() const { return rxMalformed_; }
+  uint32_t reassemblyTimeouts() const { return reassemblyTimeouts_; }
+  uint32_t bulkTimeouts() const { return bulkTimeouts_; }
 
 private:
-  static constexpr size_t RX_PACKET_MAX = 64;
+  // Queue complete ATT writes, not protocol fragments. NimBLE MTU is capped at
+  // 517, therefore an ATT payload cannot exceed this bound on supported builds.
+  static constexpr size_t RX_PACKET_MAX = 517;
   static constexpr uint8_t RX_QUEUE_SIZE = 4;
   // The reference reassembles fragmented FA02 writes before dispatch. Normal
   // media bulk stays near 4 KiB; alarm/program packets may grow to 8 KiB and
@@ -43,13 +50,12 @@ private:
 
   enum class RxChannel : uint8_t {
     FA02,
-    AudioFA02,
     AE01
   };
 
   struct RxPacket {
     RxChannel channel;
-    uint8_t length;
+    uint16_t length;
     uint8_t data[RX_PACKET_MAX];
   };
 
@@ -89,6 +95,8 @@ private:
   void enqueueFromCallback(NimBLECharacteristic* characteristic);
   bool dequeue(RxPacket& packet);
   void processPacket(const RxPacket& packet);
+  void processFA02Write(const uint8_t* data, size_t length);
+  void abortTransfers();
   void processFA02Complete(const uint8_t* data, size_t length, IDotMatrixReply& reply);
   void processAE01(const uint8_t* data, size_t length, IDotMatrixReply& reply);
   void sendFA03(const uint8_t* data, size_t length);
@@ -99,11 +107,12 @@ private:
   bool carouselTransferReady_ = false;
   bool initialized_ = false;
   bool advertising_ = false;
-  volatile bool connected_ = false;
+  bool connected_ = false;
+  volatile bool pendingConnectedState_ = false;
   volatile bool connectionEventPending_ = false;
   uint8_t deviceInfoPushesRemaining_ = 0;
   uint32_t deviceInfoPushAt_ = 0;
-  volatile bool restartAdvertising_ = false;
+  bool restartAdvertising_ = false;
   uint32_t restartAdvertisingAt_ = 0;
   uint8_t screenType_ = 0x01;
   char deviceName_[32] = "IDM-000000";
@@ -122,9 +131,18 @@ private:
   volatile uint8_t rxHead_ = 0;
   volatile uint8_t rxTail_ = 0;
   volatile uint8_t rxCount_ = 0;
-  volatile bool audioStreamActive_ = false;
+  // From here down, protocol state is owned exclusively by loop(). NimBLE
+  // callbacks only enqueue immutable ATT writes and connection events.
+  bool audioStreamActive_ = false;
   IDotMatrixFA02Assembler faAssembler_;
-  volatile uint32_t reassemblyLastWriteAt_ = 0;
+  uint32_t reassemblyLastWriteAt_ = 0;
+  uint32_t bulkLastProgressAt_ = 0;
   bool rawTransferReady_ = false;
   bool gifTransferReady_ = false;
+
+  volatile uint32_t rxDropped_ = 0;
+  volatile uint32_t rxOversize_ = 0;
+  uint32_t rxMalformed_ = 0;
+  uint32_t reassemblyTimeouts_ = 0;
+  uint32_t bulkTimeouts_ = 0;
 };

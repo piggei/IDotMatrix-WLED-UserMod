@@ -1,3 +1,63 @@
+## 0.8.2 - 2026-09-13 - Stable release
+
+- Promoted the hardware-qualified RC7 code line to stable Release 0.8.2.
+- Shortened the public WLED custom-effect name from `iDotMatrix Display` to `iDotMatrix`; the effect ID remains dynamically assigned by WLED.
+- Explicit iDotMatrix display acquisition now terminates any active WLED playlist and cancels a playlist preset already queued for WLED's deferred preset handler before selecting the framebuffer effect, preventing playlist state from immediately reclaiming the segment.
+- Hardware qualification confirmed clock styles 0..7 and blinking HH:MM separators, persistent Carousel playback and boot restore, Carousel-to-Carousel replacement, verified reset cleanup (`status:ok carousel:ok automation:ok`), alarms, programs/schedules, animated content, and local WLED AudioReactive input from an external microphone.
+- Retains the audited RC3 transport/storage fixes: single-owner FA02 assembly, complete ATT-write queuing, timeout/drop diagnostics, reusable per-slot GIF caches, transactional GIF replacement, filesystem recovery/capacity checks and bad-slot quarantine.
+- Retains the RC4-RC6 ownership fixes preventing Clock/TEXT/effect contamination during GIF staging and preventing Clock fallback during Carousel replacement.
+- Runtime identification is now `release=0.8.2`, `build=0.8.2`; app-facing Device Info remains `00 08`.
+- No new BLE command or ACK semantics were introduced by the stable promotion; playlist handling is entirely internal to WLED integration.
+
+> Historical entries below intentionally preserve names and build identifiers used by those development builds. In particular, `iDotMatrix Display` was the public WLED effect name before the final 0.8.2 rename to `iDotMatrix`.
+
+## 0.8.2-rc.7 - 2026-09-13 - Clock separator micro-positioning and blink
+
+- Ported the final clock-artwork micro-positioning requested from the emulator line.
+- Styles 0, 3, 5, 6 and 7 move the HH:MM colon two pixels to the right while DD/MM keeps the validated slash position.
+- Style 4 moves the HH:MM colon one pixel to the left.
+- Style 2 moves both hour digits and the first minute digit one pixel left; its separator and second minute digit stay fixed.
+- All HH:MM colons now blink with a 1-second cycle (500 ms visible, 500 ms hidden); date separators remain continuously visible.
+- Added exact-pixel host regressions for the affected coordinates and blink phases.
+- No changes to BLE transport, Carousel/cache, persistence, ACK semantics or the RC6 transition-ownership fix.
+
+## 0.8.2-rc.6 - 2026-09-13 - Carousel-to-Carousel transition ownership
+
+- Keeps logical iDotMatrix ownership while the official app replaces a Carousel bank, preventing the standalone Clock fallback from flashing between the old and new Carousel.
+- The update window intentionally renders neutral/blank rather than continuing a renderer whose storage/media is being retired.
+- Adds an 8-second abandoned-update fail-safe so a configure/upload session that never produces an asset cannot leave the display held blank indefinitely.
+- Retains the RC5 media-close-before-delete reset/configure fix unchanged.
+
+## 0.8.2-rc.5 - 2026-09-13 - Carousel reset/configure media-lifetime fix
+
+- Fixed protocol Reset reporting `status:partial` after Carousel GIF playback because the open GIF/frame-cache handle was released only after Carousel file deletion was attempted.
+- Carousel now releases active/pending GIF media before deleting its source/cache files during both Reset and Configure.
+- The release helper affects GIF ownership only, preserving unrelated Clock/TEXT live content when Carousel storage is reconfigured in the background.
+- `/json/info` protocol-reset diagnostics now report aggregate status plus `carousel:ok|fail` and `automation:ok|fail`.
+- Added host/package regressions for media-release ordering and non-GIF ownership preservation.
+
+## 0.8.2-rc.4 - 2026-09-13 - Carousel/GIF framebuffer ownership regression fix
+
+- Fixed Clock content continuing to update the framebuffer while the first Carousel GIF was in cold-cache staging.
+- Fixed animated/rainbow TEXT (and other procedural renderers) continuing to write into the shared framebuffer while a following GIF cache was being decoded, which could serialize stale pixels into the cached GIF itself.
+- Carousel now takes iDotMatrix display ownership immediately on entry; Clock settings remain available for fallback if no slot is playable.
+- Every GIF staging transition now suspends the previous framebuffer owner before cache generation, including TEXT -> GIF transitions inside an already-running Carousel and direct app content -> GIF transitions.
+- If GIF preparation fails, the previous logical iDotMatrix owner is restored where applicable.
+- GIF dwell timing now begins when cached GIF playback is actually active, so first-use cache generation no longer consumes the configured visible dwell interval.
+- Added host regressions for immediate Clock -> Carousel ownership transfer and animated TEXT -> stored-GIF staging isolation.
+
+## 0.8.2-rc.3 - 2026-09-12 - transport and storage robustness release candidate
+
+- Makes the WLED loop the sole owner of FA02 reassembly and transfer lifetime; NimBLE callbacks now enqueue complete ATT writes only.
+- Adds deterministic FA02/bulk inactivity cleanup, RX/drop diagnostics and normal-command routing after Audio/Rhythm traffic.
+- Reworks persistent Carousel GIF playback to reuse per-slot caches instead of rebuilding equivalent LittleFS data on every revisit.
+- Quarantines failed Carousel slots for the current bank generation so later valid assets continue playing without a hot retry loop.
+- Makes cached transient GIF replacement transactional: the previous known-good source/cache pair remains recoverable until the replacement is fully playable and committed.
+- Adds runtime filesystem capacity/reserve checks plus boot reconciliation of iDotMatrix-owned temp/backup files.
+- Verifies protocol-reset persistence cleanup and exposes partial failures diagnostically without changing captured BLE ACK semantics or rebooting WLED.
+- Keeps the observed open BLE compatibility profile; documentation now states explicitly that CRC is integrity checking, not authentication.
+- Adds/updates host regressions and separates behavioural, syntax/build, sanitizer, firmware-compile, hardware-functional and hardware-soak evidence.
+
 ## 0.8.2-rc.2 - 2026-09-12 - protocol convergence release candidate
 
 - Renumbered the pre-release line to public release 0.8.2; release 0.9 is reserved for the upcoming ESP32-S3/PSRAM/large-matrix/HUB75 hardware phase.
