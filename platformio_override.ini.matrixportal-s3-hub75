@@ -1,0 +1,35 @@
+; WLED iDotMatrix Usermod - 0.9.0-dev.1
+; Adafruit MatrixPortal ESP32-S3 + native WLED HUB75 + 64x64 iDotMatrix profile
+;
+; Target: WLED 0.17 development line using the official
+;         env:adafruit_matrixportal_esp32s3 environment.
+;
+; This profile deliberately inherits the exact WLED HUB75 board/pinout,
+; ESP-IDF 5.x stack, PSRAM setup, partition table and OTA policy from the
+; upstream MatrixPortal environment. It adds only iDotMatrix-specific flags,
+; NimBLE 2.x and the external Usermod.
+;
+; Expected hardware: Adafruit MatrixPortal S3 (8 MB flash / 2 MB PSRAM)
+;                    + one 64x64 HUB75 panel.
+;
+; The 64x64 iDotMatrix screen type is the default for a fresh configuration.
+; WLED's default usermods (currently including AudioReactive) are preserved.
+
+[env:adafruit_matrixportal_esp32s3_idotmatrix_64x64]
+extends = env:adafruit_matrixportal_esp32s3
+
+build_flags =
+  ${env:adafruit_matrixportal_esp32s3.build_flags}
+  -D IDOT_GIF_LZW12
+  -D IDOT_SCREEN_MAX_DIM=64
+  -D IDOT_DEFAULT_SCREEN_TYPE=0x04
+  -D IDOT_S3_HUB75_WLED_IDF5
+
+lib_deps =
+  ${env:adafruit_matrixportal_esp32s3.lib_deps}
+  h2zero/NimBLE-Arduino@2.5.1
+  bitbank2/AnimatedGIF@1.4.7
+
+custom_usermods =
+  ${common.default_usermods}
+  symlink://../wled-usermod-idotmatrix

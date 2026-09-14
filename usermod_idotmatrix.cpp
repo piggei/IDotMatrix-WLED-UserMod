@@ -10,6 +10,10 @@
 #include "IDotMatrixBuildProfile.h"
 #include "IDotMatrixAudioSource.h"
 
+#ifndef IDOT_DEFAULT_SCREEN_TYPE
+#define IDOT_DEFAULT_SCREEN_TYPE 0x01
+#endif
+
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp_system.h>
 #include <esp_heap_caps.h>
@@ -24,17 +28,27 @@
 #if defined(IDOT_C3_WLED_IDF5) && !defined(IDOT_NIMBLE_V2_API)
 #error "ESP32-C3 requires NimBLE-Arduino 2.x"
 #endif
-#if defined(IDOT_C3_WLED_IDF5)
+#if defined(IDOT_C3_WLED_IDF5) || defined(IDOT_S3_HUB75_WLED_IDF5)
 #include <esp_idf_version.h>
 #if ESP_IDF_VERSION_MAJOR < 5
-#error "ESP32-C3 requires ESP-IDF 5.x or newer"
+#error "This iDotMatrix IDF5 profile requires ESP-IDF 5.x or newer"
 #endif
 #endif
 
-static constexpr const char* IDOTMATRIX_RELEASE = "0.8.2";
-static constexpr const char* IDOTMATRIX_BUILD = "0.8.2";
+#if defined(IDOT_S3_HUB75_WLED_IDF5) && !defined(CONFIG_IDF_TARGET_ESP32S3)
+#error "IDOT_S3_HUB75_WLED_IDF5 is only valid for ESP32-S3 builds"
+#endif
+#if defined(IDOT_S3_HUB75_WLED_IDF5) && !defined(WLED_ENABLE_HUB75MATRIX)
+#error "ESP32-S3 iDotMatrix HUB75 profile requires WLED_ENABLE_HUB75MATRIX"
+#endif
+#if defined(IDOT_S3_HUB75_WLED_IDF5) && !defined(IDOT_NIMBLE_V2_API)
+#error "ESP32-S3 iDotMatrix HUB75 profile requires NimBLE-Arduino 2.x"
+#endif
+
+static constexpr const char* IDOTMATRIX_RELEASE = "0.9.0";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-dev.1";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
-static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x08;
+static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
 namespace {
 const char USERMOD_NAME[] PROGMEM = "iDotMatrix";
@@ -80,7 +94,7 @@ const char* resetReasonText(esp_reset_reason_t reason) {
 class IDotMatrixUsermod final : public Usermod {
 private:
   bool enabled_ = true;
-  uint8_t screenType_ = 0x01;
+  uint8_t screenType_ = IDOT_DEFAULT_SCREEN_TYPE;
   String deviceName_;
   bool rescale_ = false;
   int8_t buzzerPin_ = -1;
@@ -563,6 +577,19 @@ public:
     info.add(F("nimble=1.x API"));
 #endif
 #endif
+#if defined(IDOT_S3_HUB75_WLED_IDF5)
+    info.add(F("framework=WLED IDF5/HUB75"));
+    info.add(F("target=MatrixPortal-S3"));
+#if defined(IDOT_NIMBLE_V2_API)
+    info.add(F("nimble=2.x API"));
+#else
+    info.add(F("nimble=1.x API"));
+#endif
+#if defined(ARDUINO_ARCH_ESP32)
+    info.add(String(F("psram=")) + ESP.getPsramSize() +
+      F(" free=") + ESP.getFreePsram());
+#endif
+#endif
     info.add(String(F("profile=")) + String(renderer_.logicalWidth()) + 'x' + String(renderer_.logicalHeight()));
     info.add(String(F("canvas=")) + String(renderer_.width()) + 'x' + String(renderer_.height()));
     info.add(String(F("name=")) + deviceName_);
@@ -759,7 +786,7 @@ public:
 
     bool complete = true;
     complete &= getJsonValue(config[FPSTR(CFG_ENABLED)], enabled_, true);
-    complete &= getJsonValue(config[FPSTR(CFG_SCREEN_TYPE)], screenType_, uint8_t(0x01));
+    complete &= getJsonValue(config[FPSTR(CFG_SCREEN_TYPE)], screenType_, uint8_t(IDOT_DEFAULT_SCREEN_TYPE));
     complete &= getJsonValue(config[FPSTR(CFG_DEVICE_NAME)], deviceName_, defaultDeviceName());
 #if IDOT_SCREEN_MAX_DIM > 16
     complete &= getJsonValue(config[FPSTR(CFG_RESCALE)], rescale_, false);

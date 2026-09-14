@@ -1,3 +1,11 @@
+# 0.9.0 development priorities
+
+- Hardware-qualify MatrixPortal ESP32-S3 + native WLED HUB75 + 64x64.
+- Validate PSRAM direct AnimatedGIF playback under simultaneous Wi-Fi and BLE load.
+- Validate every iDotMatrix renderer at true 64x64 before making renderer-specific changes.
+- Validate Carousel, alarms, programs, reset and WLED ownership on the new target.
+- Investigate iOS BLE compatibility separately from the hardware migration.
+
 # Post-0.8.2 roadmap
 
 Release **0.8.2** is complete and stable for the currently qualified ESP32 / ESP32-C3 line.

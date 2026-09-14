@@ -1,3 +1,14 @@
+# 0.9 development line
+
+## 0.9.0-dev.1 - 2026-09-14 - MatrixPortal S3 / native HUB75 baseline
+
+- Starts the public 0.9 hardware generation from the clean 0.8.2 stable source tree.
+- Adds an official-WLED-0.17 MatrixPortal S3 wrapper for native HUB75, 64x64 and PSRAM.
+- Defaults the new target to iDotMatrix screen type 64x64 while preserving the existing protocol/rendering state machines.
+- Requires ESP-IDF 5.x and NimBLE-Arduino 2.x on this target.
+- Adds MatrixPortal/HUB75/PSRAM runtime markers for first-hardware qualification.
+- Does not include the temporary 0.8.2-diag.1 C3 power-off instrumentation.
+
 ## 0.8.2 - 2026-09-13 - Stable release
 
 - Promoted the hardware-qualified RC7 code line to stable Release 0.8.2.

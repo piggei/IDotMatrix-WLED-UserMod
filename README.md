@@ -1,3 +1,14 @@
+# Development line 0.9
+
+**Current development release: 0.9.0 / build 0.9.0-dev.1.**
+
+This branch starts the ESP32-S3 / PSRAM / native WLED HUB75 generation. The first
+target is the Adafruit MatrixPortal ESP32-S3 driving one 64x64 HUB75 panel on
+WLED 0.17. Stable 0.8.2 remains the recommended ESP32-C3 / 16x16 release.
+
+For the first 64x64 hardware build use
+`platformio_override.ini.matrixportal-s3-hub75`.
+
 # WLED iDotMatrix Usermod
 
 > **Release 0.8.2 / build 0.8.2:** stable release for the hardware-qualified ESP32/ESP32-C3 line, with protocol convergence, persistent Carousel support, optional AudioReactive input, and the audited transport/storage fixes validated through the 0.8.2 release-candidate cycle.

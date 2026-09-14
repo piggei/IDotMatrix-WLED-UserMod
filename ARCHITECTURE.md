@@ -599,3 +599,11 @@ temporary 16x16 legacy canvas on the stack and scale it immediately into the
 existing renderer canvas. There is no persistent second framebuffer. Animated
 visualizers are refreshed at an 80 ms cadence while `iDotMatrix` owns
 the selected segment; local AudioReactive data is sampled at a 40 ms cadence.
+
+## 0.9.0-dev.1 hardware transition
+
+The 0.9 development line keeps the stable 0.8.2 protocol and ownership architecture
+but moves the primary hardware target to Adafruit MatrixPortal ESP32-S3, WLED's
+native HUB75 backend, a 64x64 logical/physical matrix and PSRAM-backed direct GIF
+playback. HUB75 remains a WLED output backend; the Usermod continues to render into
+WLED's pixel/segment model rather than driving HUB75 pins directly.

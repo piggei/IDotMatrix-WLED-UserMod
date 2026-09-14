@@ -275,3 +275,23 @@ The repository distinguishes three different claims:
 The supported hardware baselines are the classic 4 MB ESP32 and the documented
 4 MB ESP32-C3 16x16 profile. ESP32-S3, PSRAM/direct 64x64, native physical 64x64,
 and HUB75 remain the next hardware-validation phase.
+
+## 0.9.0-dev.1: Adafruit MatrixPortal ESP32-S3 / native HUB75
+
+Use `platformio_override.ini.matrixportal-s3-hub75` with the WLED 0.17 development line.
+The profile extends WLED's official `env:adafruit_matrixportal_esp32s3`, preserving
+its native HUB75 flags, MatrixPortal pinout, ESP-IDF 5.x stack, 8 MB partitioning,
+2 MB PSRAM configuration and OTA policy. iDotMatrix adds LZW12, 64x64 profile
+capacity, a fresh-config default of screen type 64x64, NimBLE-Arduino 2.5.1 and
+the external Usermod.
+
+Build with:
+
+```bash
+cp ../wled-usermod-idotmatrix/platformio_override.ini.matrixportal-s3-hub75 platformio_override.ini
+pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
+```
+
+This is the preferred 0.9 development target. The older `platformio_override.ini.hub75`
+file remains a legacy WLED 16.x wrapper and must not be used for this MatrixPortal
+0.17 qualification.
