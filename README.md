@@ -1,6 +1,6 @@
 # Development line 0.9
 
-**Current development release: 0.9.0 / build 0.9.0-dev.1.**
+**Current development release: 0.9.0 / build 0.9.0-dev.2.**
 
 This branch starts the ESP32-S3 / PSRAM / native WLED HUB75 generation. The first
 target is the Adafruit MatrixPortal ESP32-S3 driving one 64x64 HUB75 panel on
@@ -225,17 +225,17 @@ On the validated 64x64 logical -> 16x16 physical setup, the compact workspace is
 with the current toolchain. The frame cache is capped at **512 KiB** and is
 removed when GIF playback ends.
 
-`rescale` is intended only for testing and protocol/decoder diagnostics when the
-selected logical iDotMatrix profile does not match the physical WLED matrix.
-For normal use, choose a logical profile matching the physical display and leave
-`rescale` disabled: deliberately loading 64x64 content onto a 16x16 panel cannot
-preserve the original detail.
+In the 0.9 native-matrix path, logical iDotMatrix resolution and physical WLED
+matrix resolution are independent. Every 16x16, 32x32 and 64x64 combination is
+scaled automatically: nearest-neighbour for enlargement, box averaging for
+reduction, and a direct path when dimensions match. This allows, for example,
+16x16 or 32x32 app profiles to fill a 64x64 HUB75 panel and a 64x64 logical
+profile to drive a future 32x32 physical panel.
 
-With `rescale=true`, logical protocol dimensions and renderer storage are
-separate. A 64x64 logical profile driving a 16x16 WLED matrix stores a 16x16 RGB
-canvas (**768 bytes**) instead of a 64x64 RGB canvas (**12,288 bytes**). RAW data
-and GIF scanlines are sampled directly into the smaller storage canvas, avoiding
-a second full logical framebuffer.
+The historical `rescale` setting is retained for compatibility with low-memory
+0.8-era profiles. When enabled there, logical protocol dimensions and renderer
+storage may be separated so a 64x64 logical source can be sampled directly into
+a smaller physical canvas without allocating a second full logical framebuffer.
 
 The full rationale, failed experiments, memory measurements, and safety rules are
 documented in [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -534,3 +534,7 @@ The licence was chosen to align this WLED usermod with the current licensing of
 WLED, which is distributed under EUPL v1.2 or later. WLED remains copyright of
 Christian Schwinne and the individual WLED contributors. Third-party dependencies
 used by this project remain subject to their respective licences.
+
+### Automatic native-matrix upscale
+
+In the 0.9 line, an iDotMatrix logical profile smaller than the selected WLED 2D matrix is automatically enlarged at output using nearest-neighbour sampling. This makes 16x16 -> 32x32, 16x16 -> 64x64 and 32x32 -> 64x64 normal supported display paths. The legacy `rescale` switch remains for deliberate logical-downscale tests.

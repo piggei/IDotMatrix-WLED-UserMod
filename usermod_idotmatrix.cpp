@@ -46,7 +46,7 @@
 #endif
 
 static constexpr const char* IDOTMATRIX_RELEASE = "0.9.0";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-dev.1";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-dev.2";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -592,6 +592,33 @@ public:
 #endif
     info.add(String(F("profile=")) + String(renderer_.logicalWidth()) + 'x' + String(renderer_.logicalHeight()));
     info.add(String(F("canvas=")) + String(renderer_.width()) + 'x' + String(renderer_.height()));
+    {
+      String scaleLine = String(F("output=")) + adapter_.targetWidth() + 'x' + adapter_.targetHeight();
+      if (adapter_.autoUpscaleActive()) {
+        scaleLine += F(" scale=auto-up");
+        if (renderer_.width() > 0 && renderer_.height() > 0 &&
+            adapter_.targetWidth() % renderer_.width() == 0 &&
+            adapter_.targetHeight() % renderer_.height() == 0) {
+          scaleLine += ':';
+          scaleLine += adapter_.targetWidth() / renderer_.width();
+          scaleLine += 'x';
+          scaleLine += adapter_.targetHeight() / renderer_.height();
+        }
+      } else if (adapter_.autoDownscaleActive()) {
+        scaleLine += F(" scale=auto-down");
+        if (adapter_.targetWidth() > 0 && adapter_.targetHeight() > 0 &&
+            renderer_.width() % adapter_.targetWidth() == 0 &&
+            renderer_.height() % adapter_.targetHeight() == 0) {
+          scaleLine += ':';
+          scaleLine += renderer_.width() / adapter_.targetWidth();
+          scaleLine += 'x';
+          scaleLine += renderer_.height() / adapter_.targetHeight();
+        }
+      } else {
+        scaleLine += adapter_.dimensionsMatch() ? F(" scale=1x1") : F(" scale=auto-mixed");
+      }
+      info.add(scaleLine);
+    }
     info.add(String(F("name=")) + deviceName_);
     info.add(String(F("release=")) + IDOTMATRIX_RELEASE);
     info.add(String(F("build=")) + IDOTMATRIX_BUILD);

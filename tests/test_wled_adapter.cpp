@@ -430,17 +430,71 @@ int main() {
   assert(strip.segmentRef().colorAt(0, 0) == RGBW32(41, 42, 43, 0));
   assert(strip.segmentRef().colorAt(15, 15) == RGBW32(91, 92, 93, 0));
 
-  // A profile/segment mismatch is black in strict mode and nearest-neighbour
-  // sampled only when rescale is explicitly enabled.
+  // 0.9 native-matrix behavior: logical and physical dimensions are
+  // independent. Every 16/32/64 combination scales automatically.
+  adapter.setRescaleEnabled(false);
+
+  // 64 -> 32: box-average a 2x2 source block into one destination pixel.
   assert(renderer.begin(0x04));
-  const uint8_t scaledPixel[] = {4, 8};
-  adapter.onGraffitiPixels(90, 80, 70, scaledPixel, sizeof(scaledPixel));
+  strip.segmentRef().width = 32;
+  strip.segmentRef().height = 32;
+  const uint8_t down64to32[] = {2, 2};
+  adapter.onGraffitiPixels(100, 80, 60, down64to32, sizeof(down64to32));
   strip.renderEffect();
   assert(!adapter.dimensionsMatch());
-  assert(strip.segmentRef().colorAt(1, 2) == BLACK);
-  adapter.setRescaleEnabled(true);
+  assert(!adapter.autoUpscaleActive());
+  assert(adapter.autoDownscaleActive());
+  assert(strip.segmentRef().colorAt(1, 1) == RGBW32(25, 20, 15, 0));
+
+  // 64 -> 16: a 4x4 source block is reduced to one destination pixel.
+  strip.segmentRef().width = 16;
+  strip.segmentRef().height = 16;
   strip.renderEffect();
-  assert(strip.segmentRef().colorAt(1, 2) == RGBW32(90, 80, 70, 0));
+  assert(adapter.autoDownscaleActive());
+  assert(strip.segmentRef().colorAt(0, 0) == RGBW32(6, 5, 3, 0));
+
+  // 32 -> 16: verify the remaining physical-downscale combination.
+  assert(renderer.begin(0x03));
+  const uint8_t down32to16[] = {2, 2};
+  adapter.onGraffitiPixels(100, 80, 60, down32to16, sizeof(down32to16));
+  strip.renderEffect();
+  assert(adapter.autoDownscaleActive());
+  assert(strip.segmentRef().colorAt(1, 1) == RGBW32(25, 20, 15, 0));
+
+  // 16 -> 64: nearest-neighbour expansion produces a crisp 4x4 block.
+  assert(renderer.begin(0x01));
+  strip.segmentRef().width = 64;
+  strip.segmentRef().height = 64;
+  const uint8_t upscaledPixel[] = {1, 2};
+  adapter.onGraffitiPixels(10, 20, 30, upscaledPixel, sizeof(upscaledPixel));
+  strip.renderEffect();
+  assert(!adapter.dimensionsMatch());
+  assert(adapter.autoUpscaleActive());
+  assert(!adapter.autoDownscaleActive());
+  for (uint16_t y = 8; y < 12; ++y) {
+    for (uint16_t x = 4; x < 8; ++x) {
+      assert(strip.segmentRef().colorAt(x, y) == RGBW32(10, 20, 30, 0));
+    }
+  }
+
+  // 16 -> 32 and 32 -> 64 use the same automatic upscale path.
+  strip.segmentRef().width = 32;
+  strip.segmentRef().height = 32;
+  strip.renderEffect();
+  assert(adapter.autoUpscaleActive());
+  assert(strip.segmentRef().colorAt(2, 4) == RGBW32(10, 20, 30, 0));
+
+  assert(renderer.begin(0x03));
+  strip.segmentRef().width = 64;
+  strip.segmentRef().height = 64;
+  const uint8_t up32to64[] = {3, 5};
+  adapter.onGraffitiPixels(40, 50, 60, up32to64, sizeof(up32to64));
+  strip.renderEffect();
+  assert(adapter.autoUpscaleActive());
+  assert(strip.segmentRef().colorAt(6, 10) == RGBW32(40, 50, 60, 0));
+
+  strip.segmentRef().width = 16;
+  strip.segmentRef().height = 16;
 
   // Switching to a normal WLED effect through the UI/API must release any
   // active iDotMatrix media state even though no BLE content command arrived.

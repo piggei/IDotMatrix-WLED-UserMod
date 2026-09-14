@@ -1,3 +1,10 @@
+## 0.9.0-dev.2 - 2026-09-15 - automatic native-matrix profile scaling
+
+- Separated normal logical iDotMatrix profile size from larger physical WLED 2D output size.
+- Added automatic nearest-neighbour upscale for 16->32, 16->64 and 32->64 paths.
+- Preserved explicit `rescale` semantics for logical-downscale compatibility tests.
+- Added output-scaling diagnostics and host regression coverage.
+
 # 0.9 development line
 
 ## 0.9.0-dev.1 - 2026-09-14 - MatrixPortal S3 / native HUB75 baseline

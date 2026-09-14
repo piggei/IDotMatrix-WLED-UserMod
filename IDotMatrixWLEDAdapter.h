@@ -139,6 +139,11 @@ public:
   uint8_t textSpeed() const { return renderer_.textSpeed(); }
   bool rescaleEnabled() const { return rescaleEnabled_; }
   bool dimensionsMatch() const { return dimensionsMatch_; }
+  uint16_t targetWidth() const { return targetWidth_; }
+  uint16_t targetHeight() const { return targetHeight_; }
+  bool autoUpscaleActive() const { return autoUpscaleActive_; }
+  bool autoDownscaleActive() const { return autoDownscaleActive_; }
+  bool autoScaleActive() const { return autoUpscaleActive_ || autoDownscaleActive_; }
   uint32_t protocolResetCount() const { return protocolResetCount_; }
 
 private:
@@ -183,6 +188,8 @@ private:
   bool textLoadReady_ = false;
   bool rescaleEnabled_ = false;
   bool dimensionsMatch_ = false;
+  bool autoUpscaleActive_ = false;
+  bool autoDownscaleActive_ = false;
   uint8_t displayEffectId_ = 0xFF;
   uint8_t displayEffectSegmentId_ = 0xFF;
   bool displayEffectObserved_ = false;

@@ -317,12 +317,13 @@ original-device protocol requirement.
 ## Logical-to-physical mapping
 
 **WLED integration decision:** `screenType` selects the advertised logical
-profile. Renderer storage may use the smaller physical matrix dimensions when
-the test-only rescale option is enabled. The physical output size comes from the selected
-WLED 2D segment. With `rescale=false`, unequal sizes are blocked and produce black. With
-`rescale=true`, nearest-neighbour sampling maps the complete logical canvas to
-the segment. WLED remains responsible for panel layout, rotation, mirroring,
-grouping, and serpentine wiring.
+profile while the physical output size comes from the selected WLED 2D segment.
+On the 0.9 native-matrix path, unequal logical/physical 16x16, 32x32 and 64x64
+sizes are mapped automatically. Upscale uses nearest-neighbour replication;
+downscale uses box averaging; equal sizes are copied 1:1. WLED remains
+responsible for panel layout, rotation, mirroring, grouping, and serpentine
+wiring. The historical `rescale` option is retained for legacy low-memory
+storage profiles rather than as a prerequisite for output scaling.
 
 `screenType` is also bounded by the decoder profile compiled into the firmware:
 

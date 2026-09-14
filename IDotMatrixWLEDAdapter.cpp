@@ -1147,6 +1147,10 @@ void IDotMatrixWLEDAdapter::renderCanvasToSegment() {
   targetHeight_ = SEG_H;
   dimensionsMatch_ = renderer_.width() == targetWidth_ &&
     renderer_.height() == targetHeight_;
+  autoUpscaleActive_ = !dimensionsMatch_ &&
+    targetWidth_ >= renderer_.width() && targetHeight_ >= renderer_.height();
+  autoDownscaleActive_ = !dimensionsMatch_ &&
+    targetWidth_ <= renderer_.width() && targetHeight_ <= renderer_.height();
 
   if (!renderer_.isReady() || !renderer_.isVisible() ||
       targetWidth_ == 0 || targetHeight_ == 0 ||
@@ -1161,16 +1165,60 @@ void IDotMatrixWLEDAdapter::renderCanvasToSegment() {
   SEGMENT.fill(BLACK);
   const IDotMatrixRenderer::Pixel* pixels = renderer_.pixels();
 
-  if (!dimensionsMatch_ && !rescaleEnabled_) return;
+  // 0.9 native-matrix rule: logical and physical matrix sizes are independent.
+  // Every supported 16/32/64 combination is scaled automatically. Upscaling
+  // uses nearest-neighbour replication so pixel-art edges remain crisp.
+  // Downscaling uses a box average so thin details contribute to the output
+  // instead of disappearing simply because the destination grid skipped them.
+  if (!dimensionsMatch_) {
+    const uint16_t sourceWidth = renderer_.width();
+    const uint16_t sourceHeight = renderer_.height();
 
-  if (rescaleEnabled_) {
+    const bool downscale = targetWidth_ < sourceWidth || targetHeight_ < sourceHeight;
+    if (!downscale) {
+      for (uint16_t y = 0; y < targetHeight_; ++y) {
+        const uint16_t sourceY = uint32_t(y) * sourceHeight / targetHeight_;
+        for (uint16_t x = 0; x < targetWidth_; ++x) {
+          const uint16_t sourceX = uint32_t(x) * sourceWidth / targetWidth_;
+          const IDotMatrixRenderer::Pixel& pixel =
+            pixels[size_t(sourceY) * sourceWidth + sourceX];
+          SEGMENT.setPixelColorXY(x, y, RGBW32(pixel.red, pixel.green, pixel.blue, 0));
+        }
+      }
+      return;
+    }
+
     for (uint16_t y = 0; y < targetHeight_; ++y) {
-      const uint16_t sourceY = uint32_t(y) * renderer_.height() / targetHeight_;
+      const uint16_t sourceY0 = uint32_t(y) * sourceHeight / targetHeight_;
+      uint16_t sourceY1 = uint32_t(y + 1u) * sourceHeight / targetHeight_;
+      if (sourceY1 <= sourceY0) sourceY1 = sourceY0 + 1u;
+      if (sourceY1 > sourceHeight) sourceY1 = sourceHeight;
+
       for (uint16_t x = 0; x < targetWidth_; ++x) {
-        const uint16_t sourceX = uint32_t(x) * renderer_.width() / targetWidth_;
-        const IDotMatrixRenderer::Pixel& pixel =
-          pixels[size_t(sourceY) * renderer_.width() + sourceX];
-        SEGMENT.setPixelColorXY(x, y, RGBW32(pixel.red, pixel.green, pixel.blue, 0));
+        const uint16_t sourceX0 = uint32_t(x) * sourceWidth / targetWidth_;
+        uint16_t sourceX1 = uint32_t(x + 1u) * sourceWidth / targetWidth_;
+        if (sourceX1 <= sourceX0) sourceX1 = sourceX0 + 1u;
+        if (sourceX1 > sourceWidth) sourceX1 = sourceWidth;
+
+        uint32_t red = 0;
+        uint32_t green = 0;
+        uint32_t blue = 0;
+        uint32_t samples = 0;
+        for (uint16_t sy = sourceY0; sy < sourceY1; ++sy) {
+          for (uint16_t sx = sourceX0; sx < sourceX1; ++sx) {
+            const IDotMatrixRenderer::Pixel& pixel =
+              pixels[size_t(sy) * sourceWidth + sx];
+            red += pixel.red;
+            green += pixel.green;
+            blue += pixel.blue;
+            ++samples;
+          }
+        }
+        if (samples == 0) samples = 1;
+        SEGMENT.setPixelColorXY(
+          x, y,
+          RGBW32(uint8_t(red / samples), uint8_t(green / samples), uint8_t(blue / samples), 0)
+        );
       }
     }
     return;

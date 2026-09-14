@@ -80,6 +80,11 @@ keeping a second full animation framebuffer.
 
 Large pixel allocations prefer PSRAM when it is present.
 
+For the 0.9 native-matrix path, output scaling is automatic and bidirectional.
+Logical 16/32/64 canvases may target physical 16/32/64 WLED matrices. Enlargement
+uses nearest-neighbour replication; reduction uses box averaging. This output
+policy is separate from the historical low-memory `rescale=true` storage mode.
+
 ### `IDotMatrixMedia`
 
 Owns compact PNG decoding, GIF RX/PLAY files, decoder lifetime, and the optional
@@ -607,3 +612,7 @@ but moves the primary hardware target to Adafruit MatrixPortal ESP32-S3, WLED's
 native HUB75 backend, a 64x64 logical/physical matrix and PSRAM-backed direct GIF
 playback. HUB75 remains a WLED output backend; the Usermod continues to render into
 WLED's pixel/segment model rather than driving HUB75 pins directly.
+
+## 0.9 native-matrix scaling
+
+The iDotMatrix profile defines the logical protocol/rendering canvas, while WLED defines the physical 2D output. A smaller logical canvas is automatically nearest-neighbour upscaled at the final WLED segment emission stage. This preserves one renderer/protocol path for Clock, TEXT, images, GIF and procedural content and keeps WLED responsible for physical panel mapping. Explicit `rescale` remains required only for downscaling a larger logical profile onto a smaller physical matrix.
