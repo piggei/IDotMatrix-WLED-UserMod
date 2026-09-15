@@ -131,7 +131,7 @@ pin maps:
 | `esp32dev_hub75_idotmatrix` | `esp32dev_hub75` | classic ESP32, WLED default HUB75 pinout | pending |
 | `esp32dev_hub75_forum_pinout_idotmatrix` | `esp32dev_hub75_forum_pinout` | classic ESP32, SmartMatrix/forum pinout | pending |
 | `esp32s3dev_4MB_qspi_hub75_idotmatrix` | `esp32s3dev_4MB_qspi_hub75` | Huidu HD-WF2 profile; WLED explicitly removes PSRAM for this target | pending; memory-constrained |
-| `adafruit_matrixportal_esp32s3_idotmatrix` | `adafruit_matrixportal_esp32s3` | Adafruit MatrixPortal ESP32-S3 | pending |
+| `adafruit_matrixportal_esp32s3_idotmatrix` | `adafruit_matrixportal_esp32s3` | Adafruit MatrixPortal ESP32-S3 | **hardware-validated on WLED 0.17 beta, native 64x64 HUB75 + PSRAM** |
 | `esp32s3dev_16MB_opi_hub75_idotmatrix` | `esp32s3dev_16MB_opi_hub75` | MOONHUB / LilyGo T7-S3 | pending; preferred PSRAM-class test target |
 | `waveshare_esp32s3_32MB_hub75_idotmatrix` | `waveshare_esp32s3_32MB_hub75` | Waveshare ESP32-S3-RGB-Matrix | pending |
 
@@ -272,9 +272,7 @@ The repository distinguishes three different claims:
 - **hardware-validated**: the resulting firmware has been exercised on the
   corresponding physical controller/display configuration.
 
-The supported hardware baselines are the classic 4 MB ESP32 and the documented
-4 MB ESP32-C3 16x16 profile. ESP32-S3, PSRAM/direct 64x64, native physical 64x64,
-and HUB75 remain the next hardware-validation phase.
+The supported stable 0.8.2 baselines remain the classic 4 MB ESP32 and the documented 4 MB ESP32-C3 16x16 profile. In the 0.9 development line, Adafruit MatrixPortal ESP32-S3 with 2 MB PSRAM and native WLED HUB75 has now been hardware-validated on a physical 64x64 panel, including logical 64x64, 32x32 -> 64x64 and 16x16 -> 64x64 operation.
 
 ## 0.9.0-dev.1: Adafruit MatrixPortal ESP32-S3 / native HUB75
 
@@ -292,6 +290,4 @@ cp ../wled-usermod-idotmatrix/platformio_override.ini.matrixportal-s3-hub75 plat
 pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
 
-This is the preferred 0.9 development target. The older `platformio_override.ini.hub75`
-file remains a legacy WLED 16.x wrapper and must not be used for this MatrixPortal
-0.17 qualification.
+This is the preferred and hardware-validated 0.9 development target. The older `platformio_override.ini.hub75` file remains a legacy WLED 16.x wrapper and must not be used for this MatrixPortal 0.17 qualification. Hardware validation through build `0.9.0-dev.5` covered native 64x64 HUB75 output, BLE/NimBLE 2.x, direct AnimatedGIF playback from PSRAM, persistent Carousel content, TEXT including the 32x64 glyph path, and logical 32x32/16x16 profiles automatically upscaled to the physical 64x64 panel.

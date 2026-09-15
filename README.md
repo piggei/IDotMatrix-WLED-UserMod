@@ -1,6 +1,6 @@
 # Development line 0.9
 
-**Current development release: 0.9.0 / build 0.9.0-dev.2.**
+**Current development release: 0.9.0 / build 0.9.0-dev.12.**
 
 This branch starts the ESP32-S3 / PSRAM / native WLED HUB75 generation. The first
 target is the Adafruit MatrixPortal ESP32-S3 driving one 64x64 HUB75 panel on
@@ -39,7 +39,7 @@ GIF replacement, strict framebuffer ownership during GIF staging (preventing
 Clock/TEXT bleed into cold caches), filesystem recovery/capacity checks, reset
 verification, and WLED-playlist termination when iDotMatrix explicitly takes
 display ownership.
-ESP32-S3, HUB75 and the unknown third 64x64 TEXT format remain pending.
+ESP32-S3, native HUB75, PSRAM and 16/32/64 logical-profile output scaling are hardware-validated on MatrixPortal S3. Build 0.9.0-dev.12 keeps the validated transfer artwork and Carousel diagnostics, and fixes the indeterminate left/right activity bar by explicitly scheduling periodic WLED redraws while an upload is active. Hardware diagnostics proved that the setup packet describes the full 12-slot bank rather than the real session asset count, so the firmware deliberately avoids presenting a false percentage. The bar fills completely only when the upload quiet-period confirms session completion.
 
 The new audio-source setting has three modes:
 
@@ -97,8 +97,9 @@ The 0.8.2 C3 qualification additionally covered persistent mixed Carousel playba
 | 16x16 logical / 16x16 physical, ESP32-C3 4 MB | `compact12/cache` | **supported and hardware-validated on IDF5/shared-RMT** |
 | 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | hardware-validated |
 | 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` | `compact12/cache` | hardware-validated |
-| 64x64 with PSRAM | `animatedgif12/psram` | implemented; hardware validation pending |
-| ESP32-S3 / native physical 64x64 / HUB75 | depends on build | development work for the next release line |
+| 64x64 logical / 64x64 physical, MatrixPortal ESP32-S3 + PSRAM | `animatedgif12/psram` | **hardware-validated on WLED 0.17 beta / native HUB75** |
+| 32x32 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 2x nearest-neighbour upscale** |
+| 16x16 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 4x nearest-neighbour upscale** |
 
 ### Compiled resolution and settings choices
 
@@ -112,10 +113,9 @@ firmware. The settings page never offers a profile larger than that capacity:
 | `platformio_override.ini.c3-audio` / same media profile + AudioReactive | 16x16 | hidden and forced off |
 | `platformio_override.ini.32x32` / LZW11 | 16x16, 32x32 | available for tests |
 | `.64x64` or `.64x64-lite` / LZW12 | 16x16, 32x32, 64x64 | available for tests |
+| `platformio_override.ini.matrixportal-s3-hub75` / LZW12 + PSRAM | 16x16, 32x32, 64x64 | automatic physical-output scaling; primary 0.9 target |
 
-For normal use select the `ScreenType` matching the physical WLED matrix.
-`Rescale` exists for deliberate larger-logical-profile tests, not to preserve
-32x32/64x64 detail on a 16x16 panel.
+On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile and may differ from the physical WLED matrix. Output scaling is automatic in both directions for 16x16, 32x32 and 64x64 logical/physical combinations. `Rescale` is retained for backward compatibility with the older low-memory 0.8.x storage path, not as a requirement for 0.9 output scaling.
 
 ## Supported functionality
 
@@ -452,9 +452,7 @@ more flash writes than the PSRAM/direct backend. The cache has a 512 KiB limit.
 
 ### Validation boundaries
 
-The automatic PSRAM direct backend is implemented but has not yet been tested on
-the pending PSRAM hardware. Native physical 64x64 output and HUB75 DMA are also
-outside the 0.8.2 release-validation matrix.
+The PSRAM/direct backend, native physical 64x64 output and WLED native HUB75 DMA remain outside the 0.8.2 stable release matrix, but are hardware-validated in the 0.9 development line on Adafruit MatrixPortal ESP32-S3 with one physical 64x64 HUB75 panel. Validation includes native 64x64 operation plus logical 32x32 -> 64x64 and 16x16 -> 64x64 automatic upscale, BLE, direct AnimatedGIF/PSRAM playback, Carousel, TEXT including the 32x64 glyph path, and WLED/iDotMatrix ownership transitions.
 
 ## Repository layout
 

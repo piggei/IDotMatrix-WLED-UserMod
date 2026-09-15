@@ -1,10 +1,12 @@
 # 0.9.0 development priorities
 
-- Hardware-qualify MatrixPortal ESP32-S3 + native WLED HUB75 + 64x64.
-- Validate PSRAM direct AnimatedGIF playback under simultaneous Wi-Fi and BLE load.
-- Validate every iDotMatrix renderer at true 64x64 before making renderer-specific changes.
-- Validate Carousel, alarms, programs, reset and WLED ownership on the new target.
-- Investigate iOS BLE compatibility separately from the hardware migration.
+- [x] Hardware-qualify MatrixPortal ESP32-S3 + native WLED HUB75 + physical 64x64.
+- [x] Validate PSRAM direct AnimatedGIF playback with Wi-Fi and BLE active.
+- [x] Validate the main iDotMatrix visual paths at true 64x64, including TEXT, 32x64 glyphs, GIF, Carousel and procedural TEXT effects.
+- [x] Validate automatic logical 32x32 -> physical 64x64 and logical 16x16 -> physical 64x64 output scaling.
+- [ ] Validate physical 32x32 combinations on real hardware when a 32x32 panel is available.
+- [ ] Continue Carousel/alarm/program/reset soak testing on the new target as the 0.9 line matures.
+- [ ] Investigate iOS BLE compatibility separately from the hardware migration.
 
 # Post-0.8.2 roadmap
 
@@ -37,11 +39,12 @@ Build:   0.8.2
 
 Release 0.9 is intentionally reserved for the new-hardware phase. Items in this section are not 0.8.2 regressions and should not be back-ported without a specific reason.
 
-- bring up ESP32-S3 when the target board is available and establish the PSRAM allocation policy from real measurements;
-- validate native larger matrices, including physical 64x64 operation;
-- evaluate and integrate the separate native WLED HUB75-output work;
-- validate the PSRAM/direct GIF path on real hardware;
-- identify the still-unknown third 64x64 TEXT format from original-hardware captures.
+- [x] bring up ESP32-S3 on Adafruit MatrixPortal and establish the PSRAM allocation policy from real measurements;
+- [x] validate native physical 64x64 operation;
+- [x] use WLED 0.17 native HUB75 as the physical output backend;
+- [x] validate the PSRAM/direct GIF path on real hardware;
+- [x] implement and hardware-validate the 32x64 / 256-byte glyph path used by the app's 64-pixel TEXT size;
+- [ ] validate the corresponding downscale combinations on a physical 32x32 panel when hardware is available.
 
 ## Deferred hardening / maintenance
 
@@ -56,3 +59,5 @@ Release 0.9 is intentionally reserved for the new-hardware phase. Items in this 
 ## Development rule
 
 Protocol/function changes should continue to be introduced only after they are understood from captures or validated in the standalone ESP32 emulator. The official iDotMatrix app/original-device wire behaviour remains the compatibility reference.
+
+- [ ] Reuse the dev.7 transfer-indicator infrastructure for long standalone/gallery GIF uploads after Carousel hardware validation.

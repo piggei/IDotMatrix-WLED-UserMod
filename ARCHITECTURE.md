@@ -342,8 +342,7 @@ When PSRAM is detected, the full AnimatedGIF 12-bit path is selected. The
 allocator first requests PSRAM for the decoder object. This preserves direct
 playback and avoids LittleFS frame-cache writes.
 
-This path is implemented in 0.7.1 but awaits hardware validation on the pending
-PSRAM board.
+This path is hardware-validated in the 0.9 development line on Adafruit MatrixPortal ESP32-S3 with 2 MB PSRAM and WLED 0.17 native HUB75 output. Repeated animated GIF transfers and Carousel playback use `animatedgif12/psram` without the no-PSRAM frame-cache path.
 
 ### 64x64 without PSRAM
 
@@ -615,4 +614,12 @@ WLED's pixel/segment model rather than driving HUB75 pins directly.
 
 ## 0.9 native-matrix scaling
 
-The iDotMatrix profile defines the logical protocol/rendering canvas, while WLED defines the physical 2D output. A smaller logical canvas is automatically nearest-neighbour upscaled at the final WLED segment emission stage. This preserves one renderer/protocol path for Clock, TEXT, images, GIF and procedural content and keeps WLED responsible for physical panel mapping. Explicit `rescale` remains required only for downscaling a larger logical profile onto a smaller physical matrix.
+The iDotMatrix profile defines the logical protocol/rendering canvas, while WLED defines the physical 2D output. Output scaling is automatic and bidirectional at the final WLED segment emission stage for the 16x16, 32x32 and 64x64 profile family: enlargement uses nearest-neighbour replication and reduction uses box averaging. This preserves one renderer/protocol path for Clock, TEXT, images, GIF and procedural content and keeps WLED responsible for physical panel mapping. The historical `rescale` setting is retained for compatibility with the older low-memory storage path; it is not required for 0.9 native output scaling.
+
+## Transfer status rendering (0.9.0-dev.8)
+
+Carousel replacement uses a procedural status layer owned by `IDotMatrixWLEDAdapter`. `IDotMatrixCarousel` reports transfer activity to the adapter. Hardware validation showed that the Device Assets setup count is the physical 12-slot bank/order count, not the number of assets in the current upload, so it must not be used as a percentage denominator. The adapter renders a canonical 16x16 red downward arrow and blue receiving tray, scaled by exact integer factors for 32x32/64x64. The bar is indeterminate while the upload session is active and is filled only when the quiet-period confirms completion.
+
+The protocol provides the length of the current asset only; it does not announce the byte lengths of future Carousel assets before their transfers begin. Therefore exact whole-bank byte progress cannot be computed. Dev.7 uses an asset-weighted global estimate: each configured asset has equal weight, and the current asset contributes `receivedBytes / currentAssetBytes` within its share. Completed slots are tracked with a transient bitmask so a retry cannot advance the global counter twice.
+
+The layer remains delayed by 250 ms to avoid flashes on short transfers and is automatically scaled by the existing 16/32/64 logical-to-physical output adapter. The adapter API remains generic so long standalone GIF transfers can reuse the same renderer later without introducing a second loading implementation.

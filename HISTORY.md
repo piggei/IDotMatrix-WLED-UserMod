@@ -1,3 +1,74 @@
+## 0.9.0-dev.12 - 2026-09-15 - Transfer activity refresh fix
+
+- Fixed the indeterminate Carousel activity bar remaining at its initial position on real 16x16 and 64x64 tests.
+- The adapter now requests a WLED redraw every 70 ms while the delayed transfer indicator is visible, making the animation independent of BLE chunk timing.
+- Transfer artwork and completion semantics are unchanged from dev.11.
+
+## 0.9.0-dev.11 - 2026-09-15 - Indeterminate Carousel activity bar
+
+- Hardware diagnostics with a seven-image upload confirmed that `carouselCfg=count:12` represents the complete Carousel slot bank, while only slots 0..6 were actually transferred.
+- Replaced the static pending status line with a short green activity segment that sweeps left and right.
+- The indicator is intentionally non-determinate and therefore never claims an upload percentage that the protocol cannot provide.
+- The bar still fills completely once the quiet-period confirms transfer-session completion.
+- Preserved the validated 16x16 artwork, the dedicated native 64x64 artwork, and the `carouselCfg` / `carouselUpload` diagnostics.
+
+## 0.9.0-dev.10 - 2026-09-15 - Carousel upload-count diagnostics
+
+- Raised the validated 16x16 transfer arrow and tray by one logical pixel to leave a clear gap above the status bar.
+- Replaced the indeterminate moving transfer bar with a static pending baseline; 100% is still shown only after the Carousel quiet-period confirms session completion.
+- Added `/json/info` diagnostics for the configured Carousel order and the actual asset slots begun/completed during the current upload session.
+- Purpose: determine whether the app exposes the true session asset count before implementing a determinate global progress bar.
+
+## 0.9.0-dev.8 - 2026-09-15 - Carousel transfer UI correction
+
+- Corrected the transfer-progress model after hardware validation proved that `configuredCount` is the 12-slot bank/order count, not the number of assets in the current upload.
+- Replaced the misleading percentage with a global indeterminate session bar and a brief 100% completion confirmation after the upload quiet-period.
+- Replaced the transfer icon with the user-supplied 16x16 design: fixed blue tray plus red arrow translating downward only; 32x32 and 64x64 use exact integer scaling.
+- Added host regression coverage for the canonical artwork and completion-bar state.
+
+## 0.9.0-dev.7 - 2026-09-15 - Carousel global progress and transfer icon refinement
+
+- Reworked the transfer status artwork after physical-panel review: the previous arrow/display silhouette has been replaced by a detached animated data packet falling into a recognisable matrix/display icon.
+- Carousel progress is now global across the configured replacement bank instead of restarting visually for every GIF/text asset.
+- The protocol does not expose the sizes of assets that have not started yet, so each configured Carousel asset contributes equal weight; the currently transferred asset contributes its real received-byte fraction.
+- Completed Carousel slots are tracked as a transient per-update bitmask, so retries do not double-count progress.
+- The 250 ms anti-flash threshold, iDotMatrix ownership rules and 16/32/64 logical scaling remain unchanged.
+- Added host regression coverage for the global-progress calculation on the rendered framebuffer.
+
+## 0.9.0-dev.6 - 2026-09-15 - Carousel transfer indicator
+
+- Added a procedural, language-neutral transfer/loading renderer for Carousel uploads.
+- The indicator uses an animated down-arrow, matrix glyph and current-asset progress bar and is generated directly by the framebuffer renderer, with no PNG/GIF asset dependency.
+- Added a 250 ms visibility threshold so short uploads do not flash a transient status frame.
+- The indicator keeps iDotMatrix display ownership during Carousel replacement and is released automatically when Carousel playback starts or the update-hold failsafe expires.
+- Added host regression coverage for delayed visibility and framebuffer rendering of the transfer indicator.
+- The transfer-indicator API intentionally lives in the WLED adapter so a later development build can reuse it for long single-GIF gallery uploads.
+
+## 0.9.0-dev.5 - 2026-09-15 - Faster 64x64 TEXT and distributed Snowflake
+
+- Extended the effective maximum positional TEXT speed on native 64x64 canvases. The last 10% of the app speed range can advance two logical pixels per accepted WLED render, bypassing the previous one-pixel-per-frame ceiling while preserving the existing cadence elsewhere.
+- Replaced the regular eight-particle Snowflake layout with deterministic per-particle phase offsets and fall rates. Particle density now scales with the logical canvas so 16x16 -> 64x64 no longer appears as a falling stripe separated by a blank interval.
+- Added host regressions for the 64x64 high-speed path and 16x16 Snowflake row distribution.
+- Hardware validation on Adafruit MatrixPortal ESP32-S3 + one physical 64x64 HUB75 panel confirmed the complete `0.9.0-dev.5` visual path, including native 64x64 operation, logical 32x32 -> 64x64 and 16x16 -> 64x64 scaling, 32x64 glyph/TEXT rendering, improved scroll speed, distributed Snowflake, animated GIFs, Carousel and WLED/iDotMatrix ownership transitions.
+- Runtime validation snapshot reported WLED 0.17 beta / IDF5, 43 FPS, 2 MB PSRAM with approximately 1.98 MB free, `animatedgif12/psram`, and `scale=1x1` on the native 64x64 profile.
+
+## 0.9.0-dev.4 - 2026-09-15 - 64-pixel TEXT glyph support
+
+- Added the missing 32x64 monochrome glyph cell used by the app's 64-pixel TEXT size (256 bitmap bytes per glyph).
+- Widened the internal glyph-byte field from 8 to 16 bits so 256-byte glyphs are representable.
+- Accepts the expected `0x08`/`0x09` marker family and a strict exact-record-size fallback for app/firmware marker variants.
+- Keeps app-provided glyph bitmaps byte-for-byte; no local font rasterization was introduced.
+- Added protocol and renderer regressions for 32x64 glyph payloads.
+- Keeps 0.9.0-dev.3 TEXT scrolling and 0.9.0-dev.2 automatic 16/32/64 output scaling unchanged.
+
+## 0.9.0-dev.3 - 2026-09-15 - native 64x64 vertical TEXT scroll refinement
+
+- Fixed UP/DOWN TEXT paging on native 64x64 profiles where vertically centered 16x32 glyph pages allowed part of the following page to appear immediately.
+- Vertical page travel is now based on the logical viewport edge, so the following page begins fully off-screen and enters one raster row at a time.
+- Preserves the app-provided glyph framebuffer unchanged; only page positioning/timing geometry is adjusted.
+- Keeps 0.9.0-dev.2 automatic 16/32/64 output scaling unchanged.
+- Added a native-64x64 host regression proving the next 16x32 page is absent at the edge before the first movement step and appears exactly one row later.
+
 ## 0.9.0-dev.2 - 2026-09-15 - automatic native-matrix profile scaling
 
 - Separated normal logical iDotMatrix profile size from larger physical WLED 2D output size.

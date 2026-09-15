@@ -32,6 +32,17 @@ bool IDotMatrixWLEDAdapter::registerDisplayEffect() {
 }
 
 void IDotMatrixWLEDAdapter::loop(uint32_t now) {
+  // Keep the procedural transfer UI animated even when WLED would otherwise
+  // reuse the last rendered custom-effect frame. BLE chunks are irregular and
+  // must not be the animation clock. Request a new WLED frame at a modest
+  // cadence while the indicator is visible.
+  if (transferIndicatorActive_ &&
+      uint32_t(now - transferIndicatorStartedAt_) >= transferIndicatorDelayMs_ &&
+      uint32_t(now - transferIndicatorLastRefreshAt_) >= 70u) {
+    transferIndicatorLastRefreshAt_ = now;
+    strip.trigger();
+  }
+
   // Countdown/stopwatch state belongs to the emulated device, not to the
   // currently selected WLED effect. Keep time moving even if the user has
   // temporarily switched the panel back to native WLED content.
@@ -151,7 +162,7 @@ bool IDotMatrixWLEDAdapter::hasLogicalContent() const {
   return solidActive_ || lightEffectActive_ || audioActive_ || diySessionActive_ ||
     clockActive_ || countdownActive_ || stopwatchActive_ || scoreboardActive_ ||
     textActive_ || rawImageActive_ || gifActive_ || gifPending_ || gifStaging_ ||
-    carouselUpdateHold_;
+    carouselUpdateHold_ || transferIndicatorActive_;
 }
 
 bool IDotMatrixWLEDAdapter::hasActiveContent() const {
@@ -189,6 +200,12 @@ void IDotMatrixWLEDAdapter::clearContentState() {
   gifPreviousRendererVisible_ = false;
   gifPreviousContentMask_ = 0;
   carouselUpdateHold_ = false;
+  transferIndicatorActive_ = false;
+  transferIndicatorLastRefreshAt_ = 0;
+  transferExpectedBytes_ = 0;
+  transferReceivedBytes_ = 0;
+  transferCompletedUnits_ = 0;
+  transferTotalUnits_ = 0;
   textLoadReady_ = false;
   stopMediaPlayback();
   renderer_.setVisible(false);
@@ -223,6 +240,224 @@ void IDotMatrixWLEDAdapter::beginCarouselUpdateHold() {
 
 void IDotMatrixWLEDAdapter::endCarouselUpdateHold() {
   carouselUpdateHold_ = false;
+}
+
+void IDotMatrixWLEDAdapter::beginTransferIndicator(
+  size_t totalBytes,
+  uint32_t delayMs,
+  uint8_t completedUnits,
+  uint8_t totalUnits
+) {
+  const bool firstAsset = !transferIndicatorActive_;
+  transferIndicatorActive_ = true;
+  if (firstAsset) {
+    transferIndicatorStartedAt_ = millis();
+    transferIndicatorLastRefreshAt_ = transferIndicatorStartedAt_;
+    transferIndicatorDelayMs_ = delayMs;
+    // Keep ownership but avoid flashing an unrelated previous frame while the
+    // short visibility threshold is still running. Once the indicator is
+    // visible, consecutive Carousel slots must not restart that delay.
+    renderer_.fill(0, 0, 0);
+    renderer_.setVisible(false);
+  }
+  transferExpectedBytes_ = totalBytes;
+  transferReceivedBytes_ = 0;
+  transferCompletedUnits_ = completedUnits;
+  transferTotalUnits_ = totalUnits;
+  transferIndicatorComplete_ = false;
+  activateDisplayEffect();
+  strip.trigger();
+}
+
+void IDotMatrixWLEDAdapter::updateTransferIndicator(size_t receivedBytes, size_t totalBytes) {
+  if (!transferIndicatorActive_) return;
+  transferReceivedBytes_ = receivedBytes;
+  if (totalBytes != 0) transferExpectedBytes_ = totalBytes;
+  strip.trigger();
+}
+
+void IDotMatrixWLEDAdapter::completeTransferIndicator() {
+  if (!transferIndicatorActive_) return;
+  transferIndicatorComplete_ = true;
+  strip.trigger();
+}
+
+void IDotMatrixWLEDAdapter::endTransferIndicator() {
+  transferIndicatorActive_ = false;
+  transferIndicatorLastRefreshAt_ = 0;
+  transferExpectedBytes_ = 0;
+  transferReceivedBytes_ = 0;
+  transferCompletedUnits_ = 0;
+  transferTotalUnits_ = 0;
+  transferIndicatorComplete_ = false;
+}
+
+void IDotMatrixWLEDAdapter::renderTransferIndicator(uint32_t now) {
+  if (!transferIndicatorActive_) return;
+  if (uint32_t(now - transferIndicatorStartedAt_) < transferIndicatorDelayMs_) {
+    renderer_.setVisible(false);
+    return;
+  }
+
+  const uint8_t w = renderer_.width();
+  const uint8_t h = renderer_.height();
+  if (w == 0 || h == 0) return;
+  renderer_.fill(0, 0, 0);
+
+  auto px = [&](int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b) {
+    if (x >= 0 && y >= 0 && x < w && y < h)
+      renderer_.setPixel(uint8_t(x), uint8_t(y), r, g, b);
+  };
+
+  // dev.10: keep the user-validated 16x16 artwork unchanged for 16x16 and
+  // 32x32, but use a dedicated 64x64 rendering instead of a raw 4x scale.
+  // The 64x64 version preserves the same semantics (red downward-only arrow,
+  // blue receiving tray, separate progress/status bar) while using the extra
+  // pixels for rounded corners, highlights and softer colour edges.
+  if (w >= 64 && h >= 64) {
+    auto fillRect = [&](int16_t x0, int16_t y0, int16_t x1, int16_t y1,
+                        uint8_t r, uint8_t g, uint8_t b) {
+      for (int16_t y = y0; y <= y1; ++y)
+        for (int16_t x = x0; x <= x1; ++x)
+          px(x, y, r, g, b);
+    };
+    auto hLine = [&](int16_t x0, int16_t x1, int16_t y,
+                     uint8_t r, uint8_t g, uint8_t b) {
+      for (int16_t x = x0; x <= x1; ++x) px(x, y, r, g, b);
+    };
+
+    // Blue tray: wider, rounded and highlighted so it reads as a receiving
+    // tray rather than a blocky scaled U-shape.
+    constexpr uint8_t blueDkR = 10, blueDkG = 62, blueDkB = 150;
+    constexpr uint8_t blueR = 25, blueG = 112, blueB = 235;
+    constexpr uint8_t blueHiR = 64, blueHiG = 176, blueHiB = 255;
+    // outer/bottom body
+    fillRect(11, 42, 14, 49, blueDkR, blueDkG, blueDkB);
+    fillRect(49, 42, 52, 49, blueDkR, blueDkG, blueDkB);
+    fillRect(14, 48, 49, 51, blueDkR, blueDkG, blueDkB);
+    // main colour
+    fillRect(12, 40, 15, 47, blueR, blueG, blueB);
+    fillRect(48, 40, 51, 47, blueR, blueG, blueB);
+    fillRect(15, 47, 48, 50, blueR, blueG, blueB);
+    // rounded caps and inner highlight
+    fillRect(13, 39, 15, 41, blueR, blueG, blueB);
+    fillRect(48, 39, 50, 41, blueR, blueG, blueB);
+    hLine(16, 47, 47, blueHiR, blueHiG, blueHiB);
+    px(12, 41, blueHiR, blueHiG, blueHiB);
+    px(51, 41, blueHiR, blueHiG, blueHiB);
+
+    // Arrow: strictly downward translation.  The outline uses dark red with a
+    // brighter centre so the 64x64 icon looks smoother without true alpha AA.
+    constexpr uint8_t redDkR = 150, redDkG = 8, redDkB = 18;
+    constexpr uint8_t redR = 238, redG = 30, redB = 42;
+    constexpr uint8_t redHiR = 255, redHiG = 92, redHiB = 88;
+    const uint8_t phase = uint8_t((now / 80u) % 12u);
+    const int16_t top = int16_t(4 + phase);
+    fillRect(29, top, 34, top + 13, redDkR, redDkG, redDkB);
+    fillRect(30, top, 33, top + 13, redR, redG, redB);
+    hLine(31, 32, top, redHiR, redHiG, redHiB);
+    // arrow head, widest at top and tapering to a single point
+    hLine(23, 40, top + 13, redDkR, redDkG, redDkB);
+    hLine(24, 39, top + 14, redR, redG, redB);
+    hLine(25, 38, top + 15, redR, redG, redB);
+    hLine(26, 37, top + 16, redR, redG, redB);
+    hLine(27, 36, top + 17, redR, redG, redB);
+    hLine(28, 35, top + 18, redR, redG, redB);
+    hLine(29, 34, top + 19, redR, redG, redB);
+    hLine(30, 33, top + 20, redR, redG, redB);
+    hLine(31, 32, top + 21, redHiR, redHiG, redHiB);
+
+    // Indeterminate global activity bar.  Hardware diagnostics proved that the
+    // Carousel setup packet describes the 12-slot bank, not the number of
+    // assets in the current upload session, so a determinate percentage would
+    // be misleading.  Sweep a short segment left/right while traffic is active
+    // and fill the bar only after the quiet-period confirms completion.
+    constexpr uint8_t barR = 60, barG = 220, barB = 150;
+    constexpr uint8_t dimR = 12, dimG = 36, dimB = 28;
+    constexpr int16_t barX0 = 8;
+    constexpr int16_t barX1 = 55;
+    constexpr int16_t sweepW = 12;
+    for (int16_t x = barX0; x <= barX1; ++x) {
+      px(x, 59, dimR, dimG, dimB);
+      px(x, 60, dimR, dimG, dimB);
+    }
+    if (transferIndicatorComplete_) {
+      for (int16_t x = barX0; x <= barX1; ++x) {
+        px(x, 59, barR, barG, barB);
+        px(x, 60, barR, barG, barB);
+      }
+    } else {
+      constexpr int16_t travel = (barX1 - barX0 + 1) - sweepW;
+      constexpr uint16_t stepMs = 45u;
+      const uint16_t cycle = uint16_t(travel * 2);
+      const uint16_t raw = cycle ? uint16_t((now / stepMs) % cycle) : 0u;
+      const int16_t pos = raw <= travel ? int16_t(raw) : int16_t(cycle - raw);
+      for (int16_t x = 0; x < sweepW; ++x) {
+        px(int16_t(barX0 + pos + x), 59, barR, barG, barB);
+        px(int16_t(barX0 + pos + x), 60, barR, barG, barB);
+      }
+    }
+  } else {
+    const uint8_t scale = (w >= 32 && h >= 32) ? 2u : 1u;
+    const int16_t artW = int16_t(16u * scale);
+    const int16_t artH = int16_t(16u * scale);
+    const int16_t ox = (int16_t(w) - artW) / 2;
+    const int16_t oy = (int16_t(h) - artH) / 2;
+
+    auto logicalPixel = [&](uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b) {
+      for (uint8_t yy = 0; yy < scale; ++yy)
+        for (uint8_t xx = 0; xx < scale; ++xx)
+          px(ox + int16_t(x * scale + xx), oy + int16_t(y * scale + yy), r, g, b);
+    };
+
+    constexpr uint8_t trayR = 35, trayG = 125, trayB = 235;
+    for (uint8_t y = 9; y <= 11; ++y) {
+      logicalPixel(2, y, trayR, trayG, trayB);
+      logicalPixel(3, y, trayR, trayG, trayB);
+      logicalPixel(12, y, trayR, trayG, trayB);
+      logicalPixel(13, y, trayR, trayG, trayB);
+    }
+    for (uint8_t x = 2; x <= 13; ++x) logicalPixel(x, 12, trayR, trayG, trayB);
+    for (uint8_t x = 3; x <= 12; ++x) logicalPixel(x, 13, trayR, trayG, trayB);
+
+    constexpr uint8_t arrowR = 236, arrowG = 28, arrowB = 36;
+    const uint8_t phase = uint8_t((now / 100u) % 8u);
+    const int8_t top = int8_t(-4 + phase);
+    auto arrowRow = [&](int8_t localY, uint8_t x0, uint8_t x1) {
+      const int8_t y = int8_t(top + localY);
+      if (y < 0 || y >= 15) return;
+      for (uint8_t x = x0; x <= x1; ++x) logicalPixel(x, uint8_t(y), arrowR, arrowG, arrowB);
+    };
+    arrowRow(0, 7, 9);
+    arrowRow(1, 7, 9);
+    arrowRow(2, 7, 9);
+    arrowRow(3, 7, 9);
+    arrowRow(4, 5, 11);
+    arrowRow(5, 6, 10);
+    arrowRow(6, 7, 9);
+    arrowRow(7, 8, 8);
+
+    constexpr uint8_t barY = 15;
+    constexpr uint8_t barX = 1;
+    constexpr uint8_t barW = 14;
+    constexpr uint8_t sweepW = 4;
+    constexpr uint8_t barR = 60, barG = 220, barB = 150;
+    constexpr uint8_t dimR = 12, dimG = 36, dimB = 28;
+    for (uint8_t x = 0; x < barW; ++x) logicalPixel(uint8_t(barX + x), barY, dimR, dimG, dimB);
+    if (transferIndicatorComplete_) {
+      for (uint8_t x = 0; x < barW; ++x) logicalPixel(uint8_t(barX + x), barY, barR, barG, barB);
+    } else {
+      constexpr uint8_t travel = barW - sweepW;
+      constexpr uint16_t stepMs = 90u;
+      const uint8_t cycle = uint8_t(travel * 2u);
+      const uint8_t raw = cycle ? uint8_t((now / stepMs) % cycle) : 0u;
+      const uint8_t pos = raw <= travel ? raw : uint8_t(cycle - raw);
+      for (uint8_t x = 0; x < sweepW; ++x)
+        logicalPixel(uint8_t(barX + pos + x), barY, barR, barG, barB);
+    }
+  }
+
+  renderer_.setVisible(true);
 }
 
 void IDotMatrixWLEDAdapter::releaseCarouselMediaForStorageMutation() {
@@ -1105,7 +1340,9 @@ void IDotMatrixWLEDAdapter::renderDisplayEffectFrame() {
     // actually fading away from it toward a native effect.
     displayEffectOldCallbackCount_++;
   }
-  if (lightEffectActive_) {
+  if (transferIndicatorActive_) {
+    renderTransferIndicator(now);
+  } else if (lightEffectActive_) {
     renderer_.renderLightEffect(millis());
   } else if (audioActive_) {
     const uint32_t now = millis();

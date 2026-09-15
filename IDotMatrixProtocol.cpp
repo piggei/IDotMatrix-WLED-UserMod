@@ -410,19 +410,50 @@ bool IDotMatrixProtocol::processTextPayload(const uint8_t* data, size_t length) 
   const uint8_t marker = data[GLOBAL_HEADER];
 
   IDotMatrixTextSettings settings;
-  if (marker == 0x02) {
+  if (marker == 0x02 || marker == 0x03) {
     settings.glyphWidth = 8;
     settings.glyphHeight = 16;
     settings.glyphBytes = 16;
-  } else if (marker == 0x05) {
+  } else if (marker == 0x05 || marker == 0x06) {
     settings.glyphWidth = 16;
     settings.glyphHeight = 32;
     settings.glyphBytes = 64;
+  } else if (marker == 0x08 || marker == 0x09) {
+    // The vendor APK contains a dedicated 64-pixel text sender.  The marker
+    // families observed for 16/32-pixel text advance in pairs (02/03, 05/06),
+    // so accept the corresponding 08/09 family for the 32x64 bitmap cell.
+    // The structural fallback below also recognizes the cell by exact record
+    // size, so a firmware/app marker variant does not make the text disappear.
+    settings.glyphWidth = 32;
+    settings.glyphHeight = 64;
+    settings.glyphBytes = 256;
   } else {
-    return false;
+    // Some app/firmware revisions use a different marker byte for the same
+    // raster cell.  Infer only the three known monochrome cell geometries when
+    // the complete payload has an exact fixed-size record layout.
+    const size_t payloadBytes = length - GLOBAL_HEADER;
+    if (payloadBytes % requested != 0) return false;
+    const size_t inferredRecordBytes = payloadBytes / requested;
+    if (inferredRecordBytes < GLYPH_META) return false;
+    const size_t inferredGlyphBytes = inferredRecordBytes - GLYPH_META;
+    if (inferredGlyphBytes == 16) {
+      settings.glyphWidth = 8;
+      settings.glyphHeight = 16;
+      settings.glyphBytes = 16;
+    } else if (inferredGlyphBytes == 64) {
+      settings.glyphWidth = 16;
+      settings.glyphHeight = 32;
+      settings.glyphBytes = 64;
+    } else if (inferredGlyphBytes == 256) {
+      settings.glyphWidth = 32;
+      settings.glyphHeight = 64;
+      settings.glyphBytes = 256;
+    } else {
+      return false;
+    }
   }
 
-  const size_t recordBytes = GLYPH_META + settings.glyphBytes;
+  const size_t recordBytes = GLYPH_META + size_t(settings.glyphBytes);
   const size_t required = GLOBAL_HEADER + size_t(requested) * recordBytes;
   if (length < required) return false;
 

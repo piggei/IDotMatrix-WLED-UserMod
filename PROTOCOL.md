@@ -457,7 +457,7 @@ effect lets WLED apply its configured matrix mapping or the optional rescale.
 | 0 | glyph count |
 | 1..3 | not yet documented |
 | 4 | movement/effect |
-| 5 | speed (`0..100`; mapped to 500..15 ms per pixel) |
+| 5 | speed (`0..100`; base cadence mapped to 500..15 ms per logical pixel; native 64x64 positional TEXT may use two pixels per accepted render in the final 10% to exceed the WLED frame-rate ceiling) |
 | 6 | colour mode |
 | 7..9 | text RGB |
 | 10 | background enabled/mode |
@@ -471,11 +471,15 @@ Each glyph begins with a four-byte metadata prefix followed by its bitmap:
 | `0x05` | confirmed | 16x32 | 64 bytes | 68 bytes |
 | `0x03` | reference compatibility alias, unconfirmed | 8x16 | 16 bytes | 20 bytes |
 | `0x06` | reference compatibility alias, unconfirmed | 16x32 | 64 bytes | 68 bytes |
+| `0x08` / `0x09` | 0.9.0-dev.4 candidate family; hardware validation pending | 32x64 | 256 bytes | 260 bytes |
 
-The current implementation accepts only the experimentally confirmed `0x02` and
-`0x05` markers. Bitmap rows are consecutive, and the least-significant bit is
-the leftmost pixel within each byte. Mixed glyph sizes in one payload have not
-been observed and are not supported.
+Build 0.9.0-dev.4 accepts the confirmed/reference 8x16 and 16x32 marker families
+and adds the 32x64 cell required by the app's 64-pixel TEXT size. For the 32x64
+case it also accepts a marker variant only when the complete payload has an exact
+260-byte-per-glyph record structure; this avoids silently treating arbitrary
+unknown TEXT formats as valid. Bitmap rows are consecutive, and the
+least-significant bit is the leftmost pixel within each byte. Mixed glyph sizes
+in one payload have not been observed and are not supported.
 
 **WLED mapping:** the app-supplied bitmap is stored by the independent renderer
 and selects the existing `iDotMatrix` effect. The global colour,

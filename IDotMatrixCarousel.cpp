@@ -197,6 +197,7 @@ void IDotMatrixCarousel::endUpdateHold() {
   if (!updateHoldActive_) return;
   updateHoldActive_ = false;
   updateHoldDeadline_ = 0;
+  adapter_.endTransferIndicator();
   adapter_.endCarouselUpdateHold();
 }
 
@@ -215,6 +216,7 @@ void IDotMatrixCarousel::resetPersistent() {
   resetManifest();
   failedMask_ = 0;
   lastFailedSlot_ = -1;
+  uploadCompletedMask_ = 0;
   // Keep an explicit empty manifest so a later reboot cannot resurrect stale
   // metadata even if the reset was the last command received before power loss.
   lastResetOk_ = saveManifest();
@@ -235,18 +237,28 @@ void IDotMatrixCarousel::configure(const uint8_t* slots, uint8_t count) {
   startUpdateHold(millis());
   playing_ = false;
   autoStartPending_ = false;
+  transferCompletionShown_ = false;
   resumeOnBoot_ = false;
   currentOrderPos_ = -1;
   currentSlot_ = -1;
   failedMask_ = 0;
   lastFailedSlot_ = -1;
+  uploadCompletedMask_ = 0;
   clearFiles();
   for (uint8_t i = 0; i < SLOT_COUNT; ++i) manifest_.slots[i] = SlotMeta{};
   configuredCount_ = count > SLOT_COUNT ? SLOT_COUNT : count;
-  for (uint8_t i = 0; i < SLOT_COUNT; ++i) manifest_.order[i] = i;
+  diagnosticConfiguredCount_ = configuredCount_;
+  diagnosticUploadBeginCount_ = 0;
+  diagnosticUploadCompleteCount_ = 0;
+  for (uint8_t i = 0; i < SLOT_COUNT; ++i) {
+    manifest_.order[i] = i;
+    diagnosticConfiguredOrder_[i] = i;
+    diagnosticUploadBeginSlots_[i] = 0xFF;
+  }
   if (slots != nullptr) {
     for (uint8_t i = 0; i < configuredCount_; ++i) {
       manifest_.order[i] = slots[i] < SLOT_COUNT ? slots[i] : i;
+      diagnosticConfiguredOrder_[i] = manifest_.order[i];
     }
   }
   saveManifest();
@@ -284,6 +296,17 @@ void IDotMatrixCarousel::requestAutoStart(uint32_t now, uint32_t delayMs) {
   autoStartAt_ = now + delayMs;
 }
 
+uint8_t IDotMatrixCarousel::uploadCompletedCountExcluding(uint8_t slot) const {
+  uint16_t mask = uploadCompletedMask_;
+  if (slot < SLOT_COUNT) mask &= uint16_t(~(uint16_t(1u) << slot));
+  uint8_t count = 0;
+  while (mask != 0) {
+    count += uint8_t(mask & 1u);
+    mask >>= 1u;
+  }
+  return count;
+}
+
 bool IDotMatrixCarousel::beginAsset(
   uint8_t type,
   uint8_t slot,
@@ -295,8 +318,11 @@ bool IDotMatrixCarousel::beginAsset(
   // A new asset belongs to the same app-side page upload.  Do not let the
   // previous slot's quiet-period timer start playback between two transfers.
   autoStartPending_ = false;
+  transferCompletionShown_ = false;
   if (!validType(type) || slot >= SLOT_COUNT || totalLength == 0 ||
       !carouselHasRoom(totalLength)) return false;
+  if (diagnosticUploadBeginCount_ < SLOT_COUNT)
+    diagnosticUploadBeginSlots_[diagnosticUploadBeginCount_++] = slot;
   WLED_FS.remove(ASSET_RX);
   carouselRxFile = WLED_FS.open(ASSET_RX, "w");
   if (!carouselRxFile) return false;
@@ -306,6 +332,15 @@ bool IDotMatrixCarousel::beginAsset(
   rxDwell_ = dwellSeconds;
   rxExpected_ = totalLength;
   rxWritten_ = 0;
+  // Keep the status UI across the whole Carousel replacement. Each new slot
+  // resets the current-asset progress bar, while the surrounding update hold
+  // prevents Clock/WLED content from flashing between transfers.
+  adapter_.beginTransferIndicator(
+    totalLength,
+    250u,
+    uploadCompletedCountExcluding(slot),
+    configuredCount_
+  );
   return true;
 }
 
@@ -314,6 +349,7 @@ bool IDotMatrixCarousel::writeAsset(size_t offset, const uint8_t* data, size_t l
       length > rxExpected_ - rxWritten_) return false;
   const size_t wrote = carouselRxFile.write(data, length);
   rxWritten_ += wrote;
+  adapter_.updateTransferIndicator(rxWritten_, rxExpected_);
   return wrote == length;
 }
 
@@ -395,6 +431,8 @@ bool IDotMatrixCarousel::completeAsset(bool crcValid) {
   WLED_FS.remove(cache);
   failedMask_ &= uint16_t(~(uint16_t(1u) << rxSlot_));
   if (lastFailedSlot_ == int8_t(rxSlot_)) lastFailedSlot_ = -1;
+  uploadCompletedMask_ |= uint16_t(1u) << rxSlot_;
+  if (diagnosticUploadCompleteCount_ < SLOT_COUNT) ++diagnosticUploadCompleteCount_;
   touchUpdateHold(millis());
   requestAutoStart(millis());
   return true;
@@ -497,7 +535,16 @@ void IDotMatrixCarousel::loop(uint32_t now) {
     endUpdateHold();
   }
   if (!playing_ && autoStartPending_ && int32_t(now - autoStartAt_) >= 0) {
-    enter();
+    if (!transferCompletionShown_ && updateHoldActive_) {
+      // The quiet period is the first reliable indication that the app has
+      // finished the whole Carousel upload. Show an honest 100% confirmation
+      // briefly before playback starts.
+      adapter_.completeTransferIndicator();
+      transferCompletionShown_ = true;
+      autoStartAt_ = now + 180u;
+    } else {
+      enter();
+    }
   }
   if (!playing_) return;
   if (currentSlot_ < 0) {

@@ -1018,7 +1018,7 @@ bool IDotMatrixRenderer::beginText(
   uint8_t glyphCount,
   uint8_t glyphWidth,
   uint8_t glyphHeight,
-  uint8_t glyphBytes,
+  uint16_t glyphBytes,
   uint8_t motionEffect,
   uint8_t speed,
   uint8_t colorMode,
@@ -1033,10 +1033,11 @@ bool IDotMatrixRenderer::beginText(
 ) {
   const bool formatValid =
     (glyphWidth == 8 && glyphHeight == 16 && glyphBytes == 16) ||
-    (glyphWidth == 16 && glyphHeight == 32 && glyphBytes == 64);
+    (glyphWidth == 16 && glyphHeight == 32 && glyphBytes == 64) ||
+    (glyphWidth == 32 && glyphHeight == 64 && glyphBytes == 256);
   const size_t required = size_t(glyphCount) * glyphBytes;
   if (pixels_ == nullptr || width_ == 0 || height_ == 0 ||
-      !formatValid || glyphCount == 0 || required > 4096) {
+      !formatValid || glyphCount == 0 || required > 16384) {
     return false;
   }
 
@@ -1132,7 +1133,14 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
   const int16_t centeredY = logicalHeight_ > textGlyphHeight_
     ? int16_t(logicalHeight_ - textGlyphHeight_) / 2
     : 0;
+  // Page-based effects keep the historical glyph-height cadence. Vertical
+  // UP/DOWN motion is different: each logical page is centered in the
+  // viewport, so the following page must start fully outside the viewport.
+  // Using glyphHeight here makes part of the next page already visible on
+  // 64x64 (for example a 16x32 glyph page centered at y=16), which appears as
+  // a block entering at once instead of one raster row at a time.
   const int16_t pageStep = int16_t(textGlyphHeight_) + 1;
+  const int16_t verticalPageStep = int16_t(logicalHeight_) - centeredY;
 
   auto nextPageStart = [&]() -> uint8_t {
     if (!multiplePages) return 0;
@@ -1142,31 +1150,41 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
 
   const bool moveNow = !textFrameRendered_ || uint32_t(now - textLastMove_) >= moveInterval;
   if (textFrameRendered_ && moveNow) {
-    switch (textMotionEffect_) {
-      case 1:
-        if (--textOffsetX_ < -textWidth) textOffsetX_ = logicalWidth_;
-        break;
-      case 2:
-        if (++textOffsetX_ > logicalWidth_) textOffsetX_ = -textWidth;
-        break;
-      case 3: // UP: next page follows immediately below the current page.
-        --textOffsetY_;
-        if (textOffsetY_ <= centeredY - pageStep) {
-          textFirstVisibleGlyph_ = nextPageStart();
-          textOffsetY_ += pageStep;
-          textLastPageChange_ = now;
-        }
-        break;
-      case 4: // DOWN: next page follows immediately above the current page.
-        ++textOffsetY_;
-        if (textOffsetY_ >= centeredY + pageStep) {
-          textFirstVisibleGlyph_ = nextPageStart();
-          textOffsetY_ -= pageStep;
-          textLastPageChange_ = now;
-        }
-        break;
-      default:
-        break;
+    // At the top end of the app slider a native 64x64 canvas otherwise hits
+    // the WLED render-rate ceiling: 15 ms/pixel is already shorter than one
+    // ~43 FPS frame, so reducing the interval further would have no visible
+    // effect.  Allow a second logical pixel per accepted render only for the
+    // 64-pixel profile and only in the final 10% of the speed range.  Lower
+    // speeds and 16/32 profiles retain the historical one-pixel cadence.
+    const uint8_t moveSteps = (logicalWidth_ >= 64 && boundedSpeed >= 90) ? 2u : 1u;
+    for (uint8_t step = 0; step < moveSteps; ++step) {
+      switch (textMotionEffect_) {
+        case 1:
+          if (--textOffsetX_ < -textWidth) textOffsetX_ = logicalWidth_;
+          break;
+        case 2:
+          if (++textOffsetX_ > logicalWidth_) textOffsetX_ = -textWidth;
+          break;
+        case 3: // UP: next page enters from just below the logical viewport.
+          --textOffsetY_;
+          if (textOffsetY_ <= centeredY - verticalPageStep) {
+            textFirstVisibleGlyph_ = nextPageStart();
+            textOffsetY_ += verticalPageStep;
+            textLastPageChange_ = now;
+          }
+          break;
+        case 4: // DOWN: next page enters from just above the logical viewport.
+          ++textOffsetY_;
+          if (textOffsetY_ >= centeredY + verticalPageStep) {
+            textFirstVisibleGlyph_ = nextPageStart();
+            textOffsetY_ -= verticalPageStep;
+            textLastPageChange_ = now;
+          }
+          break;
+        default:
+          step = moveSteps; // no positional motion for this effect
+          break;
+      }
     }
     textLastMove_ = now;
   }
@@ -1248,13 +1266,13 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
       // Horizontal motion remains one continuous full text line.
       drawGlyphRange(0, textGlyphCount_, textOffsetX_, textOffsetY_);
     } else if (textMotionEffect_ == 3 || textMotionEffect_ == 4) {
-      // Vertical motion is a continuous tape: the following logical page is
-      // rendered one glyph-height plus one pixel behind the current page.
+      // Vertical motion is a continuous tape: the following logical page starts
+      // fully outside the viewport and enters one logical raster row at a time.
       drawGlyphRange(textFirstVisibleGlyph_, pageCapacity, 0, textOffsetY_);
       const uint8_t following = nextPageStart();
       const int16_t followingY = textMotionEffect_ == 3
-        ? textOffsetY_ + pageStep
-        : textOffsetY_ - pageStep;
+        ? textOffsetY_ + verticalPageStep
+        : textOffsetY_ - verticalPageStep;
       drawGlyphRange(following, pageCapacity, 0, followingY);
     } else {
       drawGlyphRange(textFirstVisibleGlyph_, pageCapacity, 0, centeredY);
@@ -1263,9 +1281,27 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
 
   if (textMotionEffect_ == 7) {
     const uint16_t phase = elapsed / 100u;
-    for (uint8_t index = 0; index < 8; ++index) {
-      const uint8_t x = uint8_t((index * 5u + index * index * 3u) % logicalWidth_);
-      const uint8_t y = uint8_t((phase + index * 3u) % logicalHeight_);
+    // The old eight-particle pattern used a regular index*3 Y offset.  On a
+    // 16x16 logical canvas (especially when upscaled 4x) this aligned the
+    // flakes into a visible travelling band followed by a largely empty
+    // interval.  Use deterministic per-particle phase offsets and slightly
+    // different fall rates instead, while scaling density with canvas width.
+    const uint8_t flakeCount = logicalWidth_ >= 64 ? 48u :
+      (logicalWidth_ >= 32 ? 24u : 16u);
+    auto snowHash = [](uint32_t value) -> uint32_t {
+      value ^= value >> 16;
+      value *= 0x7FEB352DUL;
+      value ^= value >> 15;
+      value *= 0x846CA68BUL;
+      value ^= value >> 16;
+      return value;
+    };
+    for (uint8_t index = 0; index < flakeCount; ++index) {
+      const uint32_t seed = snowHash(uint32_t(index) * 0x9E3779B9UL + 0x51ED270Bu);
+      const uint8_t x = uint8_t(seed % logicalWidth_);
+      const uint16_t startY = uint16_t((seed >> 8) % logicalHeight_);
+      const uint8_t rate = uint8_t(1u + ((seed >> 20) & 0x01u));
+      const uint8_t y = uint8_t((startY + uint32_t(phase) * rate) % logicalHeight_);
       if (lowMemoryRescale()) setAnimationSourcePixel(x, y, 255, 255, 255);
       else pixels_[size_t(y) * width_ + x] = Pixel{255, 255, 255};
     }

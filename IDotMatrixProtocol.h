@@ -92,7 +92,7 @@ struct IDotMatrixTextSettings {
   uint8_t glyphCount = 0;
   uint8_t glyphWidth = 0;
   uint8_t glyphHeight = 0;
-  uint8_t glyphBytes = 0;
+  uint16_t glyphBytes = 0;
   uint8_t motionEffect = 0;
   uint8_t speed = 5;
   uint8_t colorMode = 1;

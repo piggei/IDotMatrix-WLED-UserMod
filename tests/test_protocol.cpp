@@ -185,7 +185,7 @@ public:
   uint8_t textGlyphsReceived = 0;
   uint8_t textLastGlyph = 0;
   size_t textLastBitmapLength = 0;
-  uint8_t textLastBitmap[64]{};
+  uint8_t textLastBitmap[256]{};
   IDotMatrixTextSettings textSettings{};
   bool rawAccept = true;
   bool rawBeginReceived = false;
@@ -612,7 +612,10 @@ int main() {
   assert(events.textLastBitmapLength == 16 && events.textLastBitmap[0] == 0x80);
 
   textPayload[14] = 0x03;
-  assert(!protocol.processTextPayload(textPayload, sizeof(textPayload)));
+  assert(protocol.processTextPayload(textPayload, sizeof(textPayload)));
+  assert(events.textSettings.glyphWidth == 8);
+  assert(events.textSettings.glyphHeight == 16);
+  assert(events.textSettings.glyphBytes == 16);
 
   uint8_t largeGlyphPayload[82]{};
   largeGlyphPayload[0] = 1;
@@ -629,6 +632,34 @@ int main() {
   assert(events.textLastBitmapLength == 64);
   assert(events.textLastBitmap[0] == 0x01);
   assert(events.textLastBitmap[63] == 0x80);
+
+  // 0.9.0-dev.4: the 64-pixel font uses a 32x64 monochrome glyph cell
+  // (256 bitmap bytes per glyph).  Accept the expected 08/09 marker family.
+  uint8_t font64Payload[274]{};
+  font64Payload[0] = 1;
+  font64Payload[6] = 1;
+  font64Payload[7] = 0x21;
+  font64Payload[8] = 0x43;
+  font64Payload[9] = 0x65;
+  font64Payload[14] = 0x08;
+  font64Payload[18] = 0x01;
+  font64Payload[273] = 0x80;
+  assert(protocol.processTextPayload(font64Payload, sizeof(font64Payload)));
+  assert(events.textSettings.glyphCount == 1);
+  assert(events.textSettings.glyphWidth == 32);
+  assert(events.textSettings.glyphHeight == 64);
+  assert(events.textSettings.glyphBytes == 256);
+  assert(events.textLastBitmapLength == 256);
+  assert(events.textLastBitmap[0] == 0x01);
+  assert(events.textLastBitmap[255] == 0x80);
+
+  // Also accept a structurally identical record with an app/firmware-specific
+  // marker; exact 260-byte records make the 32x64 cell unambiguous.
+  font64Payload[14] = 0x0A;
+  assert(protocol.processTextPayload(font64Payload, sizeof(font64Payload)));
+  assert(events.textSettings.glyphWidth == 32);
+  assert(events.textSettings.glyphHeight == 64);
+  assert(events.textSettings.glyphBytes == 256);
 
   const uint8_t rawBytes[] = {1, 2, 3};
   assert(protocol.beginRawImage(sizeof(rawBytes)));

@@ -105,6 +105,19 @@ public:
   // Clock fallback cannot flash on screen between two Carousels.
   void beginCarouselUpdateHold();
   void endCarouselUpdateHold();
+  // Procedural transfer indicator used while Carousel assets are arriving.
+  // It intentionally lives in the adapter so future long single-GIF uploads
+  // can reuse the same renderer without changing the BLE protocol.
+  void beginTransferIndicator(
+    size_t totalBytes,
+    uint32_t delayMs = 250u,
+    uint8_t completedUnits = 0,
+    uint8_t totalUnits = 0
+  );
+  void updateTransferIndicator(size_t receivedBytes, size_t totalBytes = 0);
+  void completeTransferIndicator();
+  void endTransferIndicator();
+  bool isTransferIndicatorActive() const { return transferIndicatorActive_; }
   bool isCarouselUpdateHoldActive() const { return carouselUpdateHold_; }
   // Before Carousel storage is erased/reconfigured, release any GIF/cache file
   // that may still be open in the shared media backend. This deliberately
@@ -158,6 +171,7 @@ private:
   void clearGifContentSnapshot();
   void stopMediaPlayback();
   void renderCanvasToSegment();
+  void renderTransferIndicator(uint32_t now);
   Segment& controlSegment();
 
   IDotMatrixRenderer& renderer_;
@@ -182,6 +196,15 @@ private:
   bool gifPreviousRendererVisible_ = false;
   bool gifBlankStaging_ = false;
   bool carouselUpdateHold_ = false;
+  bool transferIndicatorActive_ = false;
+  uint32_t transferIndicatorStartedAt_ = 0;
+  uint32_t transferIndicatorDelayMs_ = 250u;
+  uint32_t transferIndicatorLastRefreshAt_ = 0;
+  size_t transferExpectedBytes_ = 0;
+  size_t transferReceivedBytes_ = 0;
+  uint8_t transferCompletedUnits_ = 0;
+  uint8_t transferTotalUnits_ = 0;
+  bool transferIndicatorComplete_ = false;
   uint16_t gifPreviousContentMask_ = 0;
   uint32_t gifStagingPrimaryColor_ = 0;
   uint8_t gifPreviousEffect_ = 0;
