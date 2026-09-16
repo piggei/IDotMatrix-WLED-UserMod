@@ -7,6 +7,7 @@
 #include "IDotMatrixBuzzer.h"
 #include "IDotMatrixAutomation.h"
 #include "IDotMatrixCarousel.h"
+#include "IDotMatrixPreset.h"
 #include "IDotMatrixBuildProfile.h"
 #include "IDotMatrixAudioSource.h"
 
@@ -46,7 +47,7 @@
 #endif
 
 static constexpr const char* IDOTMATRIX_RELEASE = "0.9.0";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-dev.12";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-dev.23";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -112,6 +113,7 @@ private:
   IDotMatrixWLEDAdapter adapter_{renderer_, &media_};
   IDotMatrixProtocol protocol_{adapter_};
   IDotMatrixCarousel carousel_{protocol_, adapter_};
+  IDotMatrixPreset preset_{protocol_, adapter_};
   IDotMatrixAutomation automation_{renderer_, adapter_, media_, buzzer_};
   IDotMatrixBLEServer ble_{protocol_};
   bool rmtBusActive_ = false;
@@ -378,6 +380,7 @@ public:
     buzzer_.attach(&IDotMatrixUsermod::buzzerOutputThunk, this);
     protocol_.setAutomationEvents(&automation_);
     protocol_.setCarouselEvents(&carousel_);
+    protocol_.setPresetEvents(&preset_);
     protocol_.setDeviceReleaseVersion(IDOTMATRIX_APP_RELEASE_MAJOR, IDOTMATRIX_APP_RELEASE_MINOR);
     automation_.attachProtocol(&protocol_);
     registerBuzzerTestEndpoint();
@@ -442,6 +445,7 @@ public:
 
     automation_.begin();
     carousel_.begin();
+    preset_.begin();
 
     // Let WLED complete its first Wi-Fi initialization pass before starting
     // the lower-memory NimBLE host.
@@ -486,6 +490,7 @@ public:
     adapter_.pollDisplayEffectSelection();
 
     serviceAudioSource(millis());
+    protocol_.loop(millis());
     ble_.loop();
 
     // Selecting iDotMatrix means: stored Carousel first, otherwise
@@ -495,7 +500,7 @@ public:
       // yet committed Segment::mode. First make the public WLED state match the
       // effect WLED is actually servicing, then apply the standalone policy.
       adapter_.claimDisplayEffectFromCallback();
-      if (!carousel_.playing() && !carousel_.autoStartPending() &&
+      if (!carousel_.playing() && !carousel_.autoStartPending() && !preset_.playing() &&
           !adapter_.hasLogicalContent()) {
         if (carousel_.hasAssets()) carousel_.enter();
         else adapter_.restoreClockFallback();
@@ -504,6 +509,7 @@ public:
     }
 
     carousel_.loop(millis());
+    preset_.loop(millis());
     automation_.loop(millis());
     adapter_.loop(millis());
 
@@ -516,8 +522,12 @@ public:
     const bool carouselMediaFailed =
       carousel_.playing() && carousel_.currentSlot() >= 0 && mediaFailed &&
       (adapter_.isGifPending() || adapter_.isGifActive());
+    const bool presetMediaFailed =
+      preset_.playing() && preset_.currentProtocolSlot() >= 0 && mediaFailed &&
+      (adapter_.isGifPending() || adapter_.isGifActive());
     adapter_.syncGifPlayback(media_.gifActive(), mediaFailed);
     if (carouselMediaFailed) carousel_.onPlaybackFailure(millis());
+    if (presetMediaFailed) preset_.suspend();
 
     // Conversely, selecting a native WLED effect must stop autonomous Carousel
     // ownership.  During GIF frame-cache staging WLED Static is temporary and
@@ -525,6 +535,10 @@ public:
     if (carousel_.playing() && !adapter_.isDisplayEffectActive() &&
         !adapter_.isGifPending()) {
       carousel_.suspend();
+    }
+    if (preset_.playing() && !adapter_.isDisplayEffectActive() &&
+        !adapter_.isGifPending()) {
+      preset_.suspend();
     }
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -685,6 +699,21 @@ public:
       (automation_.alarmActive()
         ? String(F(" active=")) + automation_.activeAlarmSlot()
         : String()));
+    {
+      char alarmDiag[192];
+      automation_.alarmDiagnosticSummary(alarmDiag, sizeof(alarmDiag), millis());
+      info.add(alarmDiag);
+      char alarmRx[384];
+      protocol_.alarmRxDiagnostic(alarmRx, sizeof(alarmRx));
+      info.add(alarmRx);
+      char programRx[384];
+      protocol_.programRxDiagnostic(programRx, sizeof(programRx));
+      info.add(programRx);
+      for (uint8_t slot = 0; slot < IDotMatrixAlarmSettings::SLOT_COUNT; ++slot) {
+        char slotDiag[160];
+        if (automation_.alarmDiagnosticSlot(slot, slotDiag, sizeof(slotDiag))) info.add(slotDiag);
+      }
+    }
     info.add(String(F("schedule=")) +
       (automation_.scheduleEnabled() ? F("on") : F("off")) +
       F(" activities=") + automation_.configuredScheduleCount() +
@@ -729,6 +758,20 @@ public:
       snprintf(failedLine, sizeof(failedLine), "carouselFailed=0x%03X last=%d",
         unsigned(carousel_.failedMask()), int(carousel_.lastFailedSlot()));
       info.add(failedLine);
+    }
+    {
+      char presetLine[128];
+      snprintf(
+        presetLine, sizeof(presetLine),
+        "preset=%s active=%u pending=%u slot=%d hold=%lums upload=%u",
+        preset_.playing() ? "playing" : "off",
+        unsigned(preset_.activeCount()),
+        unsigned(preset_.pendingCount()),
+        int(preset_.currentProtocolSlot()),
+        static_cast<unsigned long>(preset_.currentHoldMs()),
+        preset_.uploadIndicatorActive() ? 1u : 0u
+      );
+      info.add(presetLine);
     }
     if (automation_.scheduleUploadOpen()) info.add(F("scheduleUpload=staging"));
     if (strcmp(automation_.lastErrorText(), "none") != 0) {

@@ -102,6 +102,7 @@ public:
   uint8_t textSpeed() const { return textSpeed_; }
   uint8_t textVisibleCapacity() const;
   uint8_t textFirstVisibleGlyph() const { return textFirstVisibleGlyph_; }
+  uint32_t textPresentationDurationMs() const;
   bool isRawImagePending() const { return rawImagePixels_ != nullptr; }
   const Pixel* pixels() const { return pixels_; }
   uint8_t* animationFrameData() { return reinterpret_cast<uint8_t*>(pixels_); }

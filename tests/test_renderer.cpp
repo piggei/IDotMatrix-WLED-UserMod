@@ -168,6 +168,59 @@ int main() {
     }
   }
 
+  // dev.14 native-resolution density regression. Effects 3..5 preserve
+  // their 16x16 proportions by scaling band widths at 32x32 and 64x64.
+  IDotMatrixRenderer renderer32;
+  assert(renderer32.begin(0x03));
+  assert(renderer32.beginLightEffect(3, 50, 3, effectColors, 1000));
+  expectPixel(renderer32.pixel(0, 0), 255, 0, 0);
+  expectPixel(renderer32.pixel(7, 0), 255, 0, 0);
+  expectPixel(renderer32.pixel(8, 0), 0, 255, 0);
+  assert(renderer32.beginLightEffect(4, 50, 3, effectColors, 1000));
+  expectPixel(renderer32.pixel(0, 0), 255, 0, 0);
+  expectPixel(renderer32.pixel(4, 3), 255, 0, 0);
+  expectPixel(renderer32.pixel(5, 3), 0, 255, 0);
+  assert(renderer32.beginLightEffect(5, 50, 3, effectColors, 1000));
+  expectPixel(renderer32.pixel(9, 0), 255, 0, 0);
+  expectBlack(renderer32.pixel(10, 0));
+  expectBlack(renderer32.pixel(17, 0));
+  expectPixel(renderer32.pixel(18, 0), 0, 255, 0);
+
+  IDotMatrixRenderer renderer64;
+  assert(renderer64.begin(0x04));
+  assert(renderer64.beginLightEffect(3, 50, 3, effectColors, 1000));
+  expectPixel(renderer64.pixel(15, 0), 255, 0, 0);
+  expectPixel(renderer64.pixel(16, 0), 0, 255, 0);
+  assert(renderer64.beginLightEffect(5, 50, 3, effectColors, 1000));
+  expectPixel(renderer64.pixel(19, 0), 255, 0, 0);
+  expectBlack(renderer64.pixel(20, 0));
+  expectBlack(renderer64.pixel(35, 0));
+  expectPixel(renderer64.pixel(36, 0), 0, 255, 0);
+
+  // Effect 6 keeps the original independently seeded per-pixel texture at
+  // every logical resolution. Adjacent pixels must not be collapsed into
+  // resolution-scaled colour cells.
+  assert(renderer.beginLightEffect(6, 50, 3, effectColors, 1000));
+  const auto effect6_16_a = *renderer.pixel(0, 0);
+  const auto effect6_16_b = *renderer.pixel(1, 0);
+  assert(effect6_16_a.red != effect6_16_b.red ||
+         effect6_16_a.green != effect6_16_b.green ||
+         effect6_16_a.blue != effect6_16_b.blue);
+
+  assert(renderer32.beginLightEffect(6, 50, 3, effectColors, 1000));
+  const auto effect6_32_a = *renderer32.pixel(0, 0);
+  const auto effect6_32_b = *renderer32.pixel(1, 0);
+  assert(effect6_32_a.red != effect6_32_b.red ||
+         effect6_32_a.green != effect6_32_b.green ||
+         effect6_32_a.blue != effect6_32_b.blue);
+
+  assert(renderer64.beginLightEffect(6, 50, 3, effectColors, 1000));
+  const auto effect6_64_a = *renderer64.pixel(0, 0);
+  const auto effect6_64_b = *renderer64.pixel(1, 0);
+  assert(effect6_64_a.red != effect6_64_b.red ||
+         effect6_64_a.green != effect6_64_b.green ||
+         effect6_64_a.blue != effect6_64_b.blue);
+
   uint8_t rawImage[16 * 16 * 3]{};
   rawImage[0] = 0xA1;
   rawImage[1] = 0xB2;

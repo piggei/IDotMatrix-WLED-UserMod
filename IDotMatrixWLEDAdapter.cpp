@@ -367,11 +367,12 @@ void IDotMatrixWLEDAdapter::renderTransferIndicator(uint32_t now) {
     hLine(30, 33, top + 20, redR, redG, redB);
     hLine(31, 32, top + 21, redHiR, redHiG, redHiB);
 
-    // Indeterminate global activity bar.  Hardware diagnostics proved that the
+    // Indeterminate global activity bar. Hardware diagnostics proved that the
     // Carousel setup packet describes the 12-slot bank, not the number of
     // assets in the current upload session, so a determinate percentage would
-    // be misleading.  Sweep a short segment left/right while traffic is active
-    // and fill the bar only after the quiet-period confirms completion.
+    // be misleading. Keep the short segment sweeping left/right for the full
+    // visible lifetime of the indicator; completion is represented naturally
+    // by the indicator disappearing when Carousel playback resumes.
     constexpr uint8_t barR = 60, barG = 220, barB = 150;
     constexpr uint8_t dimR = 12, dimG = 36, dimB = 28;
     constexpr int16_t barX0 = 8;
@@ -381,21 +382,14 @@ void IDotMatrixWLEDAdapter::renderTransferIndicator(uint32_t now) {
       px(x, 59, dimR, dimG, dimB);
       px(x, 60, dimR, dimG, dimB);
     }
-    if (transferIndicatorComplete_) {
-      for (int16_t x = barX0; x <= barX1; ++x) {
-        px(x, 59, barR, barG, barB);
-        px(x, 60, barR, barG, barB);
-      }
-    } else {
-      constexpr int16_t travel = (barX1 - barX0 + 1) - sweepW;
-      constexpr uint16_t stepMs = 45u;
-      const uint16_t cycle = uint16_t(travel * 2);
-      const uint16_t raw = cycle ? uint16_t((now / stepMs) % cycle) : 0u;
-      const int16_t pos = raw <= travel ? int16_t(raw) : int16_t(cycle - raw);
-      for (int16_t x = 0; x < sweepW; ++x) {
-        px(int16_t(barX0 + pos + x), 59, barR, barG, barB);
-        px(int16_t(barX0 + pos + x), 60, barR, barG, barB);
-      }
+    constexpr int16_t travel = (barX1 - barX0 + 1) - sweepW;
+    constexpr uint16_t stepMs = 45u;
+    const uint16_t cycle = uint16_t(travel * 2);
+    const uint16_t raw = cycle ? uint16_t((now / stepMs) % cycle) : 0u;
+    const int16_t pos = raw <= travel ? int16_t(raw) : int16_t(cycle - raw);
+    for (int16_t x = 0; x < sweepW; ++x) {
+      px(int16_t(barX0 + pos + x), 59, barR, barG, barB);
+      px(int16_t(barX0 + pos + x), 60, barR, barG, barB);
     }
   } else {
     const uint8_t scale = (w >= 32 && h >= 32) ? 2u : 1u;
@@ -444,17 +438,13 @@ void IDotMatrixWLEDAdapter::renderTransferIndicator(uint32_t now) {
     constexpr uint8_t barR = 60, barG = 220, barB = 150;
     constexpr uint8_t dimR = 12, dimG = 36, dimB = 28;
     for (uint8_t x = 0; x < barW; ++x) logicalPixel(uint8_t(barX + x), barY, dimR, dimG, dimB);
-    if (transferIndicatorComplete_) {
-      for (uint8_t x = 0; x < barW; ++x) logicalPixel(uint8_t(barX + x), barY, barR, barG, barB);
-    } else {
-      constexpr uint8_t travel = barW - sweepW;
-      constexpr uint16_t stepMs = 90u;
-      const uint8_t cycle = uint8_t(travel * 2u);
-      const uint8_t raw = cycle ? uint8_t((now / stepMs) % cycle) : 0u;
-      const uint8_t pos = raw <= travel ? raw : uint8_t(cycle - raw);
-      for (uint8_t x = 0; x < sweepW; ++x)
-        logicalPixel(uint8_t(barX + pos + x), barY, barR, barG, barB);
-    }
+    constexpr uint8_t travel = barW - sweepW;
+    constexpr uint16_t stepMs = 90u;
+    const uint8_t cycle = uint8_t(travel * 2u);
+    const uint8_t raw = cycle ? uint8_t((now / stepMs) % cycle) : 0u;
+    const uint8_t pos = raw <= travel ? raw : uint8_t(cycle - raw);
+    for (uint8_t x = 0; x < sweepW; ++x)
+      logicalPixel(uint8_t(barX + pos + x), barY, barR, barG, barB);
   }
 
   renderer_.setVisible(true);

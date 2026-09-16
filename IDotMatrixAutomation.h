@@ -51,6 +51,8 @@ public:
   bool alarmActive() const { return alarmActive_; }
   uint8_t activeAlarmSlot() const { return activeAlarmSlot_; }
   uint8_t configuredAlarmCount() const;
+  void alarmDiagnosticSummary(char* buffer, size_t length, uint32_t now) const;
+  bool alarmDiagnosticSlot(uint8_t slot, char* buffer, size_t length) const;
   bool scheduleEnabled() const { return (scheduleGlobalFlags_ & 0x01u) != 0; }
   bool scheduleSoundEnabled() const { return (scheduleGlobalFlags_ & 0x02u) != 0; }
   uint8_t scheduleFlags() const { return scheduleGlobalFlags_; }
@@ -93,7 +95,7 @@ private:
     uint8_t startMinute = 0;
     uint8_t endHour = 0;
     uint8_t endMinute = 0;
-    uint16_t contentType = 0;
+    uint8_t contentType = 0;
     uint32_t mediaSize = 0;
     uint32_t mediaCRC = 0;
     uint16_t reserved = 0;

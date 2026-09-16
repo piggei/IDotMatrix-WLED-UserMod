@@ -545,7 +545,8 @@ void IDotMatrixRenderer::renderLightEffect(uint32_t now) {
     case 3: {
       const uint32_t localPhase = lightEffectScrollOffset_;
       const uint8_t count = lightEffectColorCount_ == 0 ? 1 : lightEffectColorCount_;
-      constexpr uint8_t stripeWidth = 4;
+      const uint8_t resolutionScale = width_ >= 64 ? 4u : width_ >= 32 ? 2u : 1u;
+      const uint8_t stripeWidth = uint8_t(4u * resolutionScale);
       for (uint16_t y = 0; y < height_; ++y) {
         for (uint16_t x = 0; x < width_; ++x) {
           pixels_[size_t(y) * width_ + x] = effectColor(
@@ -559,7 +560,8 @@ void IDotMatrixRenderer::renderLightEffect(uint32_t now) {
     case 4: {
       const uint32_t localPhase = lightEffectScrollOffset_;
       const uint8_t count = lightEffectColorCount_ == 0 ? 1 : lightEffectColorCount_;
-      constexpr uint8_t stripeWidth = 4;
+      const uint8_t resolutionScale = width_ >= 64 ? 4u : width_ >= 32 ? 2u : 1u;
+      const uint8_t stripeWidth = uint8_t(4u * resolutionScale);
       for (uint16_t y = 0; y < height_; ++y) {
         for (uint16_t x = 0; x < width_; ++x) {
           pixels_[size_t(y) * width_ + x] = effectColor(
@@ -574,9 +576,10 @@ void IDotMatrixRenderer::renderLightEffect(uint32_t now) {
       clear();
       const uint32_t localPhase = lightEffectScrollOffset_;
       const uint8_t count = lightEffectColorCount_ == 0 ? 1 : lightEffectColorCount_;
-      constexpr uint8_t colorWidth = 5;
-      constexpr uint8_t blackWidth = 4;
-      constexpr uint8_t blockWidth = colorWidth + blackWidth;
+      const uint8_t resolutionScale = width_ >= 64 ? 4u : width_ >= 32 ? 2u : 1u;
+      const uint8_t colorWidth = uint8_t(5u * resolutionScale);
+      const uint8_t blackWidth = uint8_t(4u * resolutionScale);
+      const uint8_t blockWidth = uint8_t(colorWidth + blackWidth);
       for (uint16_t y = 0; y < height_; ++y) {
         for (uint16_t x = 0; x < width_; ++x) {
           const uint32_t distance = x + y + localPhase;
@@ -1101,6 +1104,28 @@ uint8_t IDotMatrixRenderer::textVisibleCapacity() const {
   const uint16_t capacity = uint16_t(logicalWidth_) / textGlyphWidth_;
   if (capacity == 0) return 1;
   return capacity > 255u ? 255u : uint8_t(capacity);
+}
+
+uint32_t IDotMatrixRenderer::textPresentationDurationMs() const {
+  if (!textValid_ || textGlyphCount_ == 0 || textGlyphWidth_ == 0) return 3000u;
+  const uint8_t boundedSpeed = textSpeed_ > 100 ? 100 : textSpeed_;
+  const uint32_t moveInterval = 500u - uint32_t(boundedSpeed) * 485u / 100u;
+  const uint8_t pageCapacity = textVisibleCapacity();
+  const uint32_t textWidth = uint32_t(textGlyphCount_) * textGlyphWidth_;
+
+  if (textMotionEffect_ == 1 || textMotionEffect_ == 2) {
+    const uint32_t pixels = uint32_t(logicalWidth_) + textWidth + 1u;
+    const uint32_t stepsPerTick = (logicalWidth_ >= 64 && boundedSpeed >= 90) ? 2u : 1u;
+    return ((pixels + stepsPerTick - 1u) / stepsPerTick) * moveInterval;
+  }
+
+  if (pageCapacity == 0 || textGlyphCount_ <= pageCapacity) return 3000u;
+  const uint32_t pages = (uint32_t(textGlyphCount_) + pageCapacity - 1u) / pageCapacity;
+  const uint32_t pageStep = (textMotionEffect_ == 3 || textMotionEffect_ == 4)
+    ? uint32_t(logicalHeight_ - ((logicalHeight_ > textGlyphHeight_)
+      ? (logicalHeight_ - textGlyphHeight_) / 2u : 0u))
+    : uint32_t(textGlyphHeight_) + 1u;
+  return (pages - 1u) * pageStep * moveInterval + 3000u;
 }
 
 bool IDotMatrixRenderer::setTextGlyph(

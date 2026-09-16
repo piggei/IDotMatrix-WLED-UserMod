@@ -199,12 +199,12 @@ def check_nimble_api_bridge() -> None:
     assert "ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
     assert "ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
     assert 'IDOTMATRIX_RELEASE = "0.9.0"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.0-dev.12"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.0-dev.23"' in usermod
     assert "RMT+BLE=ESP32-C3 shared-RMT" in usermod
     assert "UsermodManager::getUMData(&data, USERMOD_ID_AUDIOREACTIVE)" in usermod
 
     library = (ROOT / "library.json").read_text(encoding="utf-8")
-    assert '"version": "0.9.0-dev.12"' in library
+    assert '"version": "0.9.0-dev.23"' in library
     assert '"h2zero/NimBLE-Arduino"' not in library
     # NimBLE is target-dependent and pinned by each official PlatformIO profile.
 

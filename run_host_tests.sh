@@ -57,6 +57,7 @@ $CXX $FLAGS IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp tests/test_compact_g
 "$TMP/idotmatrix_compact_gif_test"
 
 $CXX $FLAGS -Itests/media_stub -fsyntax-only IDotMatrixCarousel.cpp
+$CXX $FLAGS -Itests/media_stub -fsyntax-only IDotMatrixPreset.cpp
 
 $CXX $FLAGS -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media_test"
 "$TMP/idotmatrix_media_test"

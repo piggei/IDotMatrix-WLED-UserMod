@@ -623,3 +623,12 @@ Carousel replacement uses a procedural status layer owned by `IDotMatrixWLEDAdap
 The protocol provides the length of the current asset only; it does not announce the byte lengths of future Carousel assets before their transfers begin. Therefore exact whole-bank byte progress cannot be computed. Dev.7 uses an asset-weighted global estimate: each configured asset has equal weight, and the current asset contributes `receivedBytes / currentAssetBytes` within its share. Completed slots are tracked with a transient bitmask so a retry cannot advance the global counter twice.
 
 The layer remains delayed by 250 ms to avoid flashes on short transfers and is automatically scaled by the existing 16/32/64 logical-to-physical output adapter. The adapter API remains generic so long standalone GIF transfers can reuse the same renderer later without introducing a second loading implementation.
+
+## Preset / Default temporary playlist (0.9.0-dev.22)
+
+Preset / Default is intentionally independent from the persistent Carousel subsystem. Bulk objects addressed to protocol slots 14..19 are staged into a six-slot volatile bank. Upload does not acquire display ownership. The `06/02` activation command promotes the selected pending objects and starts a cyclic player from the first requested slot. This keeps replacement atomic from the user's point of view and prevents a partially uploaded Preset from appearing on screen.
+
+The player reuses the normal GIF/TEXT render paths and Bulk CRC/flow-control implementation. Preset files are temporary LittleFS objects only; there is no NVS metadata and no boot restore.
+
+### Preset upload feedback (0.9.0-dev.23)
+Preset Bulk uploads reuse the Carousel transfer indicator. The UI is kept active across consecutive slot uploads and is ended by the `06/02` activation command. A 5 s idle timeout prevents an abandoned upload from leaving the indicator on-screen indefinitely. This is presentation-only and does not alter the pending/active Preset transaction model.

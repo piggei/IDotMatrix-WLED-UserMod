@@ -119,6 +119,7 @@ public:
   void endTransferIndicator();
   bool isTransferIndicatorActive() const { return transferIndicatorActive_; }
   bool isCarouselUpdateHoldActive() const { return carouselUpdateHold_; }
+  uint32_t textPresentationDurationMs() const { return renderer_.textPresentationDurationMs(); }
   // Before Carousel storage is erased/reconfigured, release any GIF/cache file
   // that may still be open in the shared media backend. This deliberately
   // affects GIF ownership only, so configuring Carousel while Clock/Text is

@@ -1,6 +1,6 @@
 # Development line 0.9
 
-**Current development release: 0.9.0 / build 0.9.0-dev.12.**
+**Current development release: 0.9.0 / build 0.9.0-dev.23.**
 
 This branch starts the ESP32-S3 / PSRAM / native WLED HUB75 generation. The first
 target is the Adafruit MatrixPortal ESP32-S3 driving one 64x64 HUB75 panel on
@@ -39,7 +39,13 @@ GIF replacement, strict framebuffer ownership during GIF staging (preventing
 Clock/TEXT bleed into cold caches), filesystem recovery/capacity checks, reset
 verification, and WLED-playlist termination when iDotMatrix explicitly takes
 display ownership.
-ESP32-S3, native HUB75, PSRAM and 16/32/64 logical-profile output scaling are hardware-validated on MatrixPortal S3. Build 0.9.0-dev.12 keeps the validated transfer artwork and Carousel diagnostics, and fixes the indeterminate left/right activity bar by explicitly scheduling periodic WLED redraws while an upload is active. Hardware diagnostics proved that the setup packet describes the full 12-slot bank rather than the real session asset count, so the firmware deliberately avoids presenting a false percentage. The bar fills completely only when the upload quiet-period confirms session completion.
+ESP32-S3, native HUB75, PSRAM and 16/32/64 logical-profile output scaling are hardware-validated on MatrixPortal S3. Build 0.9.0-dev.23 extends the reverse-engineered Preset / Default section with the same indeterminate upload indicator used by Carousel. The Preset implementation: Bulk media in protocol slots 14..19 are staged into a dedicated volatile six-slot bank, `06/02` atomically activates an ordered cyclic playlist, images/GIF media use an approximately 3-second dwell, and TEXT duration follows the existing renderer motion timing. Alarm/Program multipart compatibility from dev.21 remains unchanged, including repeated automation headers, Schedule byte 10/11 framing and `0x01`/`0x03` flow control. Carousel remains a separate persistent 12-slot bank.
+
+## Preset / Default (dev.23)
+
+The official app's **Preset / Default** page is implemented separately from Device Assets / Carousel. It uses protocol media slots `14..19` (maximum six entries), uploads objects through the existing Bulk transport, and activates the ordered list with command `06/02`. Uploading Preset media never changes the display by itself; the new playlist becomes active only when the activation command arrives.
+
+Preset media are deliberately volatile. They are stored in temporary LittleFS files, are not written to NVS, and are not restored at boot. A new Preset may be uploaded while an older Preset continues to play; the pending bank is promoted only on the next activation. Image/GIF entries use an approximately 3000 ms visible dwell, while TEXT uses the existing renderer timing so scrolling content can complete before the next entry.
 
 The new audio-source setting has three modes:
 
@@ -416,12 +422,18 @@ Brightness is synchronized from the iDotMatrix app to WLED. The app does not
 query the current WLED brightness from the emulated peripheral, so changing
 brightness elsewhere in WLED does not necessarily move the app slider.
 
+### Alarm / Program multipart media
+
+On 64x64 profiles the official app can split one Alarm or Program media asset across multiple complete logical FA02 packets. Each packet repeats the full Alarm/Program metadata header; `mediaSize` and `mediaCRC` describe the complete asset, while the bytes after that packet's header are only the current chunk. Build dev.21 assembles chunks by stable media identity, total size and CRC. For Schedule, byte 10 is the one-byte content type and byte 11 is a transport chunk marker (`0x00` first, observed `0x02` continuation); the marker is not part of media identity. Schedule returns ACK status `0x01` for accepted incomplete media and `0x03` only after complete CRC-valid commit. An incomplete, mismatched, oversized, timed-out or CRC-invalid transfer is discarded without replacing the previously committed Alarm/Program. The current transaction timeout is 5 seconds and the defensive per-asset limit is 512 KiB.
+
 ### Clock source
 
-WLED remains the primary clock authority whenever its local time is valid.
-Configure WLED NTP, timezone, and daylight-saving settings normally. The last
-valid app time-synchronization packet is retained and used as an offline fallback
-while WLED local time is not yet valid.
+For iDotMatrix Alarm and Program/Schedule compatibility, the most recent valid
+app time-synchronization packet is authoritative once received, matching the
+standalone emulator and original-device behavior. WLED local time/NTP remains
+the fallback when the app has not synchronized time in the current boot/session.
+Configure WLED NTP, timezone, and daylight-saving settings normally for WLED's
+own clock and for operation before the app supplies its time synchronization.
 
 ### Display ownership
 

@@ -721,12 +721,18 @@ int main() {
   }
   assert(activeBarPixelsB == 4);
   assert(firstActiveA != firstActiveB);
+  // 0.9.0-dev.13: completion does not turn the indeterminate activity
+  // indicator into a false 100% progress bar. It keeps sweeping until the
+  // transfer UI is retired and Carousel playback resumes.
   clockAdapter.completeTransferIndicator();
   strip.renderEffect();
+  uint8_t activeBarPixelsDone = 0;
   for (uint8_t x = 1; x <= 14; ++x) {
     const auto* pixel = renderer.pixel(x, 15);
-    assert(pixel && pixel->green == 220);
+    assert(pixel);
+    if (pixel->green == 220) ++activeBarPixelsDone;
   }
+  assert(activeBarPixelsDone == 4);
 
   // 0.9.0-dev.10: native 64x64 transfer art must use the dedicated
   // smoother rendering rather than a raw 4x copy of the 16x16 glyph.
@@ -757,8 +763,12 @@ int main() {
   assert(active64 == 12);
   clockAdapter.completeTransferIndicator();
   strip.renderEffect();
-  const auto* done64 = renderer.pixel(8, 59);
-  assert(done64 && done64->green == 220);
+  uint8_t active64Done = 0;
+  for (uint8_t x = 8; x <= 55; ++x) {
+    const auto* pixel = renderer.pixel(x, 59);
+    if (pixel && pixel->green == 220) ++active64Done;
+  }
+  assert(active64Done == 12);
 
   // Starting the next Carousel slot resets current bytes but must not hide an
   // already-visible indicator or restart the anti-flash delay.

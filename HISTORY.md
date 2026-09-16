@@ -1,3 +1,76 @@
+## 0.9.0-dev.23
+
+- Reuses the Carousel indeterminate transfer indicator for Preset / Default uploads (slots 14..19).
+- Keeps the indicator continuous across consecutive Preset assets and removes it on `06/02` activation.
+- Adds a 5 s idle safety timeout for abandoned Preset uploads, restoring the currently active Preset when applicable.
+- Adds `/json/info` Preset `upload=0/1` telemetry.
+- No changes to Preset multipart ACK, CRC, staging or activation semantics.
+
+## 0.9.0-dev.22
+
+- Added the reverse-engineered iDotMatrix Preset / Default section as a dedicated volatile six-slot playlist bank using protocol slots 14..19.
+- Added `06/02` activation with ordered cyclic playback and kept Preset state separate from the persistent Carousel bank.
+- Routed Bulk GIF/TEXT objects for slots 14..19 into Preset staging before the generic live-media path, preserving the current display until activation.
+- Added pending-to-active promotion so replacing a Preset while another is playing does not partially switch media before the new `06/02`.
+- Reused Bulk multipart flow control and CRC validation, including `0x01` intermediate and `0x03` complete ACK behavior.
+- Added renderer-derived TEXT presentation timing; static/page modes retain a final ~3 s hold while horizontal scroll waits for the complete visual pass.
+- Preset storage is intentionally volatile: temporary files are cleared at boot/reset and are not restored through NVS.
+- Added Preset diagnostics and BLE framing recognition so `06/02` remains routable after audio traffic.
+
+## 0.9.0-dev.21
+
+- Corrected Program/Schedule activity framing from the hardware-validated emulator handoff: byte 10 is an 8-bit content type and byte 11 is a separate per-chunk marker.
+- Corrected Schedule flow control: accepted incomplete activity media now receives ACK status `0x01`; status `0x03` is sent only after complete media assembly, full-object CRC validation and successful commit; rejected/failing completion uses `0x02`.
+- Narrowed in-progress Schedule media identity to activity index + content type + total media size + total media CRC, explicitly excluding the per-chunk marker.
+- Preserved Alarm ACK semantics and generic FA02 reassembly unchanged.
+- Extended host regressions to cover marker `0x00 -> 0x02`, 1/3-chunk Schedule media, intermediate/final/error ACKs and monotonic multipart accumulation.
+
+## 0.9.0-dev.20
+
+- Fixed Alarm media uploads split by the 64x64 app across multiple complete `00/80` logical packets.
+- Fixed Program/Schedule activity media uploads using the same multi-logical-packet model.
+- `mediaSize` is now treated as the total asset size; chunks are assembled by stable metadata, total size and CRC rather than by reserved continuation values.
+- Added independent Alarm and Program transactions, 5-second timeout, 512 KiB defensive size limit, overflow/mismatch abort and complete-media CRC verification before commit.
+- Preserved the previously committed Alarm/Program until the replacement asset is complete and valid.
+- Added `programRx` diagnostics and extended `alarmRx` with chunk/received/multipart/reset/timeout state.
+- Added host regressions for single-packet compatibility, observed two-packet Alarm (4096+2610), three-packet Program and incomplete-transfer timeout.
+
+## 0.9.0-dev.17 - 2026-09-16 - Consolidation and release-hygiene pass
+
+## 0.9.0-dev.19
+
+- Added `alarmRx` telemetry for the Alarm `00/80` receive, media-validation, automation-call, commit and ACK path.
+- No intentional Alarm scheduling behaviour change.
+
+
+- No intentional runtime or visual behaviour changes relative to dev.15.
+- Removed the stray `usermod_idotmatrix.cpp.orig` backup file from the source package.
+- Hardened release-package regression checks so `.orig` and `.bak` files are rejected as repository artifacts.
+- Extended `.gitignore` to exclude `.orig` backup files in addition to existing temporary-file patterns.
+- Refreshed development version metadata and documentation to establish a clean baseline before further graphics work.
+
+## 0.9.0-dev.15 - 2026-09-15 - Native-resolution light-effect tuning pass 2
+
+- Keeps the hardware-approved 1x/2x/4x band-width scaling for effects 3, 4 and 5 introduced in dev.14.
+- Reverts effect 6 to its original independently seeded per-pixel rendering at 16x16, 32x32 and 64x64 after hardware review found the enlarged 2x2/4x4 cells visually too coarse.
+- Effect 6 colour timing, interpolation and palette behaviour otherwise remain unchanged.
+- Carousel behaviour remains unchanged from dev.13.
+
+## 0.9.0-dev.14 - 2026-09-15 - Native-resolution light-effect tuning pass 1
+
+- Effects 3 and 4 now scale stripe width by 1x/2x/4x for 16/32/64 logical canvases.
+- Effect 5 scales both coloured and black diagonal bands by the same resolution factor.
+- Effect 6 now uses 1x1, 2x2 and 4x4 colour cells on 16x16, 32x32 and 64x64 canvases respectively, preserving its existing colour interpolation and timing.
+- Carousel behaviour remains unchanged from dev.13.
+
+## 0.9.0-dev.13 - 2026-09-15 - Carousel transfer UI final polish
+
+- Keeps the validated red-arrow / blue-tray transfer artwork on 16x16 and the dedicated smoother native 64x64 rendering.
+- Keeps the periodic WLED redraw scheduling introduced in dev.12 so the indeterminate activity segment animates continuously during BLE upload.
+- Removes the final full-width/100% bar state. The Carousel protocol does not announce the real session asset count in advance, so the indicator now remains semantically indeterminate for its entire visible lifetime.
+- Transfer completion is communicated by retiring the transfer UI and starting Carousel playback directly.
+- Hardware feedback confirms the Carousel transfer path and artwork are otherwise behaving correctly.
+
 ## 0.9.0-dev.12 - 2026-09-15 - Transfer activity refresh fix
 
 - Fixed the indeterminate Carousel activity bar remaining at its initial position on real 16x16 and 64x64 tests.

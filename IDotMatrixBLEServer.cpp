@@ -354,7 +354,9 @@ void IDotMatrixBLEServer::abortTransfers() {
   bulkTransfer_.reset();
   bulkLastProgressAt_ = 0;
   if (carouselTransferReady_) protocol_.cancelCarouselAsset();
+  if (presetTransferReady_) protocol_.cancelPresetAsset();
   carouselTransferReady_ = false;
+  presetTransferReady_ = false;
   protocol_.completeRawImage(false);
   protocol_.completeGif(false);
   rawTransferReady_ = false;
@@ -378,17 +380,40 @@ void IDotMatrixBLEServer::processFA02Complete(
     if (bulkResult.completed || bulkResult.aborted) bulkLastProgressAt_ = 0;
     const bool carouselAsset =
       (bulkResult.type == 0x01 || bulkResult.type == 0x03) && bulkResult.imageIndex < 12;
+    const bool presetAsset =
+      (bulkResult.type == 0x01 || bulkResult.type == 0x03) &&
+      bulkResult.imageIndex >= 14 && bulkResult.imageIndex <= 19;
 
     if (bulkResult.aborted) {
       if (carouselTransferReady_) protocol_.cancelCarouselAsset();
+      if (presetTransferReady_) protocol_.cancelPresetAsset();
       protocol_.completeRawImage(false);
       protocol_.completeGif(false);
       rawTransferReady_ = false;
       gifTransferReady_ = false;
       carouselTransferReady_ = false;
+      presetTransferReady_ = false;
     }
 
-    if (carouselAsset) {
+    if (presetAsset) {
+      if (bulkResult.began) {
+        presetTransferReady_ = protocol_.beginPresetAsset(
+          bulkResult.type,
+          bulkResult.imageIndex,
+          bulkResult.timeSign,
+          bulkResult.totalLength
+        );
+      }
+      if (bulkResult.chunkLength > 0 && presetTransferReady_) {
+        presetTransferReady_ = protocol_.writePresetAsset(
+          bulkResult.chunkOffset, bulkResult.chunkData, bulkResult.chunkLength
+        );
+      }
+      if (bulkResult.completed) {
+        protocol_.completePresetAsset(bulkResult.crcValid && presetTransferReady_);
+        presetTransferReady_ = false;
+      }
+    } else if (carouselAsset) {
       if (bulkResult.began) {
         carouselTransferReady_ = protocol_.beginCarouselAsset(
           bulkResult.type,

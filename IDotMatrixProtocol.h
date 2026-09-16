@@ -81,7 +81,8 @@ struct IDotMatrixScheduleActivitySettings {
   uint8_t startMinute = 0;
   uint8_t endHour = 0;
   uint8_t endMinute = 0;
-  uint16_t contentType = 0;
+  uint8_t contentType = 0;
+  uint8_t chunkMarker = 0;
   uint32_t mediaSize = 0;
   uint32_t mediaCRC = 0;
   uint16_t reserved = 0;
@@ -183,6 +184,18 @@ public:
   virtual void onCarouselAssetCancel() = 0;
 };
 
+class IDotMatrixPresetEvents {
+public:
+  virtual ~IDotMatrixPresetEvents() = default;
+  virtual void onPresetReset() = 0;
+  virtual void onPresetActivate(const uint8_t* slots, uint8_t count) = 0;
+  virtual void onPresetSuspend() = 0;
+  virtual bool onPresetAssetBegin(uint8_t type, uint8_t protocolSlot, uint16_t timeSign, size_t totalLength) = 0;
+  virtual bool onPresetAssetData(size_t offset, const uint8_t* data, size_t length) = 0;
+  virtual bool onPresetAssetComplete(bool crcValid) = 0;
+  virtual void onPresetAssetCancel() = 0;
+};
+
 struct IDotMatrixReply {
   static constexpr size_t MAX_SIZE = 16;
 
@@ -195,12 +208,15 @@ struct IDotMatrixReply {
 class IDotMatrixProtocol {
 public:
   explicit IDotMatrixProtocol(IDotMatrixProtocolEvents& events) : events_(events) {}
+  ~IDotMatrixProtocol();
 
   void setScreenType(uint8_t screenType);
   void setDeviceReleaseVersion(uint8_t major, uint8_t minor);
   void setAutomationEvents(IDotMatrixAutomationEvents* events) { automationEvents_ = events; }
   void setCarouselEvents(IDotMatrixCarouselEvents* events) { carouselEvents_ = events; }
+  void setPresetEvents(IDotMatrixPresetEvents* events) { presetEvents_ = events; }
   void onConnected();
+  void loop(uint32_t now);
   void makeDeviceInfoReply(IDotMatrixReply& reply) const;
   bool processFA02(const uint8_t* data, size_t length, IDotMatrixReply& reply);
   bool processAudioStream(const uint8_t* data, size_t length, IDotMatrixReply& reply);
@@ -219,6 +235,13 @@ public:
   bool completeCarouselAsset(bool crcValid);
   void cancelCarouselAsset();
   void suspendCarousel();
+  bool beginPresetAsset(uint8_t type, uint8_t protocolSlot, uint16_t timeSign, size_t totalLength);
+  bool writePresetAsset(size_t offset, const uint8_t* data, size_t length);
+  bool completePresetAsset(bool crcValid);
+  void cancelPresetAsset();
+  void suspendPreset();
+  void alarmRxDiagnostic(char* buffer, size_t length) const;
+  void programRxDiagnostic(char* buffer, size_t length) const;
 
 private:
   static bool hasValidLength(const uint8_t* data, size_t length);
@@ -227,13 +250,92 @@ private:
   static uint32_t crc32(const uint8_t* data, size_t length);
   static void makeCommandAck(uint8_t command, uint8_t subcommand, IDotMatrixReply& reply);
 
+
+  static constexpr uint32_t AUTOMATION_TRANSFER_TIMEOUT_MS = 5000u;
+  static constexpr size_t AUTOMATION_TRANSFER_MAX_BYTES = 512u * 1024u;
+
+  struct MultipartTransfer {
+    uint8_t* buffer = nullptr;
+    size_t expected = 0;
+    size_t received = 0;
+    uint32_t crc = 0;
+    uint32_t lastRxMs = 0;
+    bool active = false;
+  };
+
+  static void* allocateMultipart(size_t size);
+  static void freeMultipart(void* memory);
+  static void resetMultipart(MultipartTransfer& transfer);
+  bool appendMultipart(MultipartTransfer& transfer, const uint8_t* data, size_t length, size_t expected, uint32_t crc);
+  void expireMultipartTransfers(uint32_t now);
+  static bool sameAlarmTransfer(const IDotMatrixAlarmSettings& a, const IDotMatrixAlarmSettings& b);
+  static bool sameProgramTransfer(const IDotMatrixScheduleActivitySettings& a, const IDotMatrixScheduleActivitySettings& b);
+
   IDotMatrixProtocolEvents& events_;
   IDotMatrixAutomationEvents* automationEvents_ = nullptr;
   IDotMatrixCarouselEvents* carouselEvents_ = nullptr;
+  IDotMatrixPresetEvents* presetEvents_ = nullptr;
   uint8_t screenType_ = 0x01;
   uint8_t releaseMajor_ = 0x00;
   uint8_t releaseMinor_ = 0x00;
   uint8_t audioFrame_[21]{};
   uint8_t audioFrameLength_ = 0;
   uint8_t audioFrameExpected_ = 0;
+
+  struct AlarmRxDiag {
+    uint32_t count = 0;
+    size_t packetLength = 0;
+    uint8_t slot = 0;
+    uint8_t flags = 0;
+    uint8_t hour = 0;
+    uint8_t minute = 0;
+    uint8_t duration = 0;
+    uint8_t contentType = 0;
+    uint8_t buzzer = 0;
+    uint32_t mediaSize = 0;
+    size_t mediaAvailable = 0;
+    bool fullHeader = false;
+    bool mediaSizeValid = true;
+    bool crcValid = true;
+    bool slotValid = false;
+    bool automationPresent = false;
+    bool onAlarmCalled = false;
+    bool committed = false;
+    bool ackSent = false;
+    size_t chunkBytes = 0;
+    size_t receivedBytes = 0;
+    bool multipart = false;
+    bool transferReset = false;
+    bool timedOut = false;
+  } alarmRxDiag_;
+
+  struct ProgramRxDiag {
+    uint32_t count = 0;
+    size_t packetLength = 0;
+    uint8_t index = 0;
+    uint8_t flags = 0;
+    uint8_t startHour = 0;
+    uint8_t startMinute = 0;
+    uint8_t endHour = 0;
+    uint8_t endMinute = 0;
+    uint8_t contentType = 0;
+    uint8_t chunkMarker = 0;
+    uint8_t ackStatus = 0;
+    uint32_t mediaSize = 0;
+    size_t chunkBytes = 0;
+    size_t receivedBytes = 0;
+    bool indexValid = false;
+    bool crcValid = true;
+    bool committed = false;
+    bool ackSent = false;
+    bool multipart = false;
+    bool transferReset = false;
+    bool timedOut = false;
+  } programRxDiag_;
+
+  MultipartTransfer alarmTransfer_{};
+  MultipartTransfer programTransfer_{};
+  IDotMatrixAlarmSettings alarmTransferSettings_{};
+  IDotMatrixScheduleActivitySettings programTransferSettings_{};
+  uint32_t nowMs_ = 0;
 };

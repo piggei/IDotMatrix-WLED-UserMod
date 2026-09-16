@@ -28,7 +28,7 @@ inline bool idotStartsKnownNonAudioFrame(const uint8_t* data, size_t length) {
     (command == 0x04 && (subcommand == 0x80 || subcommand == 0x01)) ||
     (command == 0x02 && subcommand == 0x02) ||
     (command == 0x03 && subcommand == 0x02) ||
-    (command == 0x06 && subcommand == 0x01) ||
+    (command == 0x06 && (subcommand == 0x01 || subcommand == 0x02)) ||
     (command == 0x08 && subcommand == 0x80) ||
     (command == 0x09 && subcommand == 0x80) ||
     (command == 0x0A && subcommand == 0x80);
