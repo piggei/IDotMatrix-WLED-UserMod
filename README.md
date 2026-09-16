@@ -1,6 +1,6 @@
 # Development line 0.9
 
-**Current development release: 0.9.0 / build 0.9.0-dev.23.**
+**Current development release: 0.9.0 / build 0.9.0-dev.24.**
 
 This branch starts the ESP32-S3 / PSRAM / native WLED HUB75 generation. The first
 target is the Adafruit MatrixPortal ESP32-S3 driving one 64x64 HUB75 panel on
@@ -39,9 +39,14 @@ GIF replacement, strict framebuffer ownership during GIF staging (preventing
 Clock/TEXT bleed into cold caches), filesystem recovery/capacity checks, reset
 verification, and WLED-playlist termination when iDotMatrix explicitly takes
 display ownership.
-ESP32-S3, native HUB75, PSRAM and 16/32/64 logical-profile output scaling are hardware-validated on MatrixPortal S3. Build 0.9.0-dev.23 extends the reverse-engineered Preset / Default section with the same indeterminate upload indicator used by Carousel. The Preset implementation: Bulk media in protocol slots 14..19 are staged into a dedicated volatile six-slot bank, `06/02` atomically activates an ordered cyclic playlist, images/GIF media use an approximately 3-second dwell, and TEXT duration follows the existing renderer motion timing. Alarm/Program multipart compatibility from dev.21 remains unchanged, including repeated automation headers, Schedule byte 10/11 framing and `0x01`/`0x03` flow control. Carousel remains a separate persistent 12-slot bank.
+ESP32-S3, native HUB75, PSRAM and 16/32/64 logical-profile output scaling are hardware-validated on MatrixPortal S3. Build 0.9.0-dev.24 is a consolidation build: Alarm and Program/Schedule multi-packet transfers are hardware-validated, Preset / Default transfer and playback are hardware-validated, and the shared Carousel/Preset upload indicator remains fully indeterminate for its visible lifetime. Carousel remains a separate persistent 12-slot bank, while Preset / Default is a volatile six-slot bank.
 
-## Preset / Default (dev.23)
+
+### 0.9.0-dev.24 consolidation status
+
+This build intentionally adds no new protocol feature. It reconciles the source, tests and documentation after the Alarm/Program multi-packet fixes and the Preset / Default implementation. Hardware validation has confirmed Alarm and Program/Schedule operation with the corrected repeated-header framing and Schedule `0x01`/`0x03` flow control, as well as Preset media transfer/playback. The former C3 burn-test power-off investigation was traced to an external Home Assistant light-group command rather than to an iDotMatrix renderer, BLE, Alarm, Schedule or Carousel fault; diagnostic burn-test firmware remains outside this development source line.
+
+## Preset / Default (consolidated in dev.24)
 
 The official app's **Preset / Default** page is implemented separately from Device Assets / Carousel. It uses protocol media slots `14..19` (maximum six entries), uploads objects through the existing Bulk transport, and activates the ordered list with command `06/02`. Uploading Preset media never changes the display by itself; the new playlist becomes active only when the activation command arrives.
 

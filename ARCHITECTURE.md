@@ -616,13 +616,13 @@ WLED's pixel/segment model rather than driving HUB75 pins directly.
 
 The iDotMatrix profile defines the logical protocol/rendering canvas, while WLED defines the physical 2D output. Output scaling is automatic and bidirectional at the final WLED segment emission stage for the 16x16, 32x32 and 64x64 profile family: enlargement uses nearest-neighbour replication and reduction uses box averaging. This preserves one renderer/protocol path for Clock, TEXT, images, GIF and procedural content and keeps WLED responsible for physical panel mapping. The historical `rescale` setting is retained for compatibility with the older low-memory storage path; it is not required for 0.9 native output scaling.
 
-## Transfer status rendering (0.9.0-dev.8)
+## Transfer status rendering (consolidated in 0.9.0-dev.24)
 
-Carousel replacement uses a procedural status layer owned by `IDotMatrixWLEDAdapter`. `IDotMatrixCarousel` reports transfer activity to the adapter. Hardware validation showed that the Device Assets setup count is the physical 12-slot bank/order count, not the number of assets in the current upload, so it must not be used as a percentage denominator. The adapter renders a canonical 16x16 red downward arrow and blue receiving tray, scaled by exact integer factors for 32x32/64x64. The bar is indeterminate while the upload session is active and is filled only when the quiet-period confirms completion.
+Carousel replacement uses a procedural status layer owned by `IDotMatrixWLEDAdapter`. `IDotMatrixCarousel` reports transfer activity to the adapter. Hardware validation showed that the Device Assets setup count is the physical 12-slot bank/order count, not the number of assets in the current upload, so it must not be used as a percentage denominator. The adapter renders a canonical 16x16 red downward arrow and blue receiving tray, with a dedicated native 64x64 rendition and normal scaling for other supported profiles.
 
-The protocol provides the length of the current asset only; it does not announce the byte lengths of future Carousel assets before their transfers begin. Therefore exact whole-bank byte progress cannot be computed. Dev.7 uses an asset-weighted global estimate: each configured asset has equal weight, and the current asset contributes `receivedBytes / currentAssetBytes` within its share. Completed slots are tracked with a transient bitmask so a retry cannot advance the global counter twice.
+The activity bar is intentionally **indeterminate for its entire visible lifetime**. The protocol provides the length of the current asset only and does not announce the number or byte lengths of all future assets in the upload session, so no global percentage or synthetic 100% state is displayed. Completion is represented by the indicator disappearing when the upload session ends and playback resumes.
 
-The layer remains delayed by 250 ms to avoid flashes on short transfers and is automatically scaled by the existing 16/32/64 logical-to-physical output adapter. The adapter API remains generic so long standalone GIF transfers can reuse the same renderer later without introducing a second loading implementation.
+The layer remains delayed by 250 ms to avoid flashes on short transfers. The adapter API is shared by Carousel and Preset / Default uploads so both features use the same visual language without duplicating status-rendering code.
 
 ## Preset / Default temporary playlist (0.9.0-dev.22)
 

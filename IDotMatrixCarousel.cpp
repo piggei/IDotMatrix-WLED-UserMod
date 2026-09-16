@@ -237,7 +237,6 @@ void IDotMatrixCarousel::configure(const uint8_t* slots, uint8_t count) {
   startUpdateHold(millis());
   playing_ = false;
   autoStartPending_ = false;
-  transferCompletionShown_ = false;
   resumeOnBoot_ = false;
   currentOrderPos_ = -1;
   currentSlot_ = -1;
@@ -318,7 +317,6 @@ bool IDotMatrixCarousel::beginAsset(
   // A new asset belongs to the same app-side page upload.  Do not let the
   // previous slot's quiet-period timer start playback between two transfers.
   autoStartPending_ = false;
-  transferCompletionShown_ = false;
   if (!validType(type) || slot >= SLOT_COUNT || totalLength == 0 ||
       !carouselHasRoom(totalLength)) return false;
   if (diagnosticUploadBeginCount_ < SLOT_COUNT)
@@ -535,16 +533,10 @@ void IDotMatrixCarousel::loop(uint32_t now) {
     endUpdateHold();
   }
   if (!playing_ && autoStartPending_ && int32_t(now - autoStartAt_) >= 0) {
-    if (!transferCompletionShown_ && updateHoldActive_) {
-      // The quiet period is the first reliable indication that the app has
-      // finished the whole Carousel upload. Show an honest 100% confirmation
-      // briefly before playback starts.
-      adapter_.completeTransferIndicator();
-      transferCompletionShown_ = true;
-      autoStartAt_ = now + 180u;
-    } else {
-      enter();
-    }
+    // The transfer indicator stays indeterminate for its full visible lifetime.
+    // The quiet period ends the upload session by entering Carousel directly;
+    // no synthetic 100% completion frame is shown.
+    enter();
   }
   if (!playing_) return;
   if (currentSlot_ < 0) {

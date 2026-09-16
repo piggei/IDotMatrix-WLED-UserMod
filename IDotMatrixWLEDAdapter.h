@@ -115,7 +115,6 @@ public:
     uint8_t totalUnits = 0
   );
   void updateTransferIndicator(size_t receivedBytes, size_t totalBytes = 0);
-  void completeTransferIndicator();
   void endTransferIndicator();
   bool isTransferIndicatorActive() const { return transferIndicatorActive_; }
   bool isCarouselUpdateHoldActive() const { return carouselUpdateHold_; }
@@ -205,7 +204,6 @@ private:
   size_t transferReceivedBytes_ = 0;
   uint8_t transferCompletedUnits_ = 0;
   uint8_t transferTotalUnits_ = 0;
-  bool transferIndicatorComplete_ = false;
   uint16_t gifPreviousContentMask_ = 0;
   uint32_t gifStagingPrimaryColor_ = 0;
   uint8_t gifPreviousEffect_ = 0;

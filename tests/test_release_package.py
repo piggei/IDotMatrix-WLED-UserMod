@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Development release and critical-section regression checks for 0.9.0-dev.23."""
+"""Development release and critical-section regression checks for 0.9.0-dev.24."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.0-dev.23"
+    assert library["version"] == "0.9.0-dev.24"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     assert 'IDOTMATRIX_RELEASE = "0.9.0"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.0-dev.23"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.0-dev.24"' in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
     assert '"iDotMatrix@;;;2"' in adapter
@@ -34,9 +34,9 @@ def check_release_surface() -> None:
         "platformio_override.ini.c3",
         "platformio_override.ini.c3-audio",
         "platformio_override.ini.matrixportal-s3-hub75",
-        "RELEASE_NOTES_0.9.0-dev.23.md",
-        "TEST_REPORT_0.9.0-dev.23.md",
-        "HARDWARE_TEST_CHECKLIST_0.9.0-dev.23.md",
+        "RELEASE_NOTES_0.9.0-dev.24.md",
+        "TEST_REPORT_0.9.0-dev.24.md",
+        "HARDWARE_TEST_CHECKLIST_0.9.0-dev.24.md",
         "RELEASE_NOTES_0.8.2.md",
         "TEST_REPORT_0.8.2.md",
         "HARDWARE_TEST_CHECKLIST_0.8.2.md",
@@ -165,8 +165,8 @@ def check_device_reset_contract() -> None:
     assert 'schedulePrefs_->remove("flags")' in automation_cpp
     assert "Device reset (`03 80`)" in protocol_doc
     assert "not an ESP32/WLED reboot" in protocol_doc
-    assert (ROOT / "RELEASE_NOTES_0.9.0-dev.23.md").is_file()
-    assert (ROOT / "TEST_REPORT_0.9.0-dev.23.md").is_file()
+    assert (ROOT / "RELEASE_NOTES_0.9.0-dev.24.md").is_file()
+    assert (ROOT / "TEST_REPORT_0.9.0-dev.24.md").is_file()
 
 def check_no_heap_free_inside_queue_spinlock() -> None:
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")

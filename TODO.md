@@ -5,7 +5,9 @@
 - [x] Validate the main iDotMatrix visual paths at true 64x64, including TEXT, 32x64 glyphs, GIF, Carousel and procedural TEXT effects.
 - [x] Validate automatic logical 32x32 -> physical 64x64 and logical 16x16 -> physical 64x64 output scaling.
 - [ ] Validate physical 32x32 combinations on real hardware when a 32x32 panel is available.
-- [ ] Continue Carousel/alarm/program/reset soak testing on the new target as the 0.9 line matures.
+- [x] Hardware-validate Alarm and Program/Schedule multi-packet transfer on the 64x64 target.
+- [x] Hardware-validate Preset / Default transfer and playback, including long uploads with the shared transfer indicator.
+- [ ] Continue general Carousel/Alarm/Program/Preset/reset soak testing on the new target as the 0.9 line matures.
 - [ ] Investigate iOS BLE compatibility separately from the hardware migration.
 
 # Post-0.8.2 roadmap
@@ -60,4 +62,8 @@ Release 0.9 is intentionally reserved for the new-hardware phase. Items in this 
 
 Protocol/function changes should continue to be introduced only after they are understood from captures or validated in the standalone ESP32 emulator. The official iDotMatrix app/original-device wire behaviour remains the compatibility reference.
 
-- [ ] Reuse the dev.7 transfer-indicator infrastructure for long standalone/gallery GIF uploads after Carousel hardware validation.
+- [ ] Consider reusing the consolidated Carousel/Preset transfer-indicator infrastructure for long standalone/gallery GIF uploads if a real need is observed.
+
+## Closed investigations
+
+- ESP32-C3 long-run OFF event: diagnostic firmware proved the transition was a real WLED global power-off but not initiated by iDotMatrix BLE, Alarm, Schedule, Carousel or adapter calls. Home Assistant was subsequently found to include the matrix in a house-light group, so global “lights off” commands were the external cause. The dedicated `0.8.2-diag.2` branch is not part of the 0.9 source line.

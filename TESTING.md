@@ -1,3 +1,9 @@
+## 0.9.0-dev.24 consolidation regression
+
+Dev.24 is a consolidation pass with no new wire protocol. The full host suite is required to remain green across renderer, BLE framing, Bulk/Carousel/Preset routing, Alarm/Program multipart handling, WLED adapter ownership and release-package checks. Hardware status carried into this build: Alarm and Program/Schedule multi-packet transfer is validated, Preset / Default transfer and playback are validated, and the shared upload indicator has been observed during long Preset transfers.
+
+The transfer-indicator regression specifically asserts the final design: the activity bar remains indeterminate until the indicator is retired; there is no determinate or synthetic 100% completion frame.
+
 ## 0.9.0-dev.23 Preset upload-indicator regression
 
 The dev.23 checks retain all dev.22 Preset routing/multipart coverage and add release-package guards for the shared transfer-indicator hooks (`beginTransferIndicator`, `updateTransferIndicator`) plus the interrupted-upload timeout. Runtime transfer semantics remain unchanged.

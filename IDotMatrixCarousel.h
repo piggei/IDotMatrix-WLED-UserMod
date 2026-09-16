@@ -100,7 +100,6 @@ private:
   uint32_t nextSwitchAt_ = 0;
   bool autoStartPending_ = false;
   uint32_t autoStartAt_ = 0;
-  bool transferCompletionShown_ = false;
   bool updateHoldActive_ = false;
   uint32_t updateHoldDeadline_ = 0;
   static constexpr uint32_t UPDATE_HOLD_TIMEOUT_MS = 8000u;

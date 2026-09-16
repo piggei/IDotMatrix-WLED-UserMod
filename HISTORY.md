@@ -1,3 +1,11 @@
+## 0.9.0-dev.24
+
+- Consolidation build: no new protocol feature.
+- Reconciled README, protocol/architecture notes, testing guidance and TODO status with hardware-validated Alarm, Program/Schedule and Preset / Default behavior.
+- Removed obsolete transfer-completion state left over from the abandoned determinate/100% Carousel indicator; the shared Carousel/Preset activity bar is indeterminate until it disappears.
+- Recorded closure of the ESP32-C3 burn-test power-off investigation as an external Home Assistant light-group command, not an iDotMatrix firmware-originated OFF transition.
+- Retained the validated dev.21 Alarm/Schedule multipart framing and the dev.22-dev.23 Preset / Default implementation unchanged.
+
 ## 0.9.0-dev.23
 
 - Reuses the Carousel indeterminate transfer indicator for Preset / Default uploads (slots 14..19).

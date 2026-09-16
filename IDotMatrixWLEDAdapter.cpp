@@ -264,7 +264,6 @@ void IDotMatrixWLEDAdapter::beginTransferIndicator(
   transferReceivedBytes_ = 0;
   transferCompletedUnits_ = completedUnits;
   transferTotalUnits_ = totalUnits;
-  transferIndicatorComplete_ = false;
   activateDisplayEffect();
   strip.trigger();
 }
@@ -276,12 +275,6 @@ void IDotMatrixWLEDAdapter::updateTransferIndicator(size_t receivedBytes, size_t
   strip.trigger();
 }
 
-void IDotMatrixWLEDAdapter::completeTransferIndicator() {
-  if (!transferIndicatorActive_) return;
-  transferIndicatorComplete_ = true;
-  strip.trigger();
-}
-
 void IDotMatrixWLEDAdapter::endTransferIndicator() {
   transferIndicatorActive_ = false;
   transferIndicatorLastRefreshAt_ = 0;
@@ -289,7 +282,6 @@ void IDotMatrixWLEDAdapter::endTransferIndicator() {
   transferReceivedBytes_ = 0;
   transferCompletedUnits_ = 0;
   transferTotalUnits_ = 0;
-  transferIndicatorComplete_ = false;
 }
 
 void IDotMatrixWLEDAdapter::renderTransferIndicator(uint32_t now) {
