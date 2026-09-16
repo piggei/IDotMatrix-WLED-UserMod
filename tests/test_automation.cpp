@@ -291,7 +291,7 @@ static void testTimeBehaviour() {
   assert(current.year == 2026 && current.month == 9 && current.day == 10);
   assert(current.hour == 14 && current.minute == 25 && current.second == 33);
 
-  testYear = 1970; // invalidate WLED localTime and exercise app fallback
+  testYear = 1970; // invalidate WLED localTime and exercise app-time operation
   testMillis = 1000;
   IDotMatrixTimeSyncSettings sync{};
   sync.year = 2026;
@@ -321,6 +321,47 @@ static void testTimeBehaviour() {
   assert(IDotMatrixAutomation::scheduleTimeInside(overnight, 23u * 60u));
   assert(IDotMatrixAutomation::scheduleTimeInside(overnight, 5u * 60u));
   assert(!IDotMatrixAutomation::scheduleTimeInside(overnight, 12u * 60u));
+}
+
+
+static void testAppTimeSyncOverridesValidWledClockForAlarm() {
+  resetState();
+  Fixture f;
+  f.automation.begin();
+
+  // Model the S3/NTP regression: WLED exposes a valid localTime, but the
+  // iDotMatrix app has just supplied a different local clock. Compatibility
+  // requires Alarm/Program to follow the app-synchronized time.
+  testYear = 2026;
+  testMonth = 9;
+  testDay = 16;
+  testHour = 0;
+  testMinute = 51;
+  testSecond = 0;
+
+  testMillis = 1000;
+  IDotMatrixTimeSyncSettings sync{};
+  sync.year = 2026;
+  sync.month = 9;
+  sync.day = 16;
+  sync.hour = 2;
+  sync.minute = 51;
+  sync.second = 0;
+  f.automation.onTimeSync(sync);
+
+  IDotMatrixAlarmSettings alarm{};
+  alarm.slot = 0;
+  alarm.flags = 0x01;
+  alarm.hour = 2;
+  alarm.minute = 51;
+  alarm.durationSeconds = 10;
+  alarm.packetLength = 12;
+  assert(f.automation.onAlarm(alarm, nullptr, 0));
+
+  f.automation.loop(1600);
+  assert(f.automation.alarmActive_);
+  assert(f.automation.activeAlarmSlot_ == 0);
+  assert((f.automation.alarms_[0].flags & 0x01u) == 0); // one-shot consumed
 }
 
 static void testDeviceResetClearsPersistentAutomationButKeepsTimeSync() {
@@ -389,6 +430,7 @@ int main() {
   testMissingMediaAndCorruptMetadataRecovery();
   testAlarmPersistence();
   testTimeBehaviour();
+  testAppTimeSyncOverridesValidWledClockForAlarm();
   testDeviceResetClearsPersistentAutomationButKeepsTimeSync();
   testExplicitScheduleClear();
   return 0;

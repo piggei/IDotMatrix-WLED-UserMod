@@ -25,6 +25,14 @@ void alarmPath(uint8_t slot, char* buffer, size_t length) {
   snprintf(buffer, length, "/idot_a%u.bin", unsigned(slot));
 }
 
+void alarmTempPath(uint8_t slot, char* buffer, size_t length) {
+  snprintf(buffer, length, "/idot_at%u.bin", unsigned(slot));
+}
+
+void alarmBackupPath(uint8_t slot, char* buffer, size_t length) {
+  snprintf(buffer, length, "/idot_ab%u.bin", unsigned(slot));
+}
+
 void schedulePath(uint8_t index, char* buffer, size_t length) {
   snprintf(buffer, length, "/idot_s%u.bin", unsigned(index));
 }
@@ -98,6 +106,12 @@ void IDotMatrixAutomation::resetPersistent() {
     alarmPath(slot, path, sizeof(path));
     WLED_FS.remove(path);
     if (WLED_FS.exists(path)) lastResetOk_ = false;
+    alarmTempPath(slot, path, sizeof(path));
+    WLED_FS.remove(path);
+    if (WLED_FS.exists(path)) lastResetOk_ = false;
+    alarmBackupPath(slot, path, sizeof(path));
+    WLED_FS.remove(path);
+    if (WLED_FS.exists(path)) lastResetOk_ = false;
   }
 
   scheduleGlobalFlags_ = 0;
@@ -152,6 +166,28 @@ void IDotMatrixAutomation::loadPersistence() {
       alarmPrefs_->remove(key);
     }
     alarms_[slot].lastTriggerMinuteKey = 0xFFFFFFFFu;
+
+    char tempPath[20], finalPath[20], backupPath[20];
+    alarmTempPath(slot, tempPath, sizeof(tempPath));
+    alarmPath(slot, finalPath, sizeof(finalPath));
+    alarmBackupPath(slot, backupPath, sizeof(backupPath));
+    WLED_FS.remove(tempPath);
+    if (alarms_[slot].configured && alarms_[slot].mediaSize > 0) {
+      File file = WLED_FS.open(finalPath, "r");
+      bool mediaValid = file && uint32_t(file.size()) == alarms_[slot].mediaSize;
+      if (file) file.close();
+      if (!mediaValid && WLED_FS.exists(backupPath)) {
+        WLED_FS.remove(finalPath);
+        if (WLED_FS.rename(backupPath, finalPath)) {
+          file = WLED_FS.open(finalPath, "r");
+          mediaValid = file && uint32_t(file.size()) == alarms_[slot].mediaSize;
+          if (file) file.close();
+        }
+      }
+      if (mediaValid) WLED_FS.remove(backupPath);
+    } else {
+      WLED_FS.remove(backupPath);
+    }
   }
 
   scheduleGlobalFlags_ = schedulePrefs_->getUChar("flags", 0);
@@ -264,13 +300,40 @@ bool IDotMatrixAutomation::onAlarm(
     if (mediaLength != settings.mediaSize ||
         crc32(media, mediaLength) != settings.mediaCRC) return false;
 
-    char path[20];
-    alarmPath(settings.slot, path, sizeof(path));
+    char finalPath[20], tempPath[20], backupPath[20];
+    alarmPath(settings.slot, finalPath, sizeof(finalPath));
+    alarmTempPath(settings.slot, tempPath, sizeof(tempPath));
+    alarmBackupPath(settings.slot, backupPath, sizeof(backupPath));
+
     if (mediaLength == 0) {
-      WLED_FS.remove(path);
-    } else if (!writeFile(path, media, mediaLength)) {
-      lastError_ = Error::FileWrite;
-      return false;
+      WLED_FS.remove(tempPath);
+      WLED_FS.remove(backupPath);
+      WLED_FS.remove(finalPath);
+    } else {
+      // Transactional Alarm replacement: never truncate the currently valid
+      // media until the complete new asset has been written to a temp file.
+      WLED_FS.remove(tempPath);
+      if (!writeFile(tempPath, media, mediaLength)) {
+        WLED_FS.remove(tempPath);
+        lastError_ = Error::FileWrite;
+        return false;
+      }
+
+      WLED_FS.remove(backupPath);
+      const bool finalExists = WLED_FS.exists(finalPath);
+      bool oldStaged = true;
+      if (finalExists) oldStaged = WLED_FS.rename(finalPath, backupPath);
+      bool promoted = oldStaged && WLED_FS.rename(tempPath, finalPath);
+      if (!promoted) {
+        WLED_FS.remove(tempPath);
+        if (finalExists && oldStaged) {
+          WLED_FS.remove(finalPath);
+          WLED_FS.rename(backupPath, finalPath);
+        }
+        lastError_ = Error::FileWrite;
+        return false;
+      }
+      WLED_FS.remove(backupPath);
     }
   }
 
@@ -503,9 +566,13 @@ uint8_t IDotMatrixAutomation::weekdayBit(uint16_t yearValue, uint8_t monthValue,
 }
 
 bool IDotMatrixAutomation::currentDateTime(uint32_t now, DateTimeParts& value) const {
-  // Prefer WLED's persisted/NTP local clock whenever it is valid.  The BLE app
-  // sync remains a useful fallback for isolated installations with no network.
-  if (year(localTime) >= 2020) {
+  // The iDotMatrix app explicitly synchronizes the device clock before using
+  // Alarm/Program features. Match the original device and the standalone
+  // emulator: once received, app-provided local time is authoritative for
+  // iDotMatrix automations. WLED/NTP localTime remains the fallback when the
+  // app has not synchronized time in the current boot/session.
+  if (!appTimeValid_) {
+    if (year(localTime) < 2020) return false;
     value.year = uint16_t(year(localTime));
     value.month = uint8_t(month(localTime));
     value.day = uint8_t(day(localTime));
@@ -514,7 +581,6 @@ bool IDotMatrixAutomation::currentDateTime(uint32_t now, DateTimeParts& value) c
     value.second = uint8_t(second(localTime));
     return true;
   }
-  if (!appTimeValid_) return false;
 
   value.year = appTime_.year;
   value.month = appTime_.month;
@@ -899,6 +965,42 @@ void IDotMatrixAutomation::loop(uint32_t now) {
     }
     alarmReturnValid_ = false;
   }
+}
+
+void IDotMatrixAutomation::alarmDiagnosticSummary(char* buffer, size_t length, uint32_t now) const {
+  if (buffer == nullptr || length == 0) return;
+  DateTimeParts current{};
+  const bool timeOk = currentDateTime(now, current);
+  if (timeOk) {
+    snprintf(buffer, length,
+      "alarmDiag=time:%04u-%02u-%02u %02u:%02u:%02u src:%s checkAge:%lums active:%d err:%s",
+      unsigned(current.year), unsigned(current.month), unsigned(current.day),
+      unsigned(current.hour), unsigned(current.minute), unsigned(current.second),
+      appTimeValid_ ? "app" : "wled",
+      static_cast<unsigned long>(now - lastAlarmCheckAt_),
+      alarmActive_ ? int(activeAlarmSlot_) : -1,
+      lastErrorText());
+  } else {
+    snprintf(buffer, length,
+      "alarmDiag=time:invalid src:%s checkAge:%lums active:%d err:%s",
+      appTimeValid_ ? "app" : "wled",
+      static_cast<unsigned long>(now - lastAlarmCheckAt_),
+      alarmActive_ ? int(activeAlarmSlot_) : -1,
+      lastErrorText());
+  }
+}
+
+bool IDotMatrixAutomation::alarmDiagnosticSlot(uint8_t slot, char* buffer, size_t length) const {
+  if (buffer == nullptr || length == 0 || slot >= IDotMatrixAlarmSettings::SLOT_COUNT) return false;
+  const AlarmSlot& alarm = alarms_[slot];
+  if (!alarm.configured) return false;
+  snprintf(buffer, length,
+    "alarmSlot=%u flags:0x%02X time:%02u:%02u dur:%us type:%u buzz:%u media:%lu last:0x%08lX",
+    unsigned(slot), unsigned(alarm.flags), unsigned(alarm.hour), unsigned(alarm.minute),
+    unsigned(alarm.durationSeconds), unsigned(alarm.contentType), unsigned(alarm.buzzer),
+    static_cast<unsigned long>(alarm.mediaSize),
+    static_cast<unsigned long>(alarm.lastTriggerMinuteKey));
+  return true;
 }
 
 uint8_t IDotMatrixAutomation::configuredAlarmCount() const {

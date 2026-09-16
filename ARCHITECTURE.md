@@ -80,6 +80,11 @@ keeping a second full animation framebuffer.
 
 Large pixel allocations prefer PSRAM when it is present.
 
+For the 0.9 native-matrix path, output scaling is automatic and bidirectional.
+Logical 16/32/64 canvases may target physical 16/32/64 WLED matrices. Enlargement
+uses nearest-neighbour replication; reduction uses box averaging. This output
+policy is separate from the historical low-memory `rescale=true` storage mode.
+
 ### `IDotMatrixMedia`
 
 Owns compact PNG decoding, GIF RX/PLAY files, decoder lifetime, and the optional
@@ -337,8 +342,7 @@ When PSRAM is detected, the full AnimatedGIF 12-bit path is selected. The
 allocator first requests PSRAM for the decoder object. This preserves direct
 playback and avoids LittleFS frame-cache writes.
 
-This path is implemented in 0.7.1 but awaits hardware validation on the pending
-PSRAM board.
+This path is hardware-validated in the 0.9 development line on Adafruit MatrixPortal ESP32-S3 with 2 MB PSRAM and WLED 0.17 native HUB75 output. Repeated animated GIF transfers and Carousel playback use `animatedgif12/psram` without the no-PSRAM frame-cache path.
 
 ### 64x64 without PSRAM
 
@@ -599,3 +603,32 @@ temporary 16x16 legacy canvas on the stack and scale it immediately into the
 existing renderer canvas. There is no persistent second framebuffer. Animated
 visualizers are refreshed at an 80 ms cadence while `iDotMatrix` owns
 the selected segment; local AudioReactive data is sampled at a 40 ms cadence.
+
+## 0.9.0-dev.1 hardware transition
+
+The 0.9 development line keeps the stable 0.8.2 protocol and ownership architecture
+but moves the primary hardware target to Adafruit MatrixPortal ESP32-S3, WLED's
+native HUB75 backend, a 64x64 logical/physical matrix and PSRAM-backed direct GIF
+playback. HUB75 remains a WLED output backend; the Usermod continues to render into
+WLED's pixel/segment model rather than driving HUB75 pins directly.
+
+## 0.9 native-matrix scaling
+
+The iDotMatrix profile defines the logical protocol/rendering canvas, while WLED defines the physical 2D output. Output scaling is automatic and bidirectional at the final WLED segment emission stage for the 16x16, 32x32 and 64x64 profile family: enlargement uses nearest-neighbour replication and reduction uses box averaging. This preserves one renderer/protocol path for Clock, TEXT, images, GIF and procedural content and keeps WLED responsible for physical panel mapping. The historical `rescale` setting is retained for compatibility with the older low-memory storage path; it is not required for 0.9 native output scaling.
+
+## Transfer status rendering (0.9.0-dev.8)
+
+Carousel replacement uses a procedural status layer owned by `IDotMatrixWLEDAdapter`. `IDotMatrixCarousel` reports transfer activity to the adapter. Hardware validation showed that the Device Assets setup count is the physical 12-slot bank/order count, not the number of assets in the current upload, so it must not be used as a percentage denominator. The adapter renders a canonical 16x16 red downward arrow and blue receiving tray, scaled by exact integer factors for 32x32/64x64. The bar is indeterminate while the upload session is active and is filled only when the quiet-period confirms completion.
+
+The protocol provides the length of the current asset only; it does not announce the byte lengths of future Carousel assets before their transfers begin. Therefore exact whole-bank byte progress cannot be computed. Dev.7 uses an asset-weighted global estimate: each configured asset has equal weight, and the current asset contributes `receivedBytes / currentAssetBytes` within its share. Completed slots are tracked with a transient bitmask so a retry cannot advance the global counter twice.
+
+The layer remains delayed by 250 ms to avoid flashes on short transfers and is automatically scaled by the existing 16/32/64 logical-to-physical output adapter. The adapter API remains generic so long standalone GIF transfers can reuse the same renderer later without introducing a second loading implementation.
+
+## Preset / Default temporary playlist (0.9.0-dev.22)
+
+Preset / Default is intentionally independent from the persistent Carousel subsystem. Bulk objects addressed to protocol slots 14..19 are staged into a six-slot volatile bank. Upload does not acquire display ownership. The `06/02` activation command promotes the selected pending objects and starts a cyclic player from the first requested slot. This keeps replacement atomic from the user's point of view and prevents a partially uploaded Preset from appearing on screen.
+
+The player reuses the normal GIF/TEXT render paths and Bulk CRC/flow-control implementation. Preset files are temporary LittleFS objects only; there is no NVS metadata and no boot restore.
+
+### Preset upload feedback (0.9.0-dev.23)
+Preset Bulk uploads reuse the Carousel transfer indicator. The UI is kept active across consecutive slot uploads and is ended by the `06/02` activation command. A 5 s idle timeout prevents an abandoned upload from leaving the indicator on-screen indefinitely. This is presentation-only and does not alter the pending/active Preset transaction model.

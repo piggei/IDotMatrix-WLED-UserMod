@@ -430,17 +430,71 @@ int main() {
   assert(strip.segmentRef().colorAt(0, 0) == RGBW32(41, 42, 43, 0));
   assert(strip.segmentRef().colorAt(15, 15) == RGBW32(91, 92, 93, 0));
 
-  // A profile/segment mismatch is black in strict mode and nearest-neighbour
-  // sampled only when rescale is explicitly enabled.
+  // 0.9 native-matrix behavior: logical and physical dimensions are
+  // independent. Every 16/32/64 combination scales automatically.
+  adapter.setRescaleEnabled(false);
+
+  // 64 -> 32: box-average a 2x2 source block into one destination pixel.
   assert(renderer.begin(0x04));
-  const uint8_t scaledPixel[] = {4, 8};
-  adapter.onGraffitiPixels(90, 80, 70, scaledPixel, sizeof(scaledPixel));
+  strip.segmentRef().width = 32;
+  strip.segmentRef().height = 32;
+  const uint8_t down64to32[] = {2, 2};
+  adapter.onGraffitiPixels(100, 80, 60, down64to32, sizeof(down64to32));
   strip.renderEffect();
   assert(!adapter.dimensionsMatch());
-  assert(strip.segmentRef().colorAt(1, 2) == BLACK);
-  adapter.setRescaleEnabled(true);
+  assert(!adapter.autoUpscaleActive());
+  assert(adapter.autoDownscaleActive());
+  assert(strip.segmentRef().colorAt(1, 1) == RGBW32(25, 20, 15, 0));
+
+  // 64 -> 16: a 4x4 source block is reduced to one destination pixel.
+  strip.segmentRef().width = 16;
+  strip.segmentRef().height = 16;
   strip.renderEffect();
-  assert(strip.segmentRef().colorAt(1, 2) == RGBW32(90, 80, 70, 0));
+  assert(adapter.autoDownscaleActive());
+  assert(strip.segmentRef().colorAt(0, 0) == RGBW32(6, 5, 3, 0));
+
+  // 32 -> 16: verify the remaining physical-downscale combination.
+  assert(renderer.begin(0x03));
+  const uint8_t down32to16[] = {2, 2};
+  adapter.onGraffitiPixels(100, 80, 60, down32to16, sizeof(down32to16));
+  strip.renderEffect();
+  assert(adapter.autoDownscaleActive());
+  assert(strip.segmentRef().colorAt(1, 1) == RGBW32(25, 20, 15, 0));
+
+  // 16 -> 64: nearest-neighbour expansion produces a crisp 4x4 block.
+  assert(renderer.begin(0x01));
+  strip.segmentRef().width = 64;
+  strip.segmentRef().height = 64;
+  const uint8_t upscaledPixel[] = {1, 2};
+  adapter.onGraffitiPixels(10, 20, 30, upscaledPixel, sizeof(upscaledPixel));
+  strip.renderEffect();
+  assert(!adapter.dimensionsMatch());
+  assert(adapter.autoUpscaleActive());
+  assert(!adapter.autoDownscaleActive());
+  for (uint16_t y = 8; y < 12; ++y) {
+    for (uint16_t x = 4; x < 8; ++x) {
+      assert(strip.segmentRef().colorAt(x, y) == RGBW32(10, 20, 30, 0));
+    }
+  }
+
+  // 16 -> 32 and 32 -> 64 use the same automatic upscale path.
+  strip.segmentRef().width = 32;
+  strip.segmentRef().height = 32;
+  strip.renderEffect();
+  assert(adapter.autoUpscaleActive());
+  assert(strip.segmentRef().colorAt(2, 4) == RGBW32(10, 20, 30, 0));
+
+  assert(renderer.begin(0x03));
+  strip.segmentRef().width = 64;
+  strip.segmentRef().height = 64;
+  const uint8_t up32to64[] = {3, 5};
+  adapter.onGraffitiPixels(40, 50, 60, up32to64, sizeof(up32to64));
+  strip.renderEffect();
+  assert(adapter.autoUpscaleActive());
+  assert(strip.segmentRef().colorAt(6, 10) == RGBW32(40, 50, 60, 0));
+
+  strip.segmentRef().width = 16;
+  strip.segmentRef().height = 16;
 
   // Switching to a normal WLED effect through the UI/API must release any
   // active iDotMatrix media state even though no BLE content command arrived.
@@ -587,6 +641,144 @@ int main() {
   assert(clockAdapter.hasLogicalContent());
   assert(!clockAdapter.isClockActive());
   assert(!renderer.isVisible());
+
+  // 0.9.0-dev.6: Carousel uploads get a delayed procedural status frame.
+  // Short assets must not flash the indicator; after the threshold it becomes
+  // visible and progresses without surrendering iDotMatrix ownership.
+  testMillis = 1000;
+  clockAdapter.beginTransferIndicator(1000, 250);
+  assert(clockAdapter.isTransferIndicatorActive());
+  clockAdapter.updateTransferIndicator(500, 1000);
+  strip.renderEffect();
+  assert(!renderer.isVisible());
+  testMillis = 1300;
+  strip.renderEffect();
+  assert(renderer.isVisible());
+  bool transferPixelSeen = false;
+  for (uint8_t y = 0; y < renderer.height() && !transferPixelSeen; ++y) {
+    for (uint8_t x = 0; x < renderer.width(); ++x) {
+      const auto* pixel = renderer.pixel(x, y);
+      if (pixel && (pixel->red || pixel->green || pixel->blue)) {
+        transferPixelSeen = true;
+        break;
+      }
+    }
+  }
+  assert(transferPixelSeen);
+
+  // 0.9.0-dev.11: setup count is not the real session total. The 16x16
+  // status bar is therefore indeterminate: a short segment sweeps left/right
+  // until the quiet-period confirms completion. The canonical artwork keeps
+  // the blue tray and downward-only red arrow separated from the bar.
+  clockAdapter.endTransferIndicator();
+  assert(renderer.begin(0x01));
+  testMillis = 2000;
+  clockAdapter.beginTransferIndicator(1000, 0, 1, 12);
+  clockAdapter.updateTransferIndicator(500, 1000);
+  strip.renderEffect();
+  // 0.9.0-dev.12 regression: the adapter loop must keep requesting WLED
+  // redraws while the activity UI is visible; BLE chunks are not the clock.
+  const uint32_t refreshTriggersBefore = stripTriggerCount;
+  testMillis = 2071;
+  clockAdapter.loop(testMillis);
+  assert(stripTriggerCount > refreshTriggersBefore);
+  testMillis = 2000;
+  const auto* trayPixel = renderer.pixel(2, 10);
+  assert(trayPixel && trayPixel->blue == 235 && trayPixel->red == 35);
+  bool redArrowSeen = false;
+  for (uint8_t y = 0; y < 15 && !redArrowSeen; ++y) {
+    for (uint8_t x = 0; x < 16; ++x) {
+      const auto* pixel = renderer.pixel(x, y);
+      if (pixel && pixel->red == 236 && pixel->green == 28 && pixel->blue == 36) {
+        redArrowSeen = true;
+        break;
+      }
+    }
+  }
+  assert(redArrowSeen);
+  uint8_t activeBarPixelsA = 0;
+  uint8_t firstActiveA = 0xFF;
+  for (uint8_t x = 1; x <= 14; ++x) {
+    const auto* pixel = renderer.pixel(x, 15);
+    assert(pixel);
+    if (pixel->green == 220) {
+      if (firstActiveA == 0xFF) firstActiveA = x;
+      ++activeBarPixelsA;
+    }
+  }
+  assert(activeBarPixelsA == 4);
+  testMillis = 2450;
+  strip.renderEffect();
+  uint8_t activeBarPixelsB = 0;
+  uint8_t firstActiveB = 0xFF;
+  for (uint8_t x = 1; x <= 14; ++x) {
+    const auto* pixel = renderer.pixel(x, 15);
+    assert(pixel);
+    if (pixel->green == 220) {
+      if (firstActiveB == 0xFF) firstActiveB = x;
+      ++activeBarPixelsB;
+    }
+  }
+  assert(activeBarPixelsB == 4);
+  assert(firstActiveA != firstActiveB);
+  // 0.9.0-dev.13: completion does not turn the indeterminate activity
+  // indicator into a false 100% progress bar. It keeps sweeping until the
+  // transfer UI is retired and Carousel playback resumes.
+  clockAdapter.completeTransferIndicator();
+  strip.renderEffect();
+  uint8_t activeBarPixelsDone = 0;
+  for (uint8_t x = 1; x <= 14; ++x) {
+    const auto* pixel = renderer.pixel(x, 15);
+    assert(pixel);
+    if (pixel->green == 220) ++activeBarPixelsDone;
+  }
+  assert(activeBarPixelsDone == 4);
+
+  // 0.9.0-dev.10: native 64x64 transfer art must use the dedicated
+  // smoother rendering rather than a raw 4x copy of the 16x16 glyph.
+  clockAdapter.endTransferIndicator();
+  assert(renderer.begin(0x04));
+  testMillis = 3000;
+  clockAdapter.beginTransferIndicator(1000, 0, 0, 0);
+  clockAdapter.updateTransferIndicator(500, 1000);
+  strip.renderEffect();
+  const auto* tray64 = renderer.pixel(16, 47);
+  assert(tray64 && tray64->blue == 255 && tray64->green == 176);
+  bool red64Seen = false;
+  for (uint8_t y = 0; y < 39 && !red64Seen; ++y) {
+    for (uint8_t x = 20; x < 44; ++x) {
+      const auto* pixel = renderer.pixel(x, y);
+      if (pixel && pixel->red >= 238 && pixel->green <= 92) {
+        red64Seen = true;
+        break;
+      }
+    }
+  }
+  assert(red64Seen);
+  uint8_t active64 = 0;
+  for (uint8_t x = 8; x <= 55; ++x) {
+    const auto* pixel = renderer.pixel(x, 59);
+    if (pixel && pixel->green == 220) ++active64;
+  }
+  assert(active64 == 12);
+  clockAdapter.completeTransferIndicator();
+  strip.renderEffect();
+  uint8_t active64Done = 0;
+  for (uint8_t x = 8; x <= 55; ++x) {
+    const auto* pixel = renderer.pixel(x, 59);
+    if (pixel && pixel->green == 220) ++active64Done;
+  }
+  assert(active64Done == 12);
+
+  // Starting the next Carousel slot resets current bytes but must not hide an
+  // already-visible indicator or restart the anti-flash delay.
+  clockAdapter.beginTransferIndicator(2000, 250);
+  clockAdapter.updateTransferIndicator(100, 2000);
+  strip.renderEffect();
+  assert(renderer.isVisible());
+  clockAdapter.endTransferIndicator();
+  assert(!clockAdapter.isTransferIndicatorActive());
+
   clockAdapter.pollDisplayEffectSelection();
   assert(!clockAdapter.takeDisplayEffectActivationRequest());
   clockAdapter.endCarouselUpdateHold();

@@ -1,3 +1,165 @@
+## 0.9.0-dev.23
+
+- Reuses the Carousel indeterminate transfer indicator for Preset / Default uploads (slots 14..19).
+- Keeps the indicator continuous across consecutive Preset assets and removes it on `06/02` activation.
+- Adds a 5 s idle safety timeout for abandoned Preset uploads, restoring the currently active Preset when applicable.
+- Adds `/json/info` Preset `upload=0/1` telemetry.
+- No changes to Preset multipart ACK, CRC, staging or activation semantics.
+
+## 0.9.0-dev.22
+
+- Added the reverse-engineered iDotMatrix Preset / Default section as a dedicated volatile six-slot playlist bank using protocol slots 14..19.
+- Added `06/02` activation with ordered cyclic playback and kept Preset state separate from the persistent Carousel bank.
+- Routed Bulk GIF/TEXT objects for slots 14..19 into Preset staging before the generic live-media path, preserving the current display until activation.
+- Added pending-to-active promotion so replacing a Preset while another is playing does not partially switch media before the new `06/02`.
+- Reused Bulk multipart flow control and CRC validation, including `0x01` intermediate and `0x03` complete ACK behavior.
+- Added renderer-derived TEXT presentation timing; static/page modes retain a final ~3 s hold while horizontal scroll waits for the complete visual pass.
+- Preset storage is intentionally volatile: temporary files are cleared at boot/reset and are not restored through NVS.
+- Added Preset diagnostics and BLE framing recognition so `06/02` remains routable after audio traffic.
+
+## 0.9.0-dev.21
+
+- Corrected Program/Schedule activity framing from the hardware-validated emulator handoff: byte 10 is an 8-bit content type and byte 11 is a separate per-chunk marker.
+- Corrected Schedule flow control: accepted incomplete activity media now receives ACK status `0x01`; status `0x03` is sent only after complete media assembly, full-object CRC validation and successful commit; rejected/failing completion uses `0x02`.
+- Narrowed in-progress Schedule media identity to activity index + content type + total media size + total media CRC, explicitly excluding the per-chunk marker.
+- Preserved Alarm ACK semantics and generic FA02 reassembly unchanged.
+- Extended host regressions to cover marker `0x00 -> 0x02`, 1/3-chunk Schedule media, intermediate/final/error ACKs and monotonic multipart accumulation.
+
+## 0.9.0-dev.20
+
+- Fixed Alarm media uploads split by the 64x64 app across multiple complete `00/80` logical packets.
+- Fixed Program/Schedule activity media uploads using the same multi-logical-packet model.
+- `mediaSize` is now treated as the total asset size; chunks are assembled by stable metadata, total size and CRC rather than by reserved continuation values.
+- Added independent Alarm and Program transactions, 5-second timeout, 512 KiB defensive size limit, overflow/mismatch abort and complete-media CRC verification before commit.
+- Preserved the previously committed Alarm/Program until the replacement asset is complete and valid.
+- Added `programRx` diagnostics and extended `alarmRx` with chunk/received/multipart/reset/timeout state.
+- Added host regressions for single-packet compatibility, observed two-packet Alarm (4096+2610), three-packet Program and incomplete-transfer timeout.
+
+## 0.9.0-dev.17 - 2026-09-16 - Consolidation and release-hygiene pass
+
+## 0.9.0-dev.19
+
+- Added `alarmRx` telemetry for the Alarm `00/80` receive, media-validation, automation-call, commit and ACK path.
+- No intentional Alarm scheduling behaviour change.
+
+
+- No intentional runtime or visual behaviour changes relative to dev.15.
+- Removed the stray `usermod_idotmatrix.cpp.orig` backup file from the source package.
+- Hardened release-package regression checks so `.orig` and `.bak` files are rejected as repository artifacts.
+- Extended `.gitignore` to exclude `.orig` backup files in addition to existing temporary-file patterns.
+- Refreshed development version metadata and documentation to establish a clean baseline before further graphics work.
+
+## 0.9.0-dev.15 - 2026-09-15 - Native-resolution light-effect tuning pass 2
+
+- Keeps the hardware-approved 1x/2x/4x band-width scaling for effects 3, 4 and 5 introduced in dev.14.
+- Reverts effect 6 to its original independently seeded per-pixel rendering at 16x16, 32x32 and 64x64 after hardware review found the enlarged 2x2/4x4 cells visually too coarse.
+- Effect 6 colour timing, interpolation and palette behaviour otherwise remain unchanged.
+- Carousel behaviour remains unchanged from dev.13.
+
+## 0.9.0-dev.14 - 2026-09-15 - Native-resolution light-effect tuning pass 1
+
+- Effects 3 and 4 now scale stripe width by 1x/2x/4x for 16/32/64 logical canvases.
+- Effect 5 scales both coloured and black diagonal bands by the same resolution factor.
+- Effect 6 now uses 1x1, 2x2 and 4x4 colour cells on 16x16, 32x32 and 64x64 canvases respectively, preserving its existing colour interpolation and timing.
+- Carousel behaviour remains unchanged from dev.13.
+
+## 0.9.0-dev.13 - 2026-09-15 - Carousel transfer UI final polish
+
+- Keeps the validated red-arrow / blue-tray transfer artwork on 16x16 and the dedicated smoother native 64x64 rendering.
+- Keeps the periodic WLED redraw scheduling introduced in dev.12 so the indeterminate activity segment animates continuously during BLE upload.
+- Removes the final full-width/100% bar state. The Carousel protocol does not announce the real session asset count in advance, so the indicator now remains semantically indeterminate for its entire visible lifetime.
+- Transfer completion is communicated by retiring the transfer UI and starting Carousel playback directly.
+- Hardware feedback confirms the Carousel transfer path and artwork are otherwise behaving correctly.
+
+## 0.9.0-dev.12 - 2026-09-15 - Transfer activity refresh fix
+
+- Fixed the indeterminate Carousel activity bar remaining at its initial position on real 16x16 and 64x64 tests.
+- The adapter now requests a WLED redraw every 70 ms while the delayed transfer indicator is visible, making the animation independent of BLE chunk timing.
+- Transfer artwork and completion semantics are unchanged from dev.11.
+
+## 0.9.0-dev.11 - 2026-09-15 - Indeterminate Carousel activity bar
+
+- Hardware diagnostics with a seven-image upload confirmed that `carouselCfg=count:12` represents the complete Carousel slot bank, while only slots 0..6 were actually transferred.
+- Replaced the static pending status line with a short green activity segment that sweeps left and right.
+- The indicator is intentionally non-determinate and therefore never claims an upload percentage that the protocol cannot provide.
+- The bar still fills completely once the quiet-period confirms transfer-session completion.
+- Preserved the validated 16x16 artwork, the dedicated native 64x64 artwork, and the `carouselCfg` / `carouselUpload` diagnostics.
+
+## 0.9.0-dev.10 - 2026-09-15 - Carousel upload-count diagnostics
+
+- Raised the validated 16x16 transfer arrow and tray by one logical pixel to leave a clear gap above the status bar.
+- Replaced the indeterminate moving transfer bar with a static pending baseline; 100% is still shown only after the Carousel quiet-period confirms session completion.
+- Added `/json/info` diagnostics for the configured Carousel order and the actual asset slots begun/completed during the current upload session.
+- Purpose: determine whether the app exposes the true session asset count before implementing a determinate global progress bar.
+
+## 0.9.0-dev.8 - 2026-09-15 - Carousel transfer UI correction
+
+- Corrected the transfer-progress model after hardware validation proved that `configuredCount` is the 12-slot bank/order count, not the number of assets in the current upload.
+- Replaced the misleading percentage with a global indeterminate session bar and a brief 100% completion confirmation after the upload quiet-period.
+- Replaced the transfer icon with the user-supplied 16x16 design: fixed blue tray plus red arrow translating downward only; 32x32 and 64x64 use exact integer scaling.
+- Added host regression coverage for the canonical artwork and completion-bar state.
+
+## 0.9.0-dev.7 - 2026-09-15 - Carousel global progress and transfer icon refinement
+
+- Reworked the transfer status artwork after physical-panel review: the previous arrow/display silhouette has been replaced by a detached animated data packet falling into a recognisable matrix/display icon.
+- Carousel progress is now global across the configured replacement bank instead of restarting visually for every GIF/text asset.
+- The protocol does not expose the sizes of assets that have not started yet, so each configured Carousel asset contributes equal weight; the currently transferred asset contributes its real received-byte fraction.
+- Completed Carousel slots are tracked as a transient per-update bitmask, so retries do not double-count progress.
+- The 250 ms anti-flash threshold, iDotMatrix ownership rules and 16/32/64 logical scaling remain unchanged.
+- Added host regression coverage for the global-progress calculation on the rendered framebuffer.
+
+## 0.9.0-dev.6 - 2026-09-15 - Carousel transfer indicator
+
+- Added a procedural, language-neutral transfer/loading renderer for Carousel uploads.
+- The indicator uses an animated down-arrow, matrix glyph and current-asset progress bar and is generated directly by the framebuffer renderer, with no PNG/GIF asset dependency.
+- Added a 250 ms visibility threshold so short uploads do not flash a transient status frame.
+- The indicator keeps iDotMatrix display ownership during Carousel replacement and is released automatically when Carousel playback starts or the update-hold failsafe expires.
+- Added host regression coverage for delayed visibility and framebuffer rendering of the transfer indicator.
+- The transfer-indicator API intentionally lives in the WLED adapter so a later development build can reuse it for long single-GIF gallery uploads.
+
+## 0.9.0-dev.5 - 2026-09-15 - Faster 64x64 TEXT and distributed Snowflake
+
+- Extended the effective maximum positional TEXT speed on native 64x64 canvases. The last 10% of the app speed range can advance two logical pixels per accepted WLED render, bypassing the previous one-pixel-per-frame ceiling while preserving the existing cadence elsewhere.
+- Replaced the regular eight-particle Snowflake layout with deterministic per-particle phase offsets and fall rates. Particle density now scales with the logical canvas so 16x16 -> 64x64 no longer appears as a falling stripe separated by a blank interval.
+- Added host regressions for the 64x64 high-speed path and 16x16 Snowflake row distribution.
+- Hardware validation on Adafruit MatrixPortal ESP32-S3 + one physical 64x64 HUB75 panel confirmed the complete `0.9.0-dev.5` visual path, including native 64x64 operation, logical 32x32 -> 64x64 and 16x16 -> 64x64 scaling, 32x64 glyph/TEXT rendering, improved scroll speed, distributed Snowflake, animated GIFs, Carousel and WLED/iDotMatrix ownership transitions.
+- Runtime validation snapshot reported WLED 0.17 beta / IDF5, 43 FPS, 2 MB PSRAM with approximately 1.98 MB free, `animatedgif12/psram`, and `scale=1x1` on the native 64x64 profile.
+
+## 0.9.0-dev.4 - 2026-09-15 - 64-pixel TEXT glyph support
+
+- Added the missing 32x64 monochrome glyph cell used by the app's 64-pixel TEXT size (256 bitmap bytes per glyph).
+- Widened the internal glyph-byte field from 8 to 16 bits so 256-byte glyphs are representable.
+- Accepts the expected `0x08`/`0x09` marker family and a strict exact-record-size fallback for app/firmware marker variants.
+- Keeps app-provided glyph bitmaps byte-for-byte; no local font rasterization was introduced.
+- Added protocol and renderer regressions for 32x64 glyph payloads.
+- Keeps 0.9.0-dev.3 TEXT scrolling and 0.9.0-dev.2 automatic 16/32/64 output scaling unchanged.
+
+## 0.9.0-dev.3 - 2026-09-15 - native 64x64 vertical TEXT scroll refinement
+
+- Fixed UP/DOWN TEXT paging on native 64x64 profiles where vertically centered 16x32 glyph pages allowed part of the following page to appear immediately.
+- Vertical page travel is now based on the logical viewport edge, so the following page begins fully off-screen and enters one raster row at a time.
+- Preserves the app-provided glyph framebuffer unchanged; only page positioning/timing geometry is adjusted.
+- Keeps 0.9.0-dev.2 automatic 16/32/64 output scaling unchanged.
+- Added a native-64x64 host regression proving the next 16x32 page is absent at the edge before the first movement step and appears exactly one row later.
+
+## 0.9.0-dev.2 - 2026-09-15 - automatic native-matrix profile scaling
+
+- Separated normal logical iDotMatrix profile size from larger physical WLED 2D output size.
+- Added automatic nearest-neighbour upscale for 16->32, 16->64 and 32->64 paths.
+- Preserved explicit `rescale` semantics for logical-downscale compatibility tests.
+- Added output-scaling diagnostics and host regression coverage.
+
+# 0.9 development line
+
+## 0.9.0-dev.1 - 2026-09-14 - MatrixPortal S3 / native HUB75 baseline
+
+- Starts the public 0.9 hardware generation from the clean 0.8.2 stable source tree.
+- Adds an official-WLED-0.17 MatrixPortal S3 wrapper for native HUB75, 64x64 and PSRAM.
+- Defaults the new target to iDotMatrix screen type 64x64 while preserving the existing protocol/rendering state machines.
+- Requires ESP-IDF 5.x and NimBLE-Arduino 2.x on this target.
+- Adds MatrixPortal/HUB75/PSRAM runtime markers for first-hardware qualification.
+- Does not include the temporary 0.8.2-diag.1 C3 power-off instrumentation.
+
 ## 0.8.2 - 2026-09-13 - Stable release
 
 - Promoted the hardware-qualified RC7 code line to stable Release 0.8.2.

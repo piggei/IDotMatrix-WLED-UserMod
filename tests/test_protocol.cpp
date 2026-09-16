@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <vector>
 
 class TestEvents final : public IDotMatrixProtocolEvents {
 public:
@@ -185,7 +186,7 @@ public:
   uint8_t textGlyphsReceived = 0;
   uint8_t textLastGlyph = 0;
   size_t textLastBitmapLength = 0;
-  uint8_t textLastBitmap[64]{};
+  uint8_t textLastBitmap[256]{};
   IDotMatrixTextSettings textSettings{};
   bool rawAccept = true;
   bool rawBeginReceived = false;
@@ -222,6 +223,7 @@ public:
     alarm = settings;
     alarmMediaLength = mediaLength;
     alarmFirstByte = mediaLength && media ? media[0] : 0;
+    alarmLastByte = mediaLength && media ? media[mediaLength - 1] : 0;
     return alarmAccept;
   }
 
@@ -239,6 +241,7 @@ public:
     schedule = settings;
     scheduleMediaLength = mediaLength;
     scheduleFirstByte = mediaLength && media ? media[0] : 0;
+    scheduleLastByte = mediaLength && media ? media[mediaLength - 1] : 0;
     return scheduleAccept;
   }
 
@@ -250,6 +253,7 @@ public:
   IDotMatrixAlarmSettings alarm{};
   size_t alarmMediaLength = 0;
   uint8_t alarmFirstByte = 0;
+  uint8_t alarmLastByte = 0;
   bool scheduleGlobalReceived = false;
   uint8_t scheduleFlags = 0;
   bool scheduleActivityReceived = false;
@@ -257,6 +261,7 @@ public:
   IDotMatrixScheduleActivitySettings schedule{};
   size_t scheduleMediaLength = 0;
   uint8_t scheduleFirstByte = 0;
+  uint8_t scheduleLastByte = 0;
 };
 
 
@@ -278,6 +283,28 @@ public:
   bool resetReceived=false, configured=false, entered=false, suspended=false, assetComplete=false, assetValid=false, assetCancelled=false;
   uint8_t configuredCount=0, order[12]{}, assetType=0, assetSlot=0;
   uint16_t assetDwell=0; size_t assetTotal=0, assetOffset=0, assetChunk=0; uint32_t suspendCount=0;
+};
+
+
+class TestPreset final : public IDotMatrixPresetEvents {
+public:
+  void onPresetReset() override { resetReceived = true; }
+  void onPresetActivate(const uint8_t* slots, uint8_t count) override {
+    activated = true; activationCount = count;
+    for (uint8_t i = 0; i < count && i < 6; ++i) order[i] = slots[i];
+  }
+  void onPresetSuspend() override { suspended = true; ++suspendCount; }
+  bool onPresetAssetBegin(uint8_t type, uint8_t slot, uint16_t timeSign, size_t total) override {
+    assetType = type; assetSlot = slot; assetTimeSign = timeSign; assetTotal = total; return true;
+  }
+  bool onPresetAssetData(size_t offset, const uint8_t*, size_t length) override {
+    assetOffset = offset; assetChunk = length; return true;
+  }
+  bool onPresetAssetComplete(bool valid) override { assetComplete = true; assetValid = valid; return valid; }
+  void onPresetAssetCancel() override { assetCancelled = true; }
+  bool resetReceived=false, activated=false, suspended=false, assetComplete=false, assetValid=false, assetCancelled=false;
+  uint8_t activationCount=0, order[6]{}, assetType=0, assetSlot=0;
+  uint16_t assetTimeSign=0; size_t assetTotal=0, assetOffset=0, assetChunk=0; uint32_t suspendCount=0;
 };
 
 static uint32_t testCRC32(const uint8_t* data, size_t length) {
@@ -304,9 +331,11 @@ int main() {
   TestEvents events;
   TestAutomation automation;
   TestCarousel carousel;
+  TestPreset preset;
   IDotMatrixProtocol protocol(events);
   protocol.setAutomationEvents(&automation);
   protocol.setCarouselEvents(&carousel);
+  protocol.setPresetEvents(&preset);
   protocol.setDeviceReleaseVersion(0x00, 0x09);
   IDotMatrixReply reply;
 
@@ -332,6 +361,22 @@ int main() {
   assert(events.deviceResetReceived);
   assert(automation.resetReceived);
   assert(carousel.resetReceived);
+  assert(preset.resetReceived);
+
+
+  const uint8_t presetActivate[] = {0x08,0x00,0x06,0x02,0x03,0x0E,0x0F,0x10};
+  const uint8_t presetAck[] = {0x05,0x00,0x06,0x02,0x01};
+  assert(protocol.processFA02(presetActivate, sizeof(presetActivate), reply));
+  expectReply(reply, presetAck, sizeof(presetAck));
+  assert(preset.activated && preset.activationCount == 3);
+  assert(preset.order[0] == 14 && preset.order[1] == 15 && preset.order[2] == 16);
+  assert(carousel.suspended);
+
+  const uint8_t invalidPresetActivate[] = {0x07,0x00,0x06,0x02,0x02,0x0E,0x14};
+  preset.activated = false;
+  assert(protocol.processFA02(invalidPresetActivate, sizeof(invalidPresetActivate), reply));
+  expectReply(reply, presetAck, sizeof(presetAck));
+  assert(!preset.activated);
 
   const uint8_t timeSync[] = {0x0B,0x00,0x01,0x80,0x1A,0x09,0x05,0x06,0x17,0x2A,0x0B};
   const uint8_t timeAck[] = {0x05,0x00,0x01,0x80,0x01};
@@ -387,6 +432,59 @@ int main() {
   assert(automation.alarm.mediaSize == 4 && automation.alarmMediaLength == 4 && automation.alarmFirstByte == 1);
   expectReply(reply, alarmAck, sizeof(alarmAck));
 
+  // 64x64 Alarm assets are sent as multiple complete logical 00/80 packets,
+  // each with the same 24-byte header and a chunk of the total media. The
+  // observed app split is 4096 + remainder; reserved2 changes across chunks
+  // and must not be used as the assembly rule.
+  std::vector<uint8_t> alarmLargeMedia(6706);
+  for (size_t i = 0; i < alarmLargeMedia.size(); ++i) alarmLargeMedia[i] = uint8_t((i * 17u + 3u) & 0xFFu);
+  const uint32_t alarmLargeCrc = testCRC32(alarmLargeMedia.data(), alarmLargeMedia.size());
+  auto makeAlarmChunk = [&](size_t offset, size_t chunkSize, uint8_t reserved2) {
+    std::vector<uint8_t> packet(24u + chunkSize, 0);
+    const uint16_t packetSize = uint16_t(packet.size());
+    packet[0] = uint8_t(packetSize); packet[1] = uint8_t(packetSize >> 8);
+    packet[2] = 0x00; packet[3] = 0x80; packet[4] = 0; packet[5] = 0x01;
+    packet[6] = 6; packet[7] = 46; packet[8] = 10; packet[10] = 1; packet[11] = 1;
+    packet[12] = reserved2;
+    const uint32_t total = uint32_t(alarmLargeMedia.size());
+    packet[13] = uint8_t(total); packet[14] = uint8_t(total >> 8);
+    packet[15] = uint8_t(total >> 16); packet[16] = uint8_t(total >> 24);
+    packet[17] = uint8_t(alarmLargeCrc); packet[18] = uint8_t(alarmLargeCrc >> 8);
+    packet[19] = uint8_t(alarmLargeCrc >> 16); packet[20] = uint8_t(alarmLargeCrc >> 24);
+    packet[23] = 0x14;
+    memcpy(packet.data() + 24, alarmLargeMedia.data() + offset, chunkSize);
+    return packet;
+  };
+  automation.alarmReceived = false;
+  protocol.loop(1000);
+  auto alarmChunk1 = makeAlarmChunk(0, 4096, 0x00);
+  assert(protocol.processFA02(alarmChunk1.data(), alarmChunk1.size(), reply));
+  assert(!automation.alarmReceived);
+  expectReply(reply, alarmAck, sizeof(alarmAck));
+  char alarmDiag[384]{};
+  protocol.alarmRxDiagnostic(alarmDiag, sizeof(alarmDiag));
+  assert(strstr(alarmDiag, "recv:4096") != nullptr && strstr(alarmDiag, "result:receiving") != nullptr);
+
+  protocol.loop(1100);
+  auto alarmChunk2 = makeAlarmChunk(4096, 2610, 0x02);
+  assert(protocol.processFA02(alarmChunk2.data(), alarmChunk2.size(), reply));
+  assert(automation.alarmReceived);
+  assert(automation.alarmMediaLength == alarmLargeMedia.size());
+  assert(automation.alarmFirstByte == alarmLargeMedia.front() && automation.alarmLastByte == alarmLargeMedia.back());
+  protocol.alarmRxDiagnostic(alarmDiag, sizeof(alarmDiag));
+  assert(strstr(alarmDiag, "commit:1") != nullptr && strstr(alarmDiag, "result:committed") != nullptr);
+
+  // An incomplete transaction times out without committing or disturbing the
+  // previously committed alarm.
+  automation.alarmReceived = false;
+  protocol.loop(2000);
+  assert(protocol.processFA02(alarmChunk1.data(), alarmChunk1.size(), reply));
+  assert(!automation.alarmReceived);
+  protocol.loop(8001);
+  protocol.alarmRxDiagnostic(alarmDiag, sizeof(alarmDiag));
+  assert(strstr(alarmDiag, "timeout:1") != nullptr);
+  automation.alarmReceived = false;
+
   const uint8_t scheduleGlobal[] = {0x05,0x00,0x07,0x80,0x03};
   const uint8_t scheduleGlobalAck[] = {0x05,0x00,0x07,0x80,0x01};
   assert(protocol.processFA02(scheduleGlobal, sizeof(scheduleGlobal), reply));
@@ -405,17 +503,62 @@ int main() {
   schedulePacket[18] = uint8_t(scheduleCrc >> 16); schedulePacket[19] = uint8_t(scheduleCrc >> 24);
   schedulePacket[22] = 0x1E;
   memcpy(schedulePacket + 23, scheduleMedia, sizeof(scheduleMedia));
+  const uint8_t scheduleAckContinue[] = {0x05,0x00,0x05,0x80,0x01};
+  const uint8_t scheduleAckError[] = {0x05,0x00,0x05,0x80,0x02};
   const uint8_t scheduleAck[] = {0x05,0x00,0x05,0x80,0x03};
   assert(protocol.processFA02(schedulePacket, sizeof(schedulePacket), reply));
   assert(automation.scheduleActivityReceived && automation.schedule.index == 3);
   assert(automation.schedule.contentType == 2 && automation.scheduleMediaLength == 4 && automation.scheduleFirstByte == 9);
   expectReply(reply, scheduleAck, sizeof(scheduleAck));
 
-  // 0x03 terminates a recognized schedule-activity transaction even when the
-  // activity is rejected internally; it is not a universal success flag.
+  // Program activities use the same multi-logical-packet model. Exercise a
+  // three-chunk asset to ensure assembly is not hard-coded to two packets.
+  std::vector<uint8_t> programLargeMedia(9000);
+  for (size_t i = 0; i < programLargeMedia.size(); ++i) programLargeMedia[i] = uint8_t((i * 29u + 11u) & 0xFFu);
+  const uint32_t programLargeCrc = testCRC32(programLargeMedia.data(), programLargeMedia.size());
+  auto makeProgramChunk = [&](size_t offset, size_t chunkSize, uint8_t marker) {
+    std::vector<uint8_t> packet(23u + chunkSize, 0);
+    const uint16_t packetSize = uint16_t(packet.size());
+    packet[0] = uint8_t(packetSize); packet[1] = uint8_t(packetSize >> 8);
+    packet[2] = 0x05; packet[3] = 0x80; packet[4] = 4; packet[5] = 0x7F;
+    packet[6] = 10; packet[7] = 0; packet[8] = 11; packet[9] = 15;
+    packet[10] = 2; packet[11] = marker;
+    const uint32_t total = uint32_t(programLargeMedia.size());
+    packet[12] = uint8_t(total); packet[13] = uint8_t(total >> 8);
+    packet[14] = uint8_t(total >> 16); packet[15] = uint8_t(total >> 24);
+    packet[16] = uint8_t(programLargeCrc); packet[17] = uint8_t(programLargeCrc >> 8);
+    packet[18] = uint8_t(programLargeCrc >> 16); packet[19] = uint8_t(programLargeCrc >> 24);
+    packet[20] = 0; packet[21] = 0; packet[22] = 0x21;
+    memcpy(packet.data() + 23, programLargeMedia.data() + offset, chunkSize);
+    return packet;
+  };
+  automation.scheduleActivityReceived = false;
+  protocol.loop(9000);
+  auto programChunk1 = makeProgramChunk(0, 4096, 0x00);
+  auto programChunk2 = makeProgramChunk(4096, 4096, 0x02);
+  auto programChunk3 = makeProgramChunk(8192, 808, 0x02);
+  assert(protocol.processFA02(programChunk1.data(), programChunk1.size(), reply));
+  assert(!automation.scheduleActivityReceived);
+  expectReply(reply, scheduleAckContinue, sizeof(scheduleAckContinue));
+  assert(protocol.processFA02(programChunk2.data(), programChunk2.size(), reply));
+  assert(!automation.scheduleActivityReceived);
+  expectReply(reply, scheduleAckContinue, sizeof(scheduleAckContinue));
+  char programDiag[384]{};
+  protocol.programRxDiagnostic(programDiag, sizeof(programDiag));
+  assert(strstr(programDiag, "recv:8192") != nullptr && strstr(programDiag, "result:receiving") != nullptr);
+  assert(protocol.processFA02(programChunk3.data(), programChunk3.size(), reply));
+  expectReply(reply, scheduleAck, sizeof(scheduleAck));
+  assert(automation.scheduleActivityReceived);
+  assert(automation.scheduleMediaLength == programLargeMedia.size());
+  assert(automation.scheduleFirstByte == programLargeMedia.front() && automation.scheduleLastByte == programLargeMedia.back());
+  protocol.programRxDiagnostic(programDiag, sizeof(programDiag));
+  assert(strstr(programDiag, "commit:1") != nullptr && strstr(programDiag, "result:committed") != nullptr);
+
+  // A complete object that is rejected by the automation layer must not be
+  // reported as successfully committed.
   automation.scheduleAccept = false;
   assert(protocol.processFA02(schedulePacket, sizeof(schedulePacket), reply));
-  expectReply(reply, scheduleAck, sizeof(scheduleAck));
+  expectReply(reply, scheduleAckError, sizeof(scheduleAckError));
   automation.scheduleAccept = true;
 
   const uint8_t screenOff[] = {0x05, 0x00, 0x07, 0x01, 0x00};
@@ -612,7 +755,10 @@ int main() {
   assert(events.textLastBitmapLength == 16 && events.textLastBitmap[0] == 0x80);
 
   textPayload[14] = 0x03;
-  assert(!protocol.processTextPayload(textPayload, sizeof(textPayload)));
+  assert(protocol.processTextPayload(textPayload, sizeof(textPayload)));
+  assert(events.textSettings.glyphWidth == 8);
+  assert(events.textSettings.glyphHeight == 16);
+  assert(events.textSettings.glyphBytes == 16);
 
   uint8_t largeGlyphPayload[82]{};
   largeGlyphPayload[0] = 1;
@@ -629,6 +775,34 @@ int main() {
   assert(events.textLastBitmapLength == 64);
   assert(events.textLastBitmap[0] == 0x01);
   assert(events.textLastBitmap[63] == 0x80);
+
+  // 0.9.0-dev.4: the 64-pixel font uses a 32x64 monochrome glyph cell
+  // (256 bitmap bytes per glyph).  Accept the expected 08/09 marker family.
+  uint8_t font64Payload[274]{};
+  font64Payload[0] = 1;
+  font64Payload[6] = 1;
+  font64Payload[7] = 0x21;
+  font64Payload[8] = 0x43;
+  font64Payload[9] = 0x65;
+  font64Payload[14] = 0x08;
+  font64Payload[18] = 0x01;
+  font64Payload[273] = 0x80;
+  assert(protocol.processTextPayload(font64Payload, sizeof(font64Payload)));
+  assert(events.textSettings.glyphCount == 1);
+  assert(events.textSettings.glyphWidth == 32);
+  assert(events.textSettings.glyphHeight == 64);
+  assert(events.textSettings.glyphBytes == 256);
+  assert(events.textLastBitmapLength == 256);
+  assert(events.textLastBitmap[0] == 0x01);
+  assert(events.textLastBitmap[255] == 0x80);
+
+  // Also accept a structurally identical record with an app/firmware-specific
+  // marker; exact 260-byte records make the 32x64 cell unambiguous.
+  font64Payload[14] = 0x0A;
+  assert(protocol.processTextPayload(font64Payload, sizeof(font64Payload)));
+  assert(events.textSettings.glyphWidth == 32);
+  assert(events.textSettings.glyphHeight == 64);
+  assert(events.textSettings.glyphBytes == 256);
 
   const uint8_t rawBytes[] = {1, 2, 3};
   assert(protocol.beginRawImage(sizeof(rawBytes)));

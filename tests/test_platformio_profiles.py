@@ -198,13 +198,13 @@ def check_nimble_api_bridge() -> None:
     assert "advertising_ = advertising->start();" in source
     assert "ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
     assert "ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
-    assert 'IDOTMATRIX_RELEASE = "0.8.2"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.8.2"' in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.9.0"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.0-dev.23"' in usermod
     assert "RMT+BLE=ESP32-C3 shared-RMT" in usermod
     assert "UsermodManager::getUMData(&data, USERMOD_ID_AUDIOREACTIVE)" in usermod
 
     library = (ROOT / "library.json").read_text(encoding="utf-8")
-    assert '"version": "0.8.2"' in library
+    assert '"version": "0.9.0-dev.23"' in library
     assert '"h2zero/NimBLE-Arduino"' not in library
     # NimBLE is target-dependent and pinned by each official PlatformIO profile.
 
@@ -271,6 +271,30 @@ def check_hub75_profile() -> None:
 
 
 
+
+def check_matrixportal_s3_hub75_profile() -> None:
+    parser = read_ini("platformio_override.ini.matrixportal-s3-hub75")
+    section = "env:adafruit_matrixportal_esp32s3_idotmatrix_64x64"
+    sections = {name for name in parser.sections() if name.startswith("env:")}
+    assert sections == {section}
+    assert value(parser, section, "extends") == "env:adafruit_matrixportal_esp32s3"
+    assert not parser.has_option(section, "platform")
+    assert not parser.has_option(section, "platform_packages")
+    assert not parser.has_option(section, "board_build.partitions")
+    flags = value(parser, section, "build_flags")
+    assert "${env:adafruit_matrixportal_esp32s3.build_flags}" in flags
+    assert "-D IDOT_GIF_LZW12" in flags
+    assert "-D IDOT_SCREEN_MAX_DIM=64" in flags
+    assert "-D IDOT_DEFAULT_SCREEN_TYPE=0x04" in flags
+    assert "-D IDOT_S3_HUB75_WLED_IDF5" in flags
+    deps = value(parser, section, "lib_deps")
+    assert "${env:adafruit_matrixportal_esp32s3.lib_deps}" in deps
+    assert NIMBLE_V2 in deps
+    assert GIF in deps
+    usermods = value(parser, section, "custom_usermods")
+    assert "${common.default_usermods}" in usermods
+    assert USERMOD in usermods
+
 def check_profile_environment_isolation() -> None:
     """Every media profile gets its own PIOENV/build/libdeps namespace."""
     files = [
@@ -281,6 +305,7 @@ def check_profile_environment_isolation() -> None:
         "platformio_override.ini.hub75",
         "platformio_override.ini.c3",
         "platformio_override.ini.c3-audio",
+        "platformio_override.ini.matrixportal-s3-hub75",
     ]
     owners: dict[str, str] = {}
     for filename in files:
@@ -335,6 +360,7 @@ def main() -> None:
     check_hub75_profile()
     check_c3_profile()
     check_c3_audio_profile()
+    check_matrixportal_s3_hub75_profile()
     check_nimble_api_bridge()
     check_profile_environment_isolation()
     check_partitions()

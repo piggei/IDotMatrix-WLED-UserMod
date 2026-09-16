@@ -168,6 +168,59 @@ int main() {
     }
   }
 
+  // dev.14 native-resolution density regression. Effects 3..5 preserve
+  // their 16x16 proportions by scaling band widths at 32x32 and 64x64.
+  IDotMatrixRenderer renderer32;
+  assert(renderer32.begin(0x03));
+  assert(renderer32.beginLightEffect(3, 50, 3, effectColors, 1000));
+  expectPixel(renderer32.pixel(0, 0), 255, 0, 0);
+  expectPixel(renderer32.pixel(7, 0), 255, 0, 0);
+  expectPixel(renderer32.pixel(8, 0), 0, 255, 0);
+  assert(renderer32.beginLightEffect(4, 50, 3, effectColors, 1000));
+  expectPixel(renderer32.pixel(0, 0), 255, 0, 0);
+  expectPixel(renderer32.pixel(4, 3), 255, 0, 0);
+  expectPixel(renderer32.pixel(5, 3), 0, 255, 0);
+  assert(renderer32.beginLightEffect(5, 50, 3, effectColors, 1000));
+  expectPixel(renderer32.pixel(9, 0), 255, 0, 0);
+  expectBlack(renderer32.pixel(10, 0));
+  expectBlack(renderer32.pixel(17, 0));
+  expectPixel(renderer32.pixel(18, 0), 0, 255, 0);
+
+  IDotMatrixRenderer renderer64;
+  assert(renderer64.begin(0x04));
+  assert(renderer64.beginLightEffect(3, 50, 3, effectColors, 1000));
+  expectPixel(renderer64.pixel(15, 0), 255, 0, 0);
+  expectPixel(renderer64.pixel(16, 0), 0, 255, 0);
+  assert(renderer64.beginLightEffect(5, 50, 3, effectColors, 1000));
+  expectPixel(renderer64.pixel(19, 0), 255, 0, 0);
+  expectBlack(renderer64.pixel(20, 0));
+  expectBlack(renderer64.pixel(35, 0));
+  expectPixel(renderer64.pixel(36, 0), 0, 255, 0);
+
+  // Effect 6 keeps the original independently seeded per-pixel texture at
+  // every logical resolution. Adjacent pixels must not be collapsed into
+  // resolution-scaled colour cells.
+  assert(renderer.beginLightEffect(6, 50, 3, effectColors, 1000));
+  const auto effect6_16_a = *renderer.pixel(0, 0);
+  const auto effect6_16_b = *renderer.pixel(1, 0);
+  assert(effect6_16_a.red != effect6_16_b.red ||
+         effect6_16_a.green != effect6_16_b.green ||
+         effect6_16_a.blue != effect6_16_b.blue);
+
+  assert(renderer32.beginLightEffect(6, 50, 3, effectColors, 1000));
+  const auto effect6_32_a = *renderer32.pixel(0, 0);
+  const auto effect6_32_b = *renderer32.pixel(1, 0);
+  assert(effect6_32_a.red != effect6_32_b.red ||
+         effect6_32_a.green != effect6_32_b.green ||
+         effect6_32_a.blue != effect6_32_b.blue);
+
+  assert(renderer64.beginLightEffect(6, 50, 3, effectColors, 1000));
+  const auto effect6_64_a = *renderer64.pixel(0, 0);
+  const auto effect6_64_b = *renderer64.pixel(1, 0);
+  assert(effect6_64_a.red != effect6_64_b.red ||
+         effect6_64_a.green != effect6_64_b.green ||
+         effect6_64_a.blue != effect6_64_b.blue);
+
   uint8_t rawImage[16 * 16 * 3]{};
   rawImage[0] = 0xA1;
   rawImage[1] = 0xB2;
@@ -321,6 +374,23 @@ int main() {
   assert(textBackground->red == 1 && textBackground->green == 2 &&
     textBackground->blue == 3);
 
+  // 0.9.0-dev.4: native 64-pixel text cells are 32x64 1-bit glyphs.
+  assert(renderer.beginText(
+    1, 32, 64, 256, 0, 50, 1,
+    33, 66, 99, false, 0, 0, 0, 2500
+  ));
+  uint8_t glyph32x64[256]{};
+  glyph32x64[0] = 0x01;
+  glyph32x64[255] = 0x80;
+  assert(renderer.setTextGlyph(0, glyph32x64, sizeof(glyph32x64)));
+  renderer.renderText(2500);
+  const IDotMatrixRenderer::Pixel* text64Top = renderer.pixel(0, 0);
+  assert(text64Top != nullptr);
+  assert(text64Top->red == 33 && text64Top->green == 66 && text64Top->blue == 99);
+  const IDotMatrixRenderer::Pixel* text64Bottom = renderer.pixel(31, 63);
+  assert(text64Bottom != nullptr);
+  assert(text64Bottom->red == 33 && text64Bottom->green == 66 && text64Bottom->blue == 99);
+
   // Invalid profiles retain the reference implementation's 16x16 fallback.
   assert(renderer.begin(0xFF));
   assert(renderer.width() == 16 && renderer.height() == 16);
@@ -401,6 +471,31 @@ int main() {
     assert(renderer.textFirstVisibleGlyph() == 2);
   }
 
+  // 0.9.0-dev.3: on a native 64x64 canvas, 16x32 vertical pages must start
+  // completely outside the viewport and enter one raster row at a time.  The
+  // old glyph-height page step placed 15 rows of the following page on-screen
+  // immediately because the current page is vertically centered at y=16.
+  assert(renderer.begin(0x04));
+  uint8_t solidGlyph16x32[64];
+  memset(solidGlyph16x32, 0xFF, sizeof(solidGlyph16x32));
+  for (uint8_t direction = 3; direction <= 4; ++direction) {
+    assert(renderer.beginText(
+      8, 16, 32, 64, direction, 100, 1,
+      61, 71, 81, false, 0, 0, 0, 0
+    ));
+    for (uint8_t glyph = 0; glyph < 8; ++glyph) {
+      assert(renderer.setTextGlyph(glyph, solidGlyph16x32, sizeof(solidGlyph16x32)));
+    }
+    renderer.renderText(0);
+    if (direction == 3) expectBlack(renderer.pixel(0, 63));
+    else expectBlack(renderer.pixel(0, 0));
+
+    renderer.renderText(15);
+    const auto* edgePixel = direction == 3 ? renderer.pixel(0, 63) : renderer.pixel(0, 0);
+    assert(edgePixel && edgePixel->red == 61 && edgePixel->green == 71 && edgePixel->blue == 81);
+  }
+  assert(renderer.begin(0x01));
+
   // Page-based visual effects consume all glyphs without resetting their
   // animation epoch.  One page duration at speed 100 is 255 ms.
   const uint8_t pageEffects[] = {0, 5, 6, 7, 8};
@@ -432,6 +527,55 @@ int main() {
   renderer.renderText(400);
   assert(renderer.textFirstVisibleGlyph() == 2);
   assert(countNonBlack(renderer) == 0);
+
+
+  // 0.9.0-dev.5: the 64x64 profile gets one extra logical pixel of motion
+  // per accepted render in the final 10% of the app speed range.  This is
+  // necessary because the historical 15 ms minimum is already faster than
+  // the ~43 FPS WLED callback cadence and therefore cannot increase speed by
+  // interval reduction alone.
+  assert(renderer.begin(0x04));
+  uint8_t fastGlyph[16]{};
+  fastGlyph[0] = 0x01;
+  assert(renderer.beginText(
+    1, 8, 16, 16, 1, 100, 1,
+    21, 31, 41, false, 0, 0, 0, 0
+  ));
+  assert(renderer.setTextGlyph(0, fastGlyph, sizeof(fastGlyph)));
+  renderer.renderText(0);
+  renderer.renderText(15);
+  expectBlack(renderer.pixel(63, 24));
+  expectBlack(renderer.pixel(61, 24));
+  expectPixel(renderer.pixel(62, 24), 21, 31, 41);
+
+  // 0.9.0-dev.5: Snowflake on a 16x16 logical profile must be a distributed
+  // field, not eight regularly phased particles that form a travelling band
+  // followed by a mostly blank interval when upscaled to 64x64.
+  assert(renderer.begin(0x01));
+  uint8_t emptyGlyph[16]{};
+  assert(renderer.beginText(
+    1, 8, 16, 16, 7, 50, 1,
+    255, 255, 255, false, 0, 0, 0, 0
+  ));
+  assert(renderer.setTextGlyph(0, emptyGlyph, sizeof(emptyGlyph)));
+  renderer.renderText(0);
+  size_t snowPixels = 0;
+  size_t snowRows = 0;
+  for (uint8_t y = 0; y < 16; ++y) {
+    bool rowUsed = false;
+    for (uint8_t x = 0; x < 16; ++x) {
+      const auto* snow = renderer.pixel(x, y);
+      if (snow && (snow->red || snow->green || snow->blue)) {
+        ++snowPixels;
+        rowUsed = true;
+      }
+    }
+    if (rowUsed) ++snowRows;
+  }
+  assert(snowPixels >= 12);
+  assert(snowRows >= 8);
+  renderer.renderText(500);
+  assert(countNonBlack(renderer) >= 12);
 
   // The same viewport math scales naturally to larger logical profiles.
   assert(renderer.begin(0x04));

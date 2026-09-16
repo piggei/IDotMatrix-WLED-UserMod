@@ -1,3 +1,21 @@
+## 0.9.0-dev.23 Preset upload-indicator regression
+
+The dev.23 checks retain all dev.22 Preset routing/multipart coverage and add release-package guards for the shared transfer-indicator hooks (`beginTransferIndicator`, `updateTransferIndicator`) plus the interrupted-upload timeout. Runtime transfer semantics remain unchanged.
+
+## 0.9.0-dev.22 Preset / Default regression
+
+The dev.22 host suite adds protocol coverage for the `06/02` Preset activation command, validates the dedicated 14..19 slot range, verifies that invalid slot IDs are not activated, and keeps the command routable through the non-audio FA02 framing path. `IDotMatrixPreset.cpp` is syntax-checked against the host filesystem stub. Existing Bulk regressions continue to cover repeated-header multi-packet objects, CRC validation and `0x01`/`0x03` flow control reused by Preset media.
+
+Hardware validation should cover: two-image cycling, mixed static TEXT/image/scrolling TEXT, at least one >4096-byte object, five or six entries, and replacement of an active Preset where the new playlist starts only after the next `06/02`.
+
+## 0.9.0-dev.21 Schedule framing / flow-control regression
+
+The protocol host tests reproduce the hardware-validated 64x64 Schedule transfer: activity byte 10 is a one-byte content type, byte 11 changes from marker `0x00` on the first chunk to `0x02` on continuation chunks, and the media object spans multiple complete logical packets. Tests require ACK `05 00 05 80 01` for accepted incomplete chunks, ACK `... 03` only on complete CRC-valid commit, and `... 02` when a complete object is rejected. A 9000-byte activity is assembled as 4096 + 4096 + 808 without resetting when the marker changes, while the existing single-packet path remains compatible.
+
+
+## 0.9.0-dev.20 automation multipart regression
+
+The protocol host test now covers Alarm and Program media whose total `mediaSize` exceeds one logical packet. Alarm reproduces the observed 64x64 split of 6706 bytes into 4096 + 2610 with a repeated 24-byte header and changing `reserved2`; Program exercises three chunks (4096 + 4096 + 808) with repeated 23-byte headers. The tests require no commit before the final chunk, full-media CRC validation before the automation callback, exact final media length/content, and timeout of an incomplete transaction without a commit. Existing single-packet Alarm/Program tests remain in place.
 # Testing
 
 This file defines the **0.8.2 regression procedure**. All 0.8.1 stable
@@ -38,7 +56,7 @@ explicit failure injection. The host tests verify:
 - reboot/loadPersistence after failed replacement;
 - missing media and corrupt metadata recovery;
 - alarm metadata persistence;
-- WLED-time authority, app-time fallback, weekday matching, and midnight-spanning schedules.
+- app-time authority after protocol synchronization, WLED/NTP fallback before synchronization, weekday matching, alarm trigger execution, and midnight-spanning schedules.
 
 Where supported by the host compiler, run the sanitizer subset too:
 

@@ -1,3 +1,14 @@
+# Development line 0.9
+
+**Current development release: 0.9.0 / build 0.9.0-dev.23.**
+
+This branch starts the ESP32-S3 / PSRAM / native WLED HUB75 generation. The first
+target is the Adafruit MatrixPortal ESP32-S3 driving one 64x64 HUB75 panel on
+WLED 0.17. Stable 0.8.2 remains the recommended ESP32-C3 / 16x16 release.
+
+For the first 64x64 hardware build use
+`platformio_override.ini.matrixportal-s3-hub75`.
+
 # WLED iDotMatrix Usermod
 
 > **Release 0.8.2 / build 0.8.2:** stable release for the hardware-qualified ESP32/ESP32-C3 line, with protocol convergence, persistent Carousel support, optional AudioReactive input, and the audited transport/storage fixes validated through the 0.8.2 release-candidate cycle.
@@ -28,7 +39,13 @@ GIF replacement, strict framebuffer ownership during GIF staging (preventing
 Clock/TEXT bleed into cold caches), filesystem recovery/capacity checks, reset
 verification, and WLED-playlist termination when iDotMatrix explicitly takes
 display ownership.
-ESP32-S3, HUB75 and the unknown third 64x64 TEXT format remain pending.
+ESP32-S3, native HUB75, PSRAM and 16/32/64 logical-profile output scaling are hardware-validated on MatrixPortal S3. Build 0.9.0-dev.23 extends the reverse-engineered Preset / Default section with the same indeterminate upload indicator used by Carousel. The Preset implementation: Bulk media in protocol slots 14..19 are staged into a dedicated volatile six-slot bank, `06/02` atomically activates an ordered cyclic playlist, images/GIF media use an approximately 3-second dwell, and TEXT duration follows the existing renderer motion timing. Alarm/Program multipart compatibility from dev.21 remains unchanged, including repeated automation headers, Schedule byte 10/11 framing and `0x01`/`0x03` flow control. Carousel remains a separate persistent 12-slot bank.
+
+## Preset / Default (dev.23)
+
+The official app's **Preset / Default** page is implemented separately from Device Assets / Carousel. It uses protocol media slots `14..19` (maximum six entries), uploads objects through the existing Bulk transport, and activates the ordered list with command `06/02`. Uploading Preset media never changes the display by itself; the new playlist becomes active only when the activation command arrives.
+
+Preset media are deliberately volatile. They are stored in temporary LittleFS files, are not written to NVS, and are not restored at boot. A new Preset may be uploaded while an older Preset continues to play; the pending bank is promoted only on the next activation. Image/GIF entries use an approximately 3000 ms visible dwell, while TEXT uses the existing renderer timing so scrolling content can complete before the next entry.
 
 The new audio-source setting has three modes:
 
@@ -86,8 +103,9 @@ The 0.8.2 C3 qualification additionally covered persistent mixed Carousel playba
 | 16x16 logical / 16x16 physical, ESP32-C3 4 MB | `compact12/cache` | **supported and hardware-validated on IDF5/shared-RMT** |
 | 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | hardware-validated |
 | 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` | `compact12/cache` | hardware-validated |
-| 64x64 with PSRAM | `animatedgif12/psram` | implemented; hardware validation pending |
-| ESP32-S3 / native physical 64x64 / HUB75 | depends on build | development work for the next release line |
+| 64x64 logical / 64x64 physical, MatrixPortal ESP32-S3 + PSRAM | `animatedgif12/psram` | **hardware-validated on WLED 0.17 beta / native HUB75** |
+| 32x32 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 2x nearest-neighbour upscale** |
+| 16x16 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 4x nearest-neighbour upscale** |
 
 ### Compiled resolution and settings choices
 
@@ -101,10 +119,9 @@ firmware. The settings page never offers a profile larger than that capacity:
 | `platformio_override.ini.c3-audio` / same media profile + AudioReactive | 16x16 | hidden and forced off |
 | `platformio_override.ini.32x32` / LZW11 | 16x16, 32x32 | available for tests |
 | `.64x64` or `.64x64-lite` / LZW12 | 16x16, 32x32, 64x64 | available for tests |
+| `platformio_override.ini.matrixportal-s3-hub75` / LZW12 + PSRAM | 16x16, 32x32, 64x64 | automatic physical-output scaling; primary 0.9 target |
 
-For normal use select the `ScreenType` matching the physical WLED matrix.
-`Rescale` exists for deliberate larger-logical-profile tests, not to preserve
-32x32/64x64 detail on a 16x16 panel.
+On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile and may differ from the physical WLED matrix. Output scaling is automatic in both directions for 16x16, 32x32 and 64x64 logical/physical combinations. `Rescale` is retained for backward compatibility with the older low-memory 0.8.x storage path, not as a requirement for 0.9 output scaling.
 
 ## Supported functionality
 
@@ -214,17 +231,17 @@ On the validated 64x64 logical -> 16x16 physical setup, the compact workspace is
 with the current toolchain. The frame cache is capped at **512 KiB** and is
 removed when GIF playback ends.
 
-`rescale` is intended only for testing and protocol/decoder diagnostics when the
-selected logical iDotMatrix profile does not match the physical WLED matrix.
-For normal use, choose a logical profile matching the physical display and leave
-`rescale` disabled: deliberately loading 64x64 content onto a 16x16 panel cannot
-preserve the original detail.
+In the 0.9 native-matrix path, logical iDotMatrix resolution and physical WLED
+matrix resolution are independent. Every 16x16, 32x32 and 64x64 combination is
+scaled automatically: nearest-neighbour for enlargement, box averaging for
+reduction, and a direct path when dimensions match. This allows, for example,
+16x16 or 32x32 app profiles to fill a 64x64 HUB75 panel and a 64x64 logical
+profile to drive a future 32x32 physical panel.
 
-With `rescale=true`, logical protocol dimensions and renderer storage are
-separate. A 64x64 logical profile driving a 16x16 WLED matrix stores a 16x16 RGB
-canvas (**768 bytes**) instead of a 64x64 RGB canvas (**12,288 bytes**). RAW data
-and GIF scanlines are sampled directly into the smaller storage canvas, avoiding
-a second full logical framebuffer.
+The historical `rescale` setting is retained for compatibility with low-memory
+0.8-era profiles. When enabled there, logical protocol dimensions and renderer
+storage may be separated so a 64x64 logical source can be sampled directly into
+a smaller physical canvas without allocating a second full logical framebuffer.
 
 The full rationale, failed experiments, memory measurements, and safety rules are
 documented in [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -405,12 +422,18 @@ Brightness is synchronized from the iDotMatrix app to WLED. The app does not
 query the current WLED brightness from the emulated peripheral, so changing
 brightness elsewhere in WLED does not necessarily move the app slider.
 
+### Alarm / Program multipart media
+
+On 64x64 profiles the official app can split one Alarm or Program media asset across multiple complete logical FA02 packets. Each packet repeats the full Alarm/Program metadata header; `mediaSize` and `mediaCRC` describe the complete asset, while the bytes after that packet's header are only the current chunk. Build dev.21 assembles chunks by stable media identity, total size and CRC. For Schedule, byte 10 is the one-byte content type and byte 11 is a transport chunk marker (`0x00` first, observed `0x02` continuation); the marker is not part of media identity. Schedule returns ACK status `0x01` for accepted incomplete media and `0x03` only after complete CRC-valid commit. An incomplete, mismatched, oversized, timed-out or CRC-invalid transfer is discarded without replacing the previously committed Alarm/Program. The current transaction timeout is 5 seconds and the defensive per-asset limit is 512 KiB.
+
 ### Clock source
 
-WLED remains the primary clock authority whenever its local time is valid.
-Configure WLED NTP, timezone, and daylight-saving settings normally. The last
-valid app time-synchronization packet is retained and used as an offline fallback
-while WLED local time is not yet valid.
+For iDotMatrix Alarm and Program/Schedule compatibility, the most recent valid
+app time-synchronization packet is authoritative once received, matching the
+standalone emulator and original-device behavior. WLED local time/NTP remains
+the fallback when the app has not synchronized time in the current boot/session.
+Configure WLED NTP, timezone, and daylight-saving settings normally for WLED's
+own clock and for operation before the app supplies its time synchronization.
 
 ### Display ownership
 
@@ -441,9 +464,7 @@ more flash writes than the PSRAM/direct backend. The cache has a 512 KiB limit.
 
 ### Validation boundaries
 
-The automatic PSRAM direct backend is implemented but has not yet been tested on
-the pending PSRAM hardware. Native physical 64x64 output and HUB75 DMA are also
-outside the 0.8.2 release-validation matrix.
+The PSRAM/direct backend, native physical 64x64 output and WLED native HUB75 DMA remain outside the 0.8.2 stable release matrix, but are hardware-validated in the 0.9 development line on Adafruit MatrixPortal ESP32-S3 with one physical 64x64 HUB75 panel. Validation includes native 64x64 operation plus logical 32x32 -> 64x64 and 16x16 -> 64x64 automatic upscale, BLE, direct AnimatedGIF/PSRAM playback, Carousel, TEXT including the 32x64 glyph path, and WLED/iDotMatrix ownership transitions.
 
 ## Repository layout
 
@@ -523,3 +544,7 @@ The licence was chosen to align this WLED usermod with the current licensing of
 WLED, which is distributed under EUPL v1.2 or later. WLED remains copyright of
 Christian Schwinne and the individual WLED contributors. Third-party dependencies
 used by this project remain subject to their respective licences.
+
+### Automatic native-matrix upscale
+
+In the 0.9 line, an iDotMatrix logical profile smaller than the selected WLED 2D matrix is automatically enlarged at output using nearest-neighbour sampling. This makes 16x16 -> 32x32, 16x16 -> 64x64 and 32x32 -> 64x64 normal supported display paths. The legacy `rescale` switch remains for deliberate logical-downscale tests.

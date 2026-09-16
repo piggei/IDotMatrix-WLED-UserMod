@@ -93,18 +93,16 @@ while WLED local time is not yet valid.
 
 ## Program / Schedule ACK semantics
 
-Hardware-informed behavior requires command-specific interpretation:
+Hardware validation established command-specific flow control:
 
 ```text
 07 80 -> 05 00 07 80 01
-05 80 -> 05 00 05 80 03
+05 80 accepted but incomplete -> 05 00 05 80 01
+05 80 complete + CRC-valid + committed -> 05 00 05 80 03
+05 80 rejected/failed -> 05 00 05 80 02
 ```
 
-`0x03` is a transaction-termination status here, not a universal success flag.
-A recognized schedule-activity transaction therefore returns `0x03` even when
-validation or persistent storage rejects the activity internally. This keeps the
-wire transaction aligned with original-device behavior while failures remain
-visible through Usermod diagnostics.
+For Schedule activity uploads, `0x01` is the continuation status required by the official 64x64 app. Sending `0x03` after the first 4096-byte chunk prematurely terminates the transfer. `0x03` is therefore reserved for the final successfully committed media object.
 
 ## Screen power
 
@@ -317,12 +315,13 @@ original-device protocol requirement.
 ## Logical-to-physical mapping
 
 **WLED integration decision:** `screenType` selects the advertised logical
-profile. Renderer storage may use the smaller physical matrix dimensions when
-the test-only rescale option is enabled. The physical output size comes from the selected
-WLED 2D segment. With `rescale=false`, unequal sizes are blocked and produce black. With
-`rescale=true`, nearest-neighbour sampling maps the complete logical canvas to
-the segment. WLED remains responsible for panel layout, rotation, mirroring,
-grouping, and serpentine wiring.
+profile while the physical output size comes from the selected WLED 2D segment.
+On the 0.9 native-matrix path, unequal logical/physical 16x16, 32x32 and 64x64
+sizes are mapped automatically. Upscale uses nearest-neighbour replication;
+downscale uses box averaging; equal sizes are copied 1:1. WLED remains
+responsible for panel layout, rotation, mirroring, grouping, and serpentine
+wiring. The historical `rescale` option is retained for legacy low-memory
+storage profiles rather than as a prerequisite for output scaling.
 
 `screenType` is also bounded by the decoder profile compiled into the firmware:
 
@@ -456,7 +455,7 @@ effect lets WLED apply its configured matrix mapping or the optional rescale.
 | 0 | glyph count |
 | 1..3 | not yet documented |
 | 4 | movement/effect |
-| 5 | speed (`0..100`; mapped to 500..15 ms per pixel) |
+| 5 | speed (`0..100`; base cadence mapped to 500..15 ms per logical pixel; native 64x64 positional TEXT may use two pixels per accepted render in the final 10% to exceed the WLED frame-rate ceiling) |
 | 6 | colour mode |
 | 7..9 | text RGB |
 | 10 | background enabled/mode |
@@ -470,11 +469,15 @@ Each glyph begins with a four-byte metadata prefix followed by its bitmap:
 | `0x05` | confirmed | 16x32 | 64 bytes | 68 bytes |
 | `0x03` | reference compatibility alias, unconfirmed | 8x16 | 16 bytes | 20 bytes |
 | `0x06` | reference compatibility alias, unconfirmed | 16x32 | 64 bytes | 68 bytes |
+| `0x08` / `0x09` | 0.9.0-dev.4 candidate family; hardware validation pending | 32x64 | 256 bytes | 260 bytes |
 
-The current implementation accepts only the experimentally confirmed `0x02` and
-`0x05` markers. Bitmap rows are consecutive, and the least-significant bit is
-the leftmost pixel within each byte. Mixed glyph sizes in one payload have not
-been observed and are not supported.
+Build 0.9.0-dev.4 accepts the confirmed/reference 8x16 and 16x32 marker families
+and adds the 32x64 cell required by the app's 64-pixel TEXT size. For the 32x64
+case it also accepts a marker variant only when the complete payload has an exact
+260-byte-per-glyph record structure; this avoids silently treating arbitrary
+unknown TEXT formats as valid. Bitmap rows are consecutive, and the
+least-significant bit is the leftmost pixel within each byte. Mixed glyph sizes
+in one payload have not been observed and are not supported.
 
 **WLED mapping:** the app-supplied bitmap is stored by the independent renderer
 and selects the existing `iDotMatrix` effect. The global colour,
@@ -541,6 +544,16 @@ Device-level display policy is intentionally not duplicated by the emulator.
 
 The countdown (`08 80`) and stopwatch (`09 80`) wire formats are unchanged. The WLED renderer now preserves millisecond state internally so the BUILD80 timer-hand phase can be reproduced above the MM:SS display; this is a rendering change only, not a protocol change.
 
+
+## Alarm / Program multipart media (0.9.0-dev.21)
+
+64x64 captures established that `mediaSize` in Alarm (`00 80`, 24-byte header) and Program activity (`05 80`, 23-byte header) packets is the **total media size**, not the payload size of the current logical packet. The app may send multiple complete logical packets, each repeating its metadata header. An observed Alarm carrying 6706 media bytes arrived as 4096 bytes followed by 2610 bytes.
+
+For Schedule activity packets, offset 10 is an **8-bit content type** and offset 11 is a separate per-chunk marker. Observed markers are `0x00` for the first chunk and `0x02` for continuation chunks. The marker is transport framing and is not part of media identity; interpreting bytes 10..11 as LE16 would incorrectly transform type `0x01` into `0x0201` on continuation packets and reset the transfer.
+
+The receiver keeps independent Alarm and Program media transactions. Schedule chunks are associated by activity index + content type + total `mediaSize` + full-media CRC. A transaction is committed only when `received == mediaSize` and CRC32 over the complete assembled asset matches `mediaCRC`. Metadata mismatch, overflow, allocation failure, 5-second inactivity timeout or final CRC failure aborts only the in-progress transaction; the previously committed Alarm/Program remains intact. A defensive 512 KiB per-asset limit prevents unbounded allocation.
+
+This assembly is above FA02 transport reassembly: BLE fragmentation first produces one complete logical packet, then the automation multipart layer joins multiple such logical Alarm/Program packets into one media asset. Generic FA02 framing is unchanged.
 
 ## Alarm / program sound mapping
 
@@ -616,3 +629,20 @@ On the no-PSRAM frame-cache backend, persistent GIF slots use a per-slot cache
 when its slot is replaced or reset, avoiding repeated flash rewrites for
 unchanged content. A slot that cannot be started is quarantined for the current
 bank generation so later valid slots are not starved.
+
+## Preset / Default (`06 02`) — 0.9.0-dev.22
+
+The app's Preset / Default page is a dedicated temporary playlist, not a second persistent Carousel. Media objects are uploaded through the normal 16-byte Bulk header using protocol slots `14..19`. Types observed and supported are `0x01` (GIF/image media) and `0x03` (TEXT). The Bulk `timeSign` field is retained as opaque metadata; the value `5` observed in Preset traffic is **not** interpreted as a five-second dwell.
+
+Large Preset objects use normal repeated-header Bulk continuation: marker byte 4 is `0x00` on the first packet and `0x02` on continuation packets, total size/CRC describe the complete object, ACK status is `0x01` while incomplete and `0x03` when the complete CRC-valid object has been staged. The continuation marker is not part of object identity.
+
+Activation format:
+
+```text
+[lengthLE16] 06 02 <count> <slot1> ... <slotN>
+```
+
+`count` is `1..6`; every slot must be in `14..19`. The command contains only playback order. Uploads are staged without changing the active display. On `06/02`, pending media for the selected slots are promoted and playback restarts from the first requested entry. The playlist loops cyclically. Image/GIF entries use ~3000 ms visible dwell; TEXT duration is derived from the existing text renderer so horizontal scrolling completes before advancing and static/page-like presentation retains the final hold. Preset files are volatile and are cleared at boot/reset.
+
+### Preset upload indicator (0.9.0-dev.23)
+The visual upload indicator is local UI only. It starts on the first accepted Bulk object routed to slot 14..19, remains indeterminate across subsequent Preset objects, and ends on `06/02` activation (or the local interrupted-upload timeout). It does not change Bulk ACK `0x01/0x03`, CRC, marker, or slot semantics.
