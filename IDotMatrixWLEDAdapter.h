@@ -227,7 +227,11 @@ private:
   IDotMatrixClockSettings clockSettings_{};
   IDotMatrixAudioSettings audioSettings_{};
   uint32_t audioLastRenderMillis_ = 0;
+  uint32_t audioInputPacketCounter_ = 0;
+  uint32_t audioLastInputMillis_ = 0;
   uint32_t clockCycleStartedAt_ = 0;
+  uint32_t clockEntryDateGraceUntil_ = 0;
+  bool clockDatePreference_ = false;
   bool countdownRunning_ = false;
   bool countdownPaused_ = false;
   bool countdownFinishPending_ = false;

@@ -630,35 +630,6 @@ void IDotMatrixRenderer::renderLightEffect(uint32_t now) {
 }
 
 namespace {
-void drawTimerIcon(Pixel* canvas, uint8_t phase) {
-  const Pixel rim = color(255, 145, 0);
-  const Pixel hand = color(255, 45, 20);
-  const Pixel center = color(255, 220, 120);
-  constexpr int8_t cx = 7;
-  constexpr int8_t cy = 4;
-
-  // 9x9 pixel-art timer from the latest standalone emulator (BUILD80).
-  putPixel(canvas, 6, 0, rim); putPixel(canvas, 7, 0, rim); putPixel(canvas, 8, 0, rim);
-  putPixel(canvas, 7, 1, rim);
-  putPixel(canvas, 4, 1, rim); putPixel(canvas, 10, 1, rim);
-  putPixel(canvas, 3, 2, rim); putPixel(canvas, 11, 2, rim);
-  putPixel(canvas, 2, 3, rim); putPixel(canvas, 12, 3, rim);
-  putPixel(canvas, 2, 4, rim); putPixel(canvas, 12, 4, rim);
-  putPixel(canvas, 2, 5, rim); putPixel(canvas, 12, 5, rim);
-  putPixel(canvas, 3, 6, rim); putPixel(canvas, 11, 6, rim);
-  putPixel(canvas, 4, 7, rim); putPixel(canvas, 10, 7, rim);
-  putPixel(canvas, 5, 8, rim); putPixel(canvas, 6, 8, rim); putPixel(canvas, 7, 8, rim);
-  putPixel(canvas, 8, 8, rim); putPixel(canvas, 9, 8, rim);
-
-  static const int8_t handX[8] = {7, 10, 11, 10, 7, 4, 3, 4};
-  static const int8_t handY[8] = {1, 2, 4, 6, 7, 6, 4, 2};
-  const int8_t endX = handX[phase & 7u];
-  const int8_t endY = handY[phase & 7u];
-  putPixel(canvas, cx, cy, center);
-  putPixel(canvas, (cx + endX) / 2, (cy + endY) / 2, hand);
-  putPixel(canvas, endX, endY, hand);
-}
-
 void scaleLegacyCanvas(
   const Pixel* base,
   Pixel* destination,
@@ -686,19 +657,6 @@ Pixel audioRainbow(uint8_t hue) {
     case 3: return color(0, q, 255);
     case 4: return color(t, 0, 255);
     default: return color(255, 0, q);
-  }
-}
-
-void audioLine(Pixel* base, int x0, int y0, int x1, int y1, const Pixel& value) {
-  const int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-  const int dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-  int error = dx + dy;
-  while (true) {
-    putPixel(base, x0, y0, value);
-    if (x0 == x1 && y0 == y1) break;
-    const int twice = 2 * error;
-    if (twice >= dy) { error += dy; x0 += sx; }
-    if (twice <= dx) { error += dx; y0 += sy; }
   }
 }
 
@@ -731,7 +689,8 @@ uint8_t audioBand(uint8_t value) { return value > 12 ? 12 : value; }
 }
 
 void IDotMatrixRenderer::renderAudio(
-  bool fft, uint8_t mode, uint8_t level, const uint8_t bands[8], uint32_t now
+  bool fft, uint8_t mode, uint8_t level, const uint8_t bands[8], uint32_t now,
+  uint32_t packetCounter, uint32_t lastPacketMillis
 ) {
   if (pixels_ == nullptr) return;
   Pixel base[16 * 16]{};
@@ -740,20 +699,77 @@ void IDotMatrixRenderer::renderAudio(
 
   if (!fft) switch (mode > 4 ? 4 : mode) {
     case 0: {
-      const uint8_t pose = uint8_t((now / 150u + level) % 6u);
-      const Pixel green = color(45,255,25), green2 = color(15,150,15);
-      for (int x=0;x<16;x++) if (((x+pose)&1)==0) { putPixel(base,x,0,green); putPixel(base,x,1,green2); }
-      struct Pose { int hx,hy,sx,sy,px,py,lx,ly,rx,ry,lfx,lfy,rfx,rfy; };
-      static const Pose poses[6] = {
-        {8,3,8,6,8,10,4,7,12,8,5,14,11,14}, {7,3,8,6,8,10,3,9,12,5,4,13,12,14},
-        {9,4,8,7,7,10,3,5,13,10,2,14,10,13}, {5,7,7,8,9,10,3,11,10,5,4,14,13,12},
-        {8,11,8,9,8,7,4,12,12,12,5,4,11,4}, {10,3,9,6,8,10,5,5,13,7,4,14,10,13}
+      // B154 manufacturer-style breakdancer. The captured sprites are an atlas
+      // of independent body-part alternatives rather than a fixed frame loop.
+      auto dancerRand = [&]() -> uint32_t {
+        uint32_t x = audioDancerRng_;
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        audioDancerRng_ = x ? x : 0x6D2B79F5u;
+        return audioDancerRng_;
       };
-      const Pose& p = poses[pose];
-      for (int yy=-1;yy<=1;yy++) for (int xx=-1;xx<=1;xx++) putPixel(base,p.hx+xx,p.hy+yy,white);
-      audioLine(base,p.sx,p.sy,p.px,p.py,white); audioLine(base,p.sx,p.sy,p.lx,p.ly,white);
-      audioLine(base,p.sx,p.sy,p.rx,p.ry,white); audioLine(base,p.px,p.py,p.lfx,p.lfy,white);
-      audioLine(base,p.px,p.py,p.rfx,p.rfy,white);
+      auto drawPoints = [&](const int8_t (*pts)[2], uint8_t count, const Pixel& value) {
+        for (uint8_t i = 0; i < count; ++i) putPixel(base, pts[i][0], pts[i][1], value);
+      };
+
+      if (!audioDancerInitialized_) {
+        audioDancerInitialized_ = true;
+        audioDancerRng_ = 0xA341316Cu ^ now ^ (packetCounter * 0x9E3779B9u);
+        audioDancerNextChangeMs_ = 0;
+      }
+
+      const bool audioFresh = uint32_t(now - lastPacketMillis) <= 350u;
+      const bool audioActive = audioFresh && level > 1u;
+      const bool newAudioPacket = packetCounter != audioDancerLastProcessedPacket_;
+      if (audioActive && newAudioPacket && int32_t(now - audioDancerNextChangeMs_) >= 0) {
+        audioDancerLastProcessedPacket_ = packetCounter;
+        int chanceValue = 68 + int(level) * 5;
+        if (chanceValue > 99) chanceValue = 99;
+        const uint8_t chance = uint8_t(chanceValue);
+        if ((dancerRand() % 100u) < chance) audioDancerHead_ = uint8_t(dancerRand() % 3u);
+        if ((dancerRand() % 100u) < chance) audioDancerLeftArm_ = uint8_t(dancerRand() % 2u);
+        if ((dancerRand() % 100u) < chance) audioDancerRightArm_ = uint8_t(dancerRand() % 2u);
+        if ((dancerRand() % 100u) < chance) audioDancerLeftLeg_ = uint8_t(dancerRand() % 2u);
+        if ((dancerRand() % 100u) < chance) audioDancerRightLeg_ = uint8_t(dancerRand() % 2u);
+        if ((dancerRand() % 100u) < chance) audioDancerBackground_ = uint8_t(dancerRand() % 3u);
+        int wait = 145 - int(level) * 8;
+        if (wait < 45) wait = 45;
+        if (wait > 145) wait = 145;
+        audioDancerNextChangeMs_ = now + uint32_t(wait);
+      } else if (newAudioPacket) {
+        // Consume silent/too-fast packets without changing pose, matching B154.
+        audioDancerLastProcessedPacket_ = packetCounter;
+      }
+
+      static const Pixel backgrounds[3] = {
+        {90,215,70}, {247,255,100}, {46,228,222}
+      };
+      const Pixel bg = backgrounds[audioDancerBackground_ % 3u];
+      for (int y = 0; y < 3; ++y) for (int x = 0; x < 16; ++x)
+        if (((x + y) & 1) == 1) putPixel(base, x, y, bg);
+
+      static const int8_t torso[][2] = {
+        {7,5},{8,5},{7,6},{8,6},{7,7},{8,7},{7,8},{8,8},{7,9},{8,9},{7,10},{8,10}
+      };
+      static const int8_t head0[][2]={{6,1},{7,1},{8,1},{9,1},{6,2},{7,2},{8,2},{9,2},{6,3},{7,3},{8,3},{9,3},{10,3},{6,4},{7,4},{8,4},{9,4}};
+      static const int8_t head1[][2]={{7,1},{8,1},{9,1},{10,1},{7,2},{8,2},{9,2},{10,2},{7,3},{8,3},{9,3},{10,3},{7,4},{8,4},{9,4},{10,4}};
+      static const int8_t head2[][2]={{5,1},{6,1},{7,1},{8,1},{5,2},{6,2},{7,2},{8,2},{5,3},{6,3},{7,3},{8,3},{5,4},{6,4},{7,4},{8,4}};
+      static const int8_t leftArm0[][2]={{6,6},{5,7},{4,8},{3,9}};
+      static const int8_t leftArm1[][2]={{6,7},{5,7},{4,7},{3,7},{2,8}};
+      static const int8_t rightArm0[][2]={{9,6},{10,7},{11,8},{12,9}};
+      static const int8_t rightArm1[][2]={{9,7},{10,7},{11,7},{12,7},{13,8}};
+      static const int8_t leftLeg0[][2]={{7,11},{6,12},{5,12},{5,13},{5,14},{6,12}};
+      static const int8_t leftLeg1[][2]={{6,11},{7,11},{6,12},{6,13},{6,14},{5,15},{6,15}};
+      static const int8_t rightLeg0[][2]={{9,11},{9,12},{9,13},{9,14},{9,15},{10,15}};
+      static const int8_t rightLeg1[][2]={{8,11},{9,11},{9,12},{9,13},{9,14},{9,15},{10,15}};
+
+      drawPoints(torso, uint8_t(sizeof(torso)/sizeof(torso[0])), white);
+      if (audioDancerHead_ == 1) drawPoints(head1, uint8_t(sizeof(head1)/sizeof(head1[0])), white);
+      else if (audioDancerHead_ == 2) drawPoints(head2, uint8_t(sizeof(head2)/sizeof(head2[0])), white);
+      else drawPoints(head0, uint8_t(sizeof(head0)/sizeof(head0[0])), white);
+      drawPoints(audioDancerLeftArm_ ? leftArm1 : leftArm0, audioDancerLeftArm_ ? 5 : 4, white);
+      drawPoints(audioDancerRightArm_ ? rightArm1 : rightArm0, audioDancerRightArm_ ? 5 : 4, white);
+      drawPoints(audioDancerLeftLeg_ ? leftLeg1 : leftLeg0, audioDancerLeftLeg_ ? 7 : 6, white);
+      drawPoints(audioDancerRightLeg_ ? rightLeg1 : rightLeg0, audioDancerRightLeg_ ? 7 : 6, white);
       break;
     }
     case 1: {
@@ -764,10 +780,22 @@ void IDotMatrixRenderer::renderAudio(
     }
     case 2: {
       const Pixel frame=color(0,235,255);
-      for(int x=1;x<15;x+=2){putPixel(base,x,0,frame);putPixel(base,x,15,frame);}
-      for(int y=1;y<15;y+=2){putPixel(base,0,y,frame);putPixel(base,15,y,frame);}
-      const uint8_t strength = level < 1 ? 1 : level > 7 ? 7 : level;
+      // LEVEL 3 perimeter: one cyan pixel followed by two empty positions.
+      // Walk the perimeter clockwise and advance the phase positively; using
+      // (perimeterIndex + phase) makes the visible dots move one position in
+      // the opposite (counter-clockwise) direction every 95 ms.
       const uint32_t tick=now/95u;
+      const uint8_t framePhase=uint8_t(tick%3u);
+      uint8_t perimeterIndex=0;
+      auto framePixel = [&](int x, int y) {
+        if (((perimeterIndex + framePhase) % 3u) == 0u) putPixel(base,x,y,frame);
+        ++perimeterIndex;
+      };
+      for(int x=0;x<16;x++) framePixel(x,0);
+      for(int y=1;y<16;y++) framePixel(15,y);
+      for(int x=14;x>=0;x--) framePixel(x,15);
+      for(int y=14;y>0;y--) framePixel(0,y);
+      const uint8_t strength = level < 1 ? 1 : level > 7 ? 7 : level;
       for(int x=2;x<=13;x++) {
         const int boost=6-std::abs(x-7); const uint8_t wobble=uint8_t((x*7+tick*3+(x&1)*5)%5);
         int height=int(strength)+boost/2+int(wobble)-1; if(height<2)height=2;if(height>13)height=13;
@@ -789,13 +817,73 @@ void IDotMatrixRenderer::renderAudio(
       break;
     }
     default: {
-      const Pixel red=color(255,20,25), cyan=color(0,235,255), blue=color(15,55,255), dark=color(4,15,90);
-      for(int y=3;y<=7;y++){for(int x=1;x<=5;x++)putPixel(base,x,y,red);for(int x=10;x<=14;x++)putPixel(base,x,y,red);}
-      for(int y=4;y<=6;y++){for(int x=2;x<=3;x++)putPixel(base,x,y,cyan);for(int x=12;x<=13;x++)putPixel(base,x,y,cyan);}
-      const int drift=level>=5?1:0;putPixel(base,3+drift,5,white);putPixel(base,12+drift,5,white);
-      for(int x=3;x<=12;x++) putPixel(base,x,11,blue);
-      for(int x=4;x<=11;x++) putPixel(base,x,12,level>=5?blue:dark);
-      if(level>=7)for(int x=5;x<=10;x++)putPixel(base,x,13,blue);
+      // B154 observed face: eyes and blue-mouth states evolve independently.
+      static const uint16_t eyeRed[4][16] = {
+        {0,0,0,0,0x381C,0x4422,0x381C,0,0,0,0,0,0,0,0,0},
+        {0,0x381C,0x4422,0x4422,0x4422,0x4422,0x381C,0,0,0,0,0,0,0,0,0},
+        {0,0x381C,0x4422,0x4422,0x4422,0x4422,0x381C,0,0,0,0,0,0,0,0,0},
+        {0,0x381C,0x4422,0x4422,0x4422,0x4422,0x381C,0,0,0,0,0,0,0,0,0}
+      };
+      static const uint16_t eyeWhite[4][16] = {
+        {0,0,0,0,0,0x381C,0,0,0,0,0,0,0,0,0,0},
+        {0,0,0x381C,0x2814,0x2814,0x381C,0,0,0,0,0,0,0,0,0},
+        {0,0,0x381C,0x381C,0x381C,0x2010,0,0,0,0,0,0,0,0,0},
+        {0,0,0x381C,0x3018,0x3018,0x381C,0,0,0,0,0,0,0,0,0}
+      };
+      static const uint16_t mouthBlue[4][16] = {
+        {0,0,0,0,0,0,0,0,0,0x3FFC,0x7FFE,0,0x7FFE,0x3FFC,0,0},
+        {0,0,0,0,0,0,0,0,0x3FFC,0x7FFE,0,0,0,0x7FFE,0x3FFC,0},
+        {0,0,0,0,0,0,0,0,0,0,0x3FFC,0x7FFE,0x7FFE,0x3FFC,0,0},
+        {0,0,0,0,0,0,0,0,0x3FFC,0x7FFE,0,0,0,0x7FFE,0x3FFC,0}
+      };
+      static const uint16_t mouthRed[4][16] = {
+        {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+        {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+        {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+        {0,0,0,0,0,0,0,0,0,0,0x0180,0x0240,0,0,0,0}
+      };
+      auto faceRand = [&]() -> uint32_t {
+        uint32_t x = audioFaceRng_;
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        audioFaceRng_ = x ? x : 0xA341316Cu;
+        return audioFaceRng_;
+      };
+      auto differentState = [&](uint8_t current) -> uint8_t {
+        uint8_t next = uint8_t(faceRand() & 0x03u);
+        if (next == current) next = uint8_t((next + 1u + (faceRand() % 3u)) & 0x03u);
+        return next;
+      };
+      auto drawMask = [&](const uint16_t rows[16], const Pixel& value) {
+        for (uint8_t y = 0; y < 16; ++y) {
+          const uint16_t bits = rows[y];
+          for (uint8_t x = 0; x < 16; ++x) if (bits & (1u << x)) putPixel(base, x, y, value);
+        }
+      };
+
+      if (!audioFaceInitialized_) {
+        audioFaceInitialized_ = true;
+        audioFaceEyes_ = 1;
+        audioFaceMouth_ = 0;
+        audioFaceNextEyesMs_ = now + 320u;
+        audioFaceNextMouthMs_ = now + 420u;
+      }
+      if (int32_t(now - audioFaceNextEyesMs_) >= 0) {
+        audioFaceEyes_ = differentState(audioFaceEyes_);
+        int wait = 420 - int(level) * 15;
+        if (wait < 180) wait = 180;
+        audioFaceNextEyesMs_ = now + uint32_t(wait) + (faceRand() % 160u);
+      }
+      if (int32_t(now - audioFaceNextMouthMs_) >= 0) {
+        audioFaceMouth_ = differentState(audioFaceMouth_);
+        int wait = 500 - int(level) * 16;
+        if (wait < 220) wait = 220;
+        audioFaceNextMouthMs_ = now + uint32_t(wait) + (faceRand() % 200u);
+      }
+
+      drawMask(eyeRed[audioFaceEyes_], color(232,0,11));
+      drawMask(eyeWhite[audioFaceEyes_], color(255,255,252));
+      drawMask(mouthBlue[audioFaceMouth_], color(8,69,247));
+      drawMask(mouthRed[audioFaceMouth_], color(232,0,11));
       break;
     }
   } else switch (mode > 4 ? 4 : mode) {
@@ -850,28 +938,128 @@ void IDotMatrixRenderer::renderMMSS(
   visible_ = true;
 }
 
-void IDotMatrixRenderer::renderCountdown(uint32_t remainingMillis) {
+constexpr uint8_t COUNTDOWN_HOURGLASS_FRAMES[10][70] = {
+  {3,3,3,3,3,3,3, 1,2,2,2,2,2,1, 1,2,2,2,2,2,1, 0,1,2,2,2,1,0, 0,0,1,2,1,0,0, 0,0,1,0,1,0,0, 0,1,0,0,0,1,0, 1,0,0,0,0,0,1, 1,0,0,0,0,0,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,2,2,2,2,2,1, 1,2,2,2,2,2,1, 0,1,2,2,2,1,0, 0,0,1,2,1,0,0, 0,0,1,2,1,0,0, 0,1,0,0,0,1,0, 1,0,0,0,0,0,1, 1,0,0,0,0,0,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,2,2,2,2,2,1, 1,2,2,2,2,2,1, 0,1,2,2,2,1,0, 0,0,1,2,1,0,0, 0,0,1,2,1,0,0, 0,1,0,2,0,1,0, 1,0,0,0,0,0,1, 1,0,0,0,0,0,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,2,2,2,2,2,1, 1,2,2,2,2,2,1, 0,1,2,2,2,1,0, 0,0,1,2,1,0,0, 0,0,1,2,1,0,0, 0,1,0,2,0,1,0, 1,0,0,2,0,0,1, 1,0,0,2,0,0,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,2,2,2,2,2,1, 1,2,2,2,2,2,1, 0,1,2,2,2,1,0, 0,0,1,2,1,0,0, 0,0,1,2,1,0,0, 0,1,0,2,0,1,0, 1,0,0,2,0,0,1, 1,0,2,2,2,0,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,0,0,0,0,0,1, 1,2,2,2,2,2,1, 0,1,2,2,2,1,0, 0,0,1,2,1,0,0, 0,0,1,2,1,0,0, 0,1,0,2,0,1,0, 1,0,0,2,0,0,1, 1,2,2,2,2,2,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,0,0,0,0,0,1, 1,2,2,2,2,2,1, 0,1,2,2,2,1,0, 0,0,1,2,1,0,0, 0,0,1,2,1,0,0, 0,1,0,2,0,1,0, 1,0,2,2,2,0,1, 1,2,2,2,2,2,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,0,0,0,0,0,1, 1,0,0,0,0,0,1, 0,1,2,2,2,1,0, 0,0,1,2,1,0,0, 0,0,1,2,1,0,0, 0,1,0,2,0,1,0, 1,2,2,2,2,2,1, 1,2,2,2,2,2,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,0,0,0,0,0,1, 1,0,0,0,0,0,1, 0,1,0,0,0,1,0, 0,0,1,2,1,0,0, 0,0,1,2,1,0,0, 0,1,2,2,2,1,0, 1,2,2,2,2,2,1, 1,2,2,2,2,2,1, 3,3,3,3,3,3,3},
+  {3,3,3,3,3,3,3, 1,0,0,0,0,0,1, 1,0,0,0,0,0,1, 0,1,0,0,0,1,0, 0,0,1,0,1,0,0, 0,0,1,2,1,0,0, 0,1,2,2,2,1,0, 1,2,2,2,2,2,1, 1,2,2,2,2,2,1, 3,3,3,3,3,3,3}
+};
+
+constexpr uint8_t STOPWATCH_FRAMES[8][63] = {
+  {0,2,2,2,2,2,0, 0,0,2,2,2,0,0, 0,3,3,3,3,3,0, 3,1,1,1,1,1,3, 3,1,1,4,1,1,3, 3,1,1,4,1,1,3, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 0,3,3,3,3,3,0},
+  {0,2,2,2,2,2,0, 0,0,2,2,2,0,0, 0,3,3,3,3,3,0, 3,1,1,1,1,1,3, 3,1,1,1,4,1,3, 3,1,1,4,1,1,3, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 0,3,3,3,3,3,0},
+  {0,2,2,2,2,2,0, 0,0,2,2,2,0,0, 0,3,3,3,3,3,0, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 3,1,1,4,4,1,3, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 0,3,3,3,3,3,0},
+  {0,2,2,2,2,2,0, 0,0,2,2,2,0,0, 0,3,3,3,3,3,0, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 3,1,1,4,1,1,3, 3,1,1,1,4,1,3, 3,1,1,1,1,1,3, 0,3,3,3,3,3,0},
+  {0,2,2,2,2,2,0, 0,0,2,2,2,0,0, 0,3,3,3,3,3,0, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 3,1,1,4,1,1,3, 3,1,1,4,1,1,3, 3,1,1,1,1,1,3, 0,3,3,3,3,3,0},
+  {0,2,2,2,2,2,0, 0,0,2,2,2,0,0, 0,3,3,3,3,3,0, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 3,1,1,4,1,1,3, 3,1,4,1,1,1,3, 3,1,1,1,1,1,3, 0,3,3,3,3,3,0},
+  {0,2,2,2,2,2,0, 0,0,2,2,2,0,0, 0,3,3,3,3,3,0, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 3,1,4,4,1,1,3, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 0,3,3,3,3,3,0},
+  {0,2,2,2,2,2,0, 0,0,2,2,2,0,0, 0,3,3,3,3,3,0, 3,1,1,1,1,1,3, 3,1,4,1,1,1,3, 3,1,1,4,1,1,3, 3,1,1,1,1,1,3, 3,1,1,1,1,1,3, 0,3,3,3,3,3,0}
+};
+
+constexpr uint8_t SCORE_DIGITS_4X7[10][7] = {
+  {0xF,0x9,0x9,0x9,0x9,0x9,0xF},
+  {0x2,0x6,0x2,0x2,0x2,0x2,0x7},
+  {0xF,0x1,0x1,0xF,0x8,0x8,0xF},
+  {0xF,0x1,0x1,0xF,0x1,0x1,0xF},
+  {0x9,0x9,0x9,0xF,0x1,0x1,0x1},
+  {0xF,0x8,0x8,0xF,0x1,0x1,0xF},
+  {0xF,0x8,0x8,0xF,0x9,0x9,0xF},
+  {0xF,0x1,0x1,0x2,0x2,0x4,0x4},
+  {0xF,0x9,0x9,0xF,0x9,0x9,0xF},
+  {0xF,0x9,0x9,0xF,0x1,0x1,0xF}
+};
+
+void drawCountdownHourglass(Pixel* canvas, uint8_t frame) {
+  constexpr Pixel palette[4] = {
+    color(0,0,0), color(255,255,255), color(242,119,6), color(146,86,61)
+  };
+  frame %= 10u;
+  for (uint8_t y=0; y<10; ++y) {
+    for (uint8_t x=0; x<7; ++x) {
+      const uint8_t index = COUNTDOWN_HOURGLASS_FRAMES[frame][size_t(y)*7u+x];
+      if (index != 0) putPixel(canvas, x, y+4, palette[index]);
+    }
+  }
+}
+
+void drawStopwatchArtwork(Pixel* canvas, uint8_t frame) {
+  constexpr Pixel palette[5] = {
+    color(0,0,0), color(255,255,255), color(242,119,6), color(164,158,165), color(220,5,39)
+  };
+  frame &= 7u;
+  for (uint8_t y=0; y<9; ++y) {
+    for (uint8_t x=0; x<7; ++x) {
+      const uint8_t index = STOPWATCH_FRAMES[frame][size_t(y)*7u+x];
+      if (index != 0) putPixel(canvas, x, y+4, palette[index]);
+    }
+  }
+}
+
+void drawScoreDigit4x7(Pixel* canvas, uint8_t digit, int16_t x, int16_t y, const Pixel& value) {
+  if (digit > 9u) return;
+  for (uint8_t row=0; row<7; ++row) {
+    const uint8_t bits = SCORE_DIGITS_4X7[digit][row];
+    for (uint8_t col=0; col<4; ++col) {
+      if ((bits & (1u << (3u-col))) != 0) putPixel(canvas, x+col, y+row, value);
+    }
+  }
+}
+
+void drawScore3Digit(Pixel* canvas, uint16_t score, int16_t y, const Pixel& value) {
+  score %= 1000u;
+  drawScoreDigit4x7(canvas, uint8_t((score/100u)%10u), 1, y, value);
+  drawScoreDigit4x7(canvas, uint8_t((score/10u)%10u), 6, y, value);
+  drawScoreDigit4x7(canvas, uint8_t(score%10u), 11, y, value);
+}
+
+void IDotMatrixRenderer::renderCountdown(uint32_t remainingMillis, uint32_t animationMillis) {
   if (pixels_ == nullptr) return;
 
   Pixel base[16 * 16]{};
   const uint32_t remainingSeconds = (remainingMillis + 999u) / 1000u;
-  const Pixel digits = remainingSeconds <= 5u
-    ? color(255, 0, 0)
-    : color(255, 255, 255);
   const uint8_t minutes = uint8_t((remainingSeconds / 60u) % 100u);
   const uint8_t seconds = uint8_t(remainingSeconds % 60u);
+  const Pixel minuteColor = color(255,255,255);
+  const Pixel secondColor = remainingSeconds <= 10u ? color(255,0,0) : color(242,119,6);
+  const bool colonVisible = ((animationMillis / 500u) & 1u) == 0u;
 
-  // Remaining time decreases.  Inverting the 125 ms phase reproduces the
-  // standalone emulator's timer-hand progression.
-  const uint8_t phase = uint8_t((8u - ((remainingMillis / 125u) & 7u)) & 7u);
-  drawTimerIcon(base, phase);
-  drawDigit(base, minutes / 10u, 0, 10, digits);
-  drawDigit(base, minutes % 10u, 3, 10, digits);
-  drawSeparator(base, 7, 10, digits, false);
-  drawDigit(base, seconds / 10u, 9, 10, digits);
-  drawDigit(base, seconds % 10u, 12, 10, digits);
+  // Original-device hourglass: 10 frames at 200 ms. At 00:00 the final
+  // frame remains displayed instead of continuing to animate.
+  const uint8_t frame = remainingSeconds == 0u ? 9u : uint8_t((animationMillis / 200u) % 10u);
+  drawCountdownHourglass(base, frame);
+  drawDigit(base, minutes / 10u, 9, 3, minuteColor);
+  drawDigit(base, minutes % 10u, 13, 3, minuteColor);
+  drawDigit(base, seconds / 10u, 9, 9, secondColor);
+  drawDigit(base, seconds % 10u, 13, 9, secondColor);
+  if (colonVisible && width_ == 16u) {
+    putPixel(base, 7, 10, secondColor);
+    putPixel(base, 7, 12, secondColor);
+  }
 
   scaleLegacyCanvas(base, pixels_, width_, height_);
+
+  // On 32x32/64x64 the separator is shifted right by half of a legacy
+  // 16x16 pixel so it sits optically centered between the timer groups.
+  if (colonVisible && (width_ == 32u || width_ == 64u) && height_ == width_) {
+    const uint8_t scale = uint8_t(width_ / 16u);
+    const uint8_t shift = uint8_t(scale / 2u);
+    const uint8_t colonX = uint8_t(7u * scale + shift);
+    const uint8_t colonRows[2] = {uint8_t(10u * scale), uint8_t(12u * scale)};
+    for (uint8_t rowIndex = 0; rowIndex < 2u; ++rowIndex) {
+      const uint8_t blockY = colonRows[rowIndex];
+      for (uint8_t yy = 0; yy < scale; ++yy) {
+        for (uint8_t xx = 0; xx < scale; ++xx) {
+          pixels_[size_t(blockY + yy) * width_ + uint8_t(colonX + xx)] = secondColor;
+        }
+      }
+    }
+  }
   visible_ = true;
 }
 
@@ -882,17 +1070,40 @@ void IDotMatrixRenderer::renderStopwatch(uint32_t elapsedMillis) {
   const uint32_t elapsedSeconds = elapsedMillis / 1000u;
   const uint8_t minutes = uint8_t((elapsedSeconds / 60u) % 100u);
   const uint8_t seconds = uint8_t(elapsedSeconds % 60u);
-  const Pixel digits = color(255, 255, 255);
+  const Pixel minuteColor = color(255,255,255);
+  const Pixel secondColor = color(242,119,6);
 
-  const uint8_t phase = uint8_t((elapsedMillis / 125u) & 7u);
-  drawTimerIcon(base, phase);
-  drawDigit(base, minutes / 10u, 0, 10, digits);
-  drawDigit(base, minutes % 10u, 3, 10, digits);
-  drawSeparator(base, 7, 10, digits, false);
-  drawDigit(base, seconds / 10u, 9, 10, digits);
-  drawDigit(base, seconds % 10u, 12, 10, digits);
+  // Eight original hand positions, indexed by elapsed time so pause naturally
+  // freezes the artwork and resume continues from the same phase.
+  drawStopwatchArtwork(base, uint8_t((elapsedMillis / 100u) & 7u));
+  drawDigit(base, minutes / 10u, 9, 3, minuteColor);
+  drawDigit(base, minutes % 10u, 13, 3, minuteColor);
+  drawDigit(base, seconds / 10u, 9, 9, secondColor);
+  drawDigit(base, seconds % 10u, 13, 9, secondColor);
+  const bool colonVisible = ((elapsedMillis / 500u) & 1u) == 0u;
+  if (colonVisible && width_ == 16u) {
+    putPixel(base, 7, 10, secondColor);
+    putPixel(base, 7, 12, secondColor);
+  }
 
   scaleLegacyCanvas(base, pixels_, width_, height_);
+
+  // Match Countdown: on larger canvases move the separator right by half
+  // of one legacy 16x16 pixel (1 native LED on 32x32, 2 on 64x64).
+  if (colonVisible && (width_ == 32u || width_ == 64u) && height_ == width_) {
+    const uint8_t scale = uint8_t(width_ / 16u);
+    const uint8_t shift = uint8_t(scale / 2u);
+    const uint8_t colonX = uint8_t(7u * scale + shift);
+    const uint8_t colonRows[2] = {uint8_t(10u * scale), uint8_t(12u * scale)};
+    for (uint8_t rowIndex = 0; rowIndex < 2u; ++rowIndex) {
+      const uint8_t blockY = colonRows[rowIndex];
+      for (uint8_t yy = 0; yy < scale; ++yy) {
+        for (uint8_t xx = 0; xx < scale; ++xx) {
+          pixels_[size_t(blockY + yy) * width_ + uint8_t(colonX + xx)] = secondColor;
+        }
+      }
+    }
+  }
   visible_ = true;
 }
 
@@ -900,15 +1111,8 @@ void IDotMatrixRenderer::renderScoreboard(uint16_t scoreA, uint16_t scoreB) {
   if (pixels_ == nullptr) return;
 
   Pixel base[16 * 16]{};
-  auto drawScore = [&base](uint16_t score, int16_t x, const Pixel& value) {
-    score %= 100u;
-    if (score >= 10u) drawDigit(base, uint8_t(score / 10u), x, 5, value);
-    drawDigit(base, uint8_t(score % 10u), x + 3, 5, value);
-  };
-
-  drawScore(scoreA, 0, color(0, 0, 255));
-  drawSeparator(base, 7, 5, color(255, 255, 255), false);
-  drawScore(scoreB, 9, color(255, 0, 0));
+  drawScore3Digit(base, scoreA, 0, color(120,88,248));
+  drawScore3Digit(base, scoreB, 9, color(248,32,120));
 
   scaleLegacyCanvas(base, pixels_, width_, height_);
   visible_ = true;
@@ -929,8 +1133,82 @@ void IDotMatrixRenderer::renderClock(
 ) {
   if (pixels_ == nullptr) return;
 
-  Pixel base[16 * 16]{};
   const Pixel selected = color(red, green, blue);
+
+  // Native 64x64 two-line layouts for the date-capable clocks.  Styles 0
+  // (rainbow frame) and 3 (solid blue/background colour) use the extra
+  // resolution to keep HH:MM and DD/MM visible together instead of alternating.
+  const uint8_t normalizedStyle = style & 0x07u;
+  if ((normalizedStyle == 0u || normalizedStyle == 3u) && renderDate &&
+      logicalWidth_ == 64u && width_ == 64u && height_ == 64u) {
+    if (normalizedStyle == 0u) {
+      Pixel border[16 * 16]{};
+      drawRainbowBorder(border, animationMillis);
+      scaleLegacyCanvas(border, pixels_, width_, height_);
+    } else {
+      fill(red, green, blue);
+    }
+
+    const Pixel foreground = normalizedStyle == 3u ? color(0, 0, 0) : selected;
+
+    auto fillBlock = [&](int16_t x, int16_t y, uint8_t scale, const Pixel& value) {
+      for (uint8_t yy = 0; yy < scale; ++yy) {
+        for (uint8_t xx = 0; xx < scale; ++xx) {
+          setPixel(uint8_t(x + xx), uint8_t(y + yy), value.red, value.green, value.blue);
+        }
+      }
+    };
+    auto drawNativeDigit = [&](uint8_t digit, int16_t x, int16_t y, uint8_t scale,
+                               const Pixel& value) {
+      if (digit > 9u) return;
+      for (uint8_t row = 0; row < 5u; ++row) {
+        for (uint8_t column = 0; column < 3u; ++column) {
+          if ((DIGITS_3X5[digit][row] & (1u << (2u - column))) != 0u) {
+            fillBlock(x + int16_t(column) * scale, y + int16_t(row) * scale, scale, value);
+          }
+        }
+      }
+    };
+
+    uint8_t hourValue = clockHour;
+    if (!use24Hour) {
+      if (hourValue == 0u) hourValue = 12u;
+      else if (hourValue > 12u) hourValue = uint8_t(hourValue - 12u);
+    }
+
+    // HH:MM: 3x5 font at 3x scale.  Width = 49 px, centered at x=7.
+    constexpr uint8_t timeScale = 3u;
+    constexpr int16_t timeY = 14;
+    constexpr int16_t timeX = 7;
+    drawNativeDigit(hourValue / 10u, timeX, timeY, timeScale, foreground);
+    drawNativeDigit(hourValue % 10u, timeX + 11, timeY, timeScale, foreground);
+    if ((animationMillis % 1000u) < 500u) {
+      fillBlock(timeX + 23, timeY + 3, 3u, foreground);
+      fillBlock(timeX + 23, timeY + 9, 3u, foreground);
+    }
+    drawNativeDigit(clockMinute / 10u, timeX + 29, timeY, timeScale, foreground);
+    drawNativeDigit(clockMinute % 10u, timeX + 40, timeY, timeScale, foreground);
+
+    // DD/MM: 3x5 font at 2x scale. Width = 40 px, centered at x=12.
+    constexpr uint8_t dateScale = 2u;
+    constexpr int16_t dateY = 39;
+    constexpr int16_t dateX = 12;
+    drawNativeDigit(clockDay / 10u, dateX, dateY, dateScale, foreground);
+    drawNativeDigit(clockDay % 10u, dateX + 8, dateY, dateScale, foreground);
+    // Slash, scaled from a 3x5 diagonal glyph.
+    fillBlock(dateX + 18, dateY, 2u, foreground);
+    fillBlock(dateX + 18, dateY + 2, 2u, foreground);
+    fillBlock(dateX + 16, dateY + 4, 2u, foreground);
+    fillBlock(dateX + 14, dateY + 6, 2u, foreground);
+    fillBlock(dateX + 14, dateY + 8, 2u, foreground);
+    drawNativeDigit(clockMonth / 10u, dateX + 22, dateY, dateScale, foreground);
+    drawNativeDigit(clockMonth % 10u, dateX + 30, dateY, dateScale, foreground);
+
+    visible_ = true;
+    return;
+  }
+
+  Pixel base[16 * 16]{};
   uint8_t top = renderDate ? clockDay : clockHour;
   const uint8_t bottom = renderDate ? clockMonth : clockMinute;
   if (!renderDate && !use24Hour) {
@@ -971,7 +1249,9 @@ void IDotMatrixRenderer::renderClock(
         putPixel(base, 9, 6, white);
         putPixel(base, 8, 7, white);
         putPixel(base, 8, 8, white);
-      } else if (separatorVisible) {
+      } else if (separatorVisible && width_ == 16u) {
+        // On 32x32 and 64x64 the separator is overlaid after scaling so it
+        // can be shifted by half of a legacy 16x16 pixel: 1 or 2 native LEDs.
         putPixel(base, 8, 6, white);
         putPixel(base, 8, 8, white);
       }
@@ -1012,6 +1292,29 @@ void IDotMatrixRenderer::renderClock(
     for (uint16_t x = 0; x < width_; ++x) {
       const uint8_t sourceX = uint16_t(x) * 16u / width_;
       pixels_[size_t(y) * width_ + x] = base[size_t(sourceY) * 16 + sourceX];
+    }
+  }
+
+  // Style 2 uses a half-legacy-pixel correction for the time separator on
+  // larger logical canvases.  That is 1 native LED on 32x32 and 2 on 64x64,
+  // which centers the colon between the hour and minute groups without moving
+  // any digit or racing-band artwork.
+  if ((style & 0x07u) == 2u && !renderDate && separatorVisible &&
+      (width_ == 32u || width_ == 64u) && height_ == width_) {
+    const uint8_t scale = uint8_t(width_ / 16u);
+    const uint8_t shift = uint8_t(scale / 2u);
+    const uint8_t colonX = uint8_t(8u * scale - shift);
+    const Pixel white = color(255, 255, 255);
+    const uint8_t colonRows[2] = {uint8_t(6u * scale), uint8_t(8u * scale)};
+    for (uint8_t rowIndex = 0; rowIndex < 2u; ++rowIndex) {
+      const uint8_t blockY = colonRows[rowIndex];
+      for (uint8_t yy = 0; yy < scale; ++yy) {
+        for (uint8_t xx = 0; xx < scale; ++xx) {
+          const uint8_t x = uint8_t(colonX + xx);
+          const uint8_t y = uint8_t(blockY + yy);
+          pixels_[size_t(y) * width_ + x] = white;
+        }
+      }
     }
   }
   visible_ = true;

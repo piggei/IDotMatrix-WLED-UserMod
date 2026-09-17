@@ -104,4 +104,4 @@ ESP32-S3, native physical 64x64, HUB75 and the unclassified third 64x64 TEXT for
 
 Application-facing Device Info bytes remain `00 08`. The public library version and runtime release/build are all `0.8.2`.
 
-See `TEST_REPORT_0.8.2.md`, `TESTING.md`, `HISTORY.md` and `TODO.md` for qualification evidence, regression procedure, development history and deferred work.
+See `TESTING.md`, `HISTORY.md` and `TODO.md` for the consolidated regression procedure, qualification status, development history and deferred work.

@@ -246,18 +246,12 @@ void IDotMatrixCarousel::configure(const uint8_t* slots, uint8_t count) {
   clearFiles();
   for (uint8_t i = 0; i < SLOT_COUNT; ++i) manifest_.slots[i] = SlotMeta{};
   configuredCount_ = count > SLOT_COUNT ? SLOT_COUNT : count;
-  diagnosticConfiguredCount_ = configuredCount_;
-  diagnosticUploadBeginCount_ = 0;
-  diagnosticUploadCompleteCount_ = 0;
   for (uint8_t i = 0; i < SLOT_COUNT; ++i) {
     manifest_.order[i] = i;
-    diagnosticConfiguredOrder_[i] = i;
-    diagnosticUploadBeginSlots_[i] = 0xFF;
   }
   if (slots != nullptr) {
     for (uint8_t i = 0; i < configuredCount_; ++i) {
       manifest_.order[i] = slots[i] < SLOT_COUNT ? slots[i] : i;
-      diagnosticConfiguredOrder_[i] = manifest_.order[i];
     }
   }
   saveManifest();
@@ -319,8 +313,6 @@ bool IDotMatrixCarousel::beginAsset(
   autoStartPending_ = false;
   if (!validType(type) || slot >= SLOT_COUNT || totalLength == 0 ||
       !carouselHasRoom(totalLength)) return false;
-  if (diagnosticUploadBeginCount_ < SLOT_COUNT)
-    diagnosticUploadBeginSlots_[diagnosticUploadBeginCount_++] = slot;
   WLED_FS.remove(ASSET_RX);
   carouselRxFile = WLED_FS.open(ASSET_RX, "w");
   if (!carouselRxFile) return false;
@@ -430,7 +422,6 @@ bool IDotMatrixCarousel::completeAsset(bool crcValid) {
   failedMask_ &= uint16_t(~(uint16_t(1u) << rxSlot_));
   if (lastFailedSlot_ == int8_t(rxSlot_)) lastFailedSlot_ = -1;
   uploadCompletedMask_ |= uint16_t(1u) << rxSlot_;
-  if (diagnosticUploadCompleteCount_ < SLOT_COUNT) ++diagnosticUploadCompleteCount_;
   touchUpdateHold(millis());
   requestAutoStart(millis());
   return true;

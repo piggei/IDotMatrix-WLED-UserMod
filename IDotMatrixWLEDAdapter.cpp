@@ -724,6 +724,8 @@ void IDotMatrixWLEDAdapter::setAudioDataOverride(bool enabled) {
 
 void IDotMatrixWLEDAdapter::updateAudioSample(uint8_t level, const uint8_t bands[8]) {
   audioSettings_.level = level > 12 ? 12 : level;
+  ++audioInputPacketCounter_;
+  audioLastInputMillis_ = millis();
   if (bands == nullptr) {
     for (uint8_t& band : audioSettings_.bands) band = 0;
     return;
@@ -760,12 +762,15 @@ void IDotMatrixWLEDAdapter::onAudio(const IDotMatrixAudioSettings& settings) {
     audioSettings_.mode = settings.mode;
   } else {
     audioSettings_ = settings;
+    ++audioInputPacketCounter_;
+    audioLastInputMillis_ = millis();
   }
 
   audioLastRenderMillis_ = millis();
   renderer_.renderAudio(audioSettings_.fft, audioSettings_.mode,
                         audioSettings_.level, audioSettings_.bands,
-                        audioLastRenderMillis_);
+                        audioLastRenderMillis_, audioInputPacketCounter_,
+                        audioLastInputMillis_);
   renderer_.setVisible(true);
   activateDisplayEffect();
 }
@@ -837,6 +842,42 @@ void IDotMatrixWLEDAdapter::onGraffitiPixels(
 }
 
 void IDotMatrixWLEDAdapter::onClock(const IDotMatrixClockSettings& settings) {
+  IDotMatrixClockSettings effectiveSettings = settings;
+  const uint32_t now = millis();
+  // The official app emits transient Clock commands with the date bit cleared
+  // while entering the section and while paging between styles.  Keep a stable
+  // date preference for the native 64x64 combined layouts (styles 0 and 3),
+  // and protect that preference across the short entry/style-change burst.
+  // A showDate=0 command received after the grace window, on an already stable
+  // combined style, is treated as an intentional user request to hide the date.
+  const uint8_t incomingStyle = settings.style & 0x07u;
+  const uint8_t currentStyle = clockSettings_.style & 0x07u;
+  const bool enteringClock = !clockActive_;
+  const bool styleChanged = clockActive_ && incomingStyle != currentStyle;
+  const bool nativeCombinedStyle = renderer_.logicalWidth() == 64u &&
+    (incomingStyle == 0u || incomingStyle == 3u);
+
+  if (settings.showDate) {
+    clockDatePreference_ = true;
+    clockEntryDateGraceUntil_ = 0u;
+  }
+
+  if ((enteringClock || styleChanged) && nativeCombinedStyle && clockDatePreference_) {
+    clockEntryDateGraceUntil_ = now + 1000u;
+  }
+
+  const bool dateGraceActive = clockEntryDateGraceUntil_ != 0u &&
+    int32_t(now - clockEntryDateGraceUntil_) < 0;
+
+  if (nativeCombinedStyle && clockDatePreference_ && !settings.showDate) {
+    if (enteringClock || styleChanged || dateGraceActive) {
+      effectiveSettings.showDate = true;
+    } else {
+      clockDatePreference_ = false;
+      clockEntryDateGraceUntil_ = 0u;
+    }
+  }
+
   solidActive_ = false;
   lightEffectActive_ = false;
   audioActive_ = false;
@@ -852,7 +893,7 @@ void IDotMatrixWLEDAdapter::onClock(const IDotMatrixClockSettings& settings) {
   gifPrecache_ = false;
   gifStaging_ = false;
   stopMediaPlayback();
-  clockSettings_ = settings;
+  clockSettings_ = effectiveSettings;
   clockCycleStartedAt_ = millis();
   renderer_.setVisible(true);
   activateDisplayEffect();
@@ -1031,12 +1072,12 @@ void IDotMatrixWLEDAdapter::renderCountdown(uint32_t now, bool force) {
   if (!countdownActive_) return;
   if (!force && uint32_t(now - countdownLastRenderMillis_) < 200u) return;
   countdownLastRenderMillis_ = now;
-  renderer_.renderCountdown(countdownRemainingMillis(now));
+  renderer_.renderCountdown(countdownRemainingMillis(now), now);
 }
 
 void IDotMatrixWLEDAdapter::renderStopwatch(uint32_t now, bool force) {
   if (!stopwatchActive_) return;
-  if (!force && uint32_t(now - stopwatchLastRenderMillis_) < 200u) return;
+  if (!force && uint32_t(now - stopwatchLastRenderMillis_) < 100u) return;
   stopwatchLastRenderMillis_ = now;
   renderer_.renderStopwatch(stopwatchElapsedMillis(now));
 }
@@ -1331,11 +1372,20 @@ void IDotMatrixWLEDAdapter::renderDisplayEffectFrame() {
     if (uint32_t(now - audioLastRenderMillis_) >= 80u) {
       audioLastRenderMillis_ = now;
       renderer_.renderAudio(audioSettings_.fft, audioSettings_.mode,
-                            audioSettings_.level, audioSettings_.bands, now);
+                            audioSettings_.level, audioSettings_.bands, now,
+                            audioInputPacketCounter_, audioLastInputMillis_);
     }
   } else if (clockActive_) {
     const uint32_t elapsed = millis() - clockCycleStartedAt_;
-    const bool renderDate = clockSettings_.showDate && (elapsed % 35000u) >= 30000u;
+    // On native 64x64, styles 0 and 3 use the available space to keep time
+    // and date visible together instead of alternating them.  Smaller profiles
+    // retain the original iDotMatrix 30 s time / 5 s date cycle.
+    const uint8_t normalizedClockStyle = clockSettings_.style & 0x07u;
+    const bool combinedDateLayout = clockSettings_.showDate &&
+      (normalizedClockStyle == 0u || normalizedClockStyle == 3u) &&
+      renderer_.logicalWidth() == 64u;
+    const bool renderDate = combinedDateLayout ||
+      (clockSettings_.showDate && (elapsed % 35000u) >= 30000u);
     renderer_.renderClock(
       static_cast<uint8_t>(hour(localTime)),
       static_cast<uint8_t>(minute(localTime)),

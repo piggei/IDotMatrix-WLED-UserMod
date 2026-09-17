@@ -116,33 +116,62 @@ int main() {
   // translate elapsed time into a multi-pixel jump: every accepted render
   // advances the pattern by exactly one pixel, while speed only changes the
   // minimum interval between renders.
-  // BUILD80 timer artwork: orange 9x9 timer above MM:SS, with a moving hand.
-  renderer.renderCountdown(3000);
+  // dev.28 Countdown artwork: hourglass at left, stacked MM/SS on the
+  // right, orange seconds during normal countdown, red in the final ten
+  // seconds, and a 1 Hz blinking separator (500 ms on / 500 ms off).
+  renderer.renderCountdown(30000, 0);
   assert(renderer.isVisible());
   assert(countNonBlack(renderer) > 0);
-  pixel = renderer.pixel(6, 0); // orange rim
-  assert(pixel && pixel->red == 255 && pixel->green == 145 && pixel->blue == 0);
-  pixel = renderer.pixel(7, 4); // warm center
-  assert(pixel && pixel->red == 255 && pixel->green == 220 && pixel->blue == 120);
-  pixel = renderer.pixel(7, 1); // phase 0 hand endpoint overrides the rim
-  assert(pixel && pixel->red == 255 && pixel->green == 45 && pixel->blue == 20);
-  pixel = renderer.pixel(7, 11); // red countdown separator (last five seconds)
-  assert(pixel && pixel->red == 255 && pixel->green == 0 && pixel->blue == 0);
-
-  renderer.renderStopwatch(250); // phase 2 -> hand points right
-  pixel = renderer.pixel(11, 4);
-  assert(pixel && pixel->red == 255 && pixel->green == 45 && pixel->blue == 20);
-  pixel = renderer.pixel(7, 11);
+  pixel = renderer.pixel(0, 4); // brown hourglass base
+  assert(pixel && pixel->red == 146 && pixel->green == 86 && pixel->blue == 61);
+  pixel = renderer.pixel(1, 5); // orange sand
+  assert(pixel && pixel->red == 242 && pixel->green == 119 && pixel->blue == 6);
+  pixel = renderer.pixel(9, 3); // white minutes
   assert(pixel && pixel->red == 255 && pixel->green == 255 && pixel->blue == 255);
+  pixel = renderer.pixel(9, 9); // normal seconds are orange
+  assert(pixel && pixel->red == 242 && pixel->green == 119 && pixel->blue == 6);
+  pixel = renderer.pixel(7, 10); // separator visible during first half-second
+  assert(pixel && pixel->red == 242 && pixel->green == 119 && pixel->blue == 6);
+  renderer.renderCountdown(30000, 500);
+  pixel = renderer.pixel(7, 10); // separator hidden during second half-second
+  assert(pixel && pixel->red == 0 && pixel->green == 0 && pixel->blue == 0);
+  renderer.renderCountdown(3000, 0);
+  pixel = renderer.pixel(9, 9); // final-ten-seconds red seconds
+  assert(pixel && pixel->red == 255 && pixel->green == 0 && pixel->blue == 0);
+  pixel = renderer.pixel(7, 10); // separator follows the active seconds colour
+  assert(pixel && pixel->red == 255 && pixel->green == 0 && pixel->blue == 0);
+  renderer.renderCountdown(0, 0);
+  pixel = renderer.pixel(0, 4); // final hourglass frame remains visible at 00:00
+  assert(pixel && pixel->red == 146 && pixel->green == 86 && pixel->blue == 61);
 
+  // dev.27 original-device Stopwatch: white/lilac face, orange button, red
+  // hand, white minutes, orange seconds. 250 ms selects frame 2.
+  renderer.renderStopwatch(250);
+  pixel = renderer.pixel(2, 4);
+  assert(pixel && pixel->red == 242 && pixel->green == 119 && pixel->blue == 6);
+  pixel = renderer.pixel(3, 8);
+  assert(pixel && pixel->red == 255 && pixel->green == 255 && pixel->blue == 255);
+  pixel = renderer.pixel(4, 9);
+  assert(pixel && pixel->red == 220 && pixel->green == 5 && pixel->blue == 39);
+  pixel = renderer.pixel(9, 9);
+  assert(pixel && pixel->red == 242 && pixel->green == 119 && pixel->blue == 6);
+  pixel = renderer.pixel(7, 10); // stopwatch separator visible at 250 ms
+  assert(pixel && pixel->red == 242 && pixel->green == 119 && pixel->blue == 6);
+  renderer.renderStopwatch(550);
+  pixel = renderer.pixel(7, 10); // separator hidden at 550 ms
+  assert(pixel && pixel->red == 0 && pixel->green == 0 && pixel->blue == 0);
+
+  // dev.27 original-device Scoreboard: two 3-digit rows with leading zeroes.
   renderer.renderScoreboard(7, 42);
   assert(renderer.isVisible());
-  pixel = renderer.pixel(3, 5);
-  assert(pixel && pixel->red == 0 && pixel->green == 0 && pixel->blue == 255);
-  pixel = renderer.pixel(9, 5);
-  assert(pixel && pixel->red == 255 && pixel->green == 0 && pixel->blue == 0);
-  pixel = renderer.pixel(7, 6);
-  assert(pixel && pixel->red == 255 && pixel->green == 255 && pixel->blue == 255);
+  pixel = renderer.pixel(1, 0);
+  assert(pixel && pixel->red == 120 && pixel->green == 88 && pixel->blue == 248);
+  pixel = renderer.pixel(12, 6);
+  assert(pixel && pixel->red == 120 && pixel->green == 88 && pixel->blue == 248);
+  pixel = renderer.pixel(1, 9);
+  assert(pixel && pixel->red == 248 && pixel->green == 32 && pixel->blue == 120);
+  assert(renderer.pixel(0, 7) && renderer.pixel(0, 7)->red == 0);
+  assert(renderer.pixel(0, 8) && renderer.pixel(0, 8)->red == 0);
 
   for (uint8_t effect = 3; effect <= 5; ++effect) {
     assert(renderer.beginLightEffect(effect, 50, 3, effectColors, 1000));
@@ -269,16 +298,68 @@ int main() {
   assert(clockBackground->red == 10 && clockBackground->green == 20 &&
     clockBackground->blue == 30);
 
+  // dev.33: style 2 colon gets a half-legacy-pixel native correction on
+  // larger canvases: one LED left on 32x32.
+  renderer.renderClock(88, 88, 18, 8, 2, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(15, 12), 255, 255, 255);
+  const auto* style2OldColon32 = renderer.pixel(17, 12);
+  assert(style2OldColon32 != nullptr);
+  assert(!(style2OldColon32->red == 255 && style2OldColon32->green == 255 &&
+    style2OldColon32->blue == 255));
+
   renderer.renderMMSS(61, 255, 0, 0);
   const IDotMatrixRenderer::Pixel* scaledColon = renderer.pixel(14, 12);
   assert(scaledColon != nullptr);
   assert(scaledColon->red == 255 && scaledColon->green == 0 && scaledColon->blue == 0);
+
+  // dev.35: Countdown and Stopwatch move only their blinking separator
+  // half a legacy pixel to the right on 32x32: one native LED.
+  renderer.renderCountdown(30000, 0);
+  expectPixel(renderer.pixel(15, 20), 242, 119, 6);
+  expectBlack(renderer.pixel(14, 20));
+  renderer.renderStopwatch(250);
+  expectPixel(renderer.pixel(15, 20), 242, 119, 6);
+  expectBlack(renderer.pixel(14, 20));
 
   assert(renderer.begin(0x04));
   assert(renderer.width() == 64 && renderer.height() == 64);
   assert(renderer.pixelCount() == 4096);
   assert(renderer.setPixel(63, 63, 255, 1, 2));
   assert(!renderer.setPixel(64, 63, 255, 1, 2));
+
+  // dev.29: native 64x64 style-0 clock with date enabled keeps HH:MM and
+  // DD/MM visible together, centered on separate rows inside the rainbow
+  // frame.  The time row is intentionally larger than the date row.
+  renderer.renderClock(12, 34, 17, 9, 0, true, true, 255, 255, 255, 100);
+  expectPixel(renderer.pixel(10, 14), 255, 255, 255); // top-row hour digit, shifted +4 px in dev.30
+  expectPixel(renderer.pixel(14, 39), 255, 255, 255); // lower-row day digit
+  expectBlack(renderer.pixel(5, 20));                 // clear left margin
+  expectBlack(renderer.pixel(58, 45));                // clear right margin
+
+  // dev.33: style 3 adopts the native 64x64 two-line date layout used by
+  // style 0, retaining its solid background and black foreground.
+  renderer.renderClock(12, 34, 17, 9, 3, true, true, 10, 20, 30, 100);
+  expectPixel(renderer.pixel(0, 0), 10, 20, 30);
+  expectBlack(renderer.pixel(10, 14)); // top-row hour glyph on blue/selected background
+  expectBlack(renderer.pixel(14, 39)); // lower-row day glyph
+
+  // Style 2 gets the same half-legacy-pixel correction on 64x64: two LEDs
+  // left, while the digits and racing-band artwork remain fixed.
+  renderer.renderClock(88, 88, 18, 8, 2, true, false, 40, 50, 60, 100);
+  expectPixel(renderer.pixel(30, 24), 255, 255, 255);
+  const auto* style2OldColon64 = renderer.pixel(34, 24);
+  assert(style2OldColon64 != nullptr);
+  assert(!(style2OldColon64->red == 255 && style2OldColon64->green == 255 &&
+    style2OldColon64->blue == 255));
+
+  // dev.35: the same half-legacy-pixel correction is two native LEDs on
+  // 64x64, again affecting only the timer separator.
+  renderer.renderCountdown(30000, 0);
+  expectPixel(renderer.pixel(30, 40), 242, 119, 6);
+  expectBlack(renderer.pixel(28, 40));
+  renderer.renderStopwatch(250);
+  expectPixel(renderer.pixel(30, 40), 242, 119, 6);
+  expectBlack(renderer.pixel(28, 40));
 
   // GIF playback reuses the logical canvas instead of allocating a second
   // full-size animation framebuffer.
@@ -300,6 +381,33 @@ int main() {
   assert(renderer.pixelCount() == 256);
   assert(renderer.lowMemoryRescale());
   uint8_t audioBands[8] = {1,3,5,7,9,11,12,4};
+
+  // B154 LEVEL 1: the breakdancer advances only on a fresh audio sample.
+  renderer.renderAudio(false, 0, 8, audioBands, 1000, 1, 1000);
+  IDotMatrixRenderer::Pixel dancerFrame[16 * 16]{};
+  std::memcpy(dancerFrame, renderer.pixels(), sizeof(dancerFrame));
+  renderer.renderAudio(false, 0, 8, audioBands, 1400, 1, 1000);
+  assert(std::memcmp(dancerFrame, renderer.pixels(), sizeof(dancerFrame)) == 0);
+
+  // B154 LEVEL 5: initial observed face uses the reconstructed blue-mouth atlas.
+  renderer.renderAudio(false, 4, 8, audioBands, 2000, 2, 2000);
+  const auto* observedMouth = renderer.pixel(2, 9);
+  assert(observedMouth != nullptr);
+  assert(observedMouth->red == 8 && observedMouth->green == 69 && observedMouth->blue == 247);
+
+  // dev.26 LEVEL 3: cyan perimeter is 1 pixel on + 2 off and moves
+  // counter-clockwise by one perimeter pixel every 95 ms.
+  renderer.renderAudio(false, 2, 8, audioBands, 0);
+  expectPixel(renderer.pixel(0, 0), 0, 235, 255);
+  expectBlack(renderer.pixel(1, 0));
+  expectBlack(renderer.pixel(2, 0));
+  expectPixel(renderer.pixel(3, 0), 0, 235, 255);
+  renderer.renderAudio(false, 2, 8, audioBands, 95);
+  expectBlack(renderer.pixel(0, 0));
+  expectBlack(renderer.pixel(1, 0));
+  expectPixel(renderer.pixel(2, 0), 0, 235, 255);
+  expectBlack(renderer.pixel(3, 0));
+
   for (uint8_t mode = 0; mode < 5; ++mode) {
     renderer.renderAudio(false, mode, 8, audioBands, 1000);
     assert(renderer.isVisible() && countNonBlack(renderer) > 0);

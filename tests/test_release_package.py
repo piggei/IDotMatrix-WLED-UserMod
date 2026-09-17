@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Development release and critical-section regression checks for 0.9.0-dev.24."""
+"""Release-candidate and critical-section regression checks for 0.9.0-rc.1."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.0-dev.24"
+    assert library["version"] == "0.9.0-rc.1"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     assert 'IDOTMATRIX_RELEASE = "0.9.0"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.0-dev.24"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.0-rc.1"' in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
     assert '"iDotMatrix@;;;2"' in adapter
@@ -34,15 +34,8 @@ def check_release_surface() -> None:
         "platformio_override.ini.c3",
         "platformio_override.ini.c3-audio",
         "platformio_override.ini.matrixportal-s3-hub75",
-        "RELEASE_NOTES_0.9.0-dev.24.md",
-        "TEST_REPORT_0.9.0-dev.24.md",
-        "HARDWARE_TEST_CHECKLIST_0.9.0-dev.24.md",
+        "RELEASE_NOTES_0.9.0-rc.1.md",
         "RELEASE_NOTES_0.8.2.md",
-        "TEST_REPORT_0.8.2.md",
-        "HARDWARE_TEST_CHECKLIST_0.8.2.md",
-        "RELEASE_NOTES_0.8.1.md",
-        "AUDIT_REMEDIATION_0.8.1.md",
-        "TEST_REPORT_0.8.1-audit-fix1.md",
         "IDotMatrixAudioSource.h",
         "IDotMatrixAudioSource.cpp",
         "IDotMatrixCarousel.h",
@@ -59,8 +52,7 @@ def check_release_surface() -> None:
         assert (ROOT / name).is_file(), f"missing development file: {name}"
     assert not list(ROOT.glob("platformio_override.ini.c3-dev*"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.8.2-rc.*.md"))
-    assert not list(ROOT.glob("TEST_REPORT_0.8.2-rc.*.md"))
-    assert not list(ROOT.glob("HARDWARE_TEST_CHECKLIST_0.8.2-rc.*.md"))
+    assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-dev.*.md"))
 
 
 def check_markdown_links() -> None:
@@ -97,24 +89,25 @@ def check_documentation_contract() -> None:
     assert "not a general-purpose PNG" in protocol
     assert "LZW10/default" not in protocol
 
-    assert "release 0.8.2 / build 0.8.2" in readme.lower()
+    assert "0.9.0-rc.1" in readme.lower()
+    assert "release candidate" in readme.lower()
+    assert "release 0.8.2 remains the last stable pre-0.9 release" in readme.lower()
     assert "phone / ble" in readme.lower()
     assert "wled audioreactive" in readme.lower()
     assert "platformio_override.ini.c3-audio" in readme
     assert "BLE compatibility/security" in readme
     assert "unauthenticated" in readme
     assert "per-slot frame cache" in readme
-    assert "current stable release" in readme.lower()
     assert "`idotmatrix` wled effect" in readme.lower()
     assert "terminates the active wled playlist" in readme.lower()
     assert "queued" in readme.lower() and "preset" in readme.lower()
     release_notes = (ROOT / "RELEASE_NOTES_0.8.2.md").read_text(encoding="utf-8")
-    test_report = (ROOT / "TEST_REPORT_0.8.2.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
     assert "carousel" in release_notes.lower()
     assert "reset" in release_notes.lower()
     assert "alarm" in release_notes.lower()
     assert "schedule" in release_notes.lower()
-    assert "host" in test_report.lower()
+    assert "host" in testing.lower()
     assert "audioreactive" in architecture.lower()
     assert "device assets" in protocol.lower()
     assert "compatibility/security note" in protocol.lower()
@@ -165,8 +158,7 @@ def check_device_reset_contract() -> None:
     assert 'schedulePrefs_->remove("flags")' in automation_cpp
     assert "Device reset (`03 80`)" in protocol_doc
     assert "not an ESP32/WLED reboot" in protocol_doc
-    assert (ROOT / "RELEASE_NOTES_0.9.0-dev.24.md").is_file()
-    assert (ROOT / "TEST_REPORT_0.9.0-dev.24.md").is_file()
+    assert (ROOT / "RELEASE_NOTES_0.9.0-rc.1.md").is_file()
 
 def check_no_heap_free_inside_queue_spinlock() -> None:
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")

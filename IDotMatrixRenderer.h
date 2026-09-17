@@ -34,13 +34,15 @@ public:
     uint8_t mode,
     uint8_t level,
     const uint8_t bands[8],
-    uint32_t now
+    uint32_t now,
+    uint32_t packetCounter = 0,
+    uint32_t lastPacketMillis = 0
   );
   uint8_t lightEffectId() const { return lightEffectId_; }
   uint8_t lightEffectSpeed() const { return lightEffectSpeed_; }
   uint8_t lightEffectColorCount() const { return lightEffectColorCount_; }
   void renderMMSS(uint32_t seconds, uint8_t red, uint8_t green, uint8_t blue);
-  void renderCountdown(uint32_t remainingMillis);
+  void renderCountdown(uint32_t remainingMillis, uint32_t animationMillis);
   void renderStopwatch(uint32_t elapsedMillis);
   void renderScoreboard(uint16_t scoreA, uint16_t scoreB);
   void renderClock(
@@ -150,6 +152,26 @@ private:
   uint32_t textLastMove_ = 0;
   uint32_t textLastPageChange_ = 0;
   uint8_t textFirstVisibleGlyph_ = 0;
+
+  // Audio LEVEL mode 1 (breakdancer) state, ported from emulator B154.
+  bool audioDancerInitialized_ = false;
+  uint8_t audioDancerHead_ = 0;
+  uint8_t audioDancerLeftArm_ = 0;
+  uint8_t audioDancerRightArm_ = 0;
+  uint8_t audioDancerLeftLeg_ = 0;
+  uint8_t audioDancerRightLeg_ = 0;
+  uint8_t audioDancerBackground_ = 0;
+  uint32_t audioDancerRng_ = 0x6D2B79F5u;
+  uint32_t audioDancerNextChangeMs_ = 0;
+  uint32_t audioDancerLastProcessedPacket_ = 0;
+
+  // Audio LEVEL mode 5 (observed blue-mouth face) state, ported from B154.
+  bool audioFaceInitialized_ = false;
+  uint8_t audioFaceEyes_ = 0;
+  uint8_t audioFaceMouth_ = 0;
+  uint32_t audioFaceRng_ = 0xA341316Cu;
+  uint32_t audioFaceNextEyesMs_ = 0;
+  uint32_t audioFaceNextMouthMs_ = 0;
   Pixel* rawImagePixels_ = nullptr;
   size_t rawImageBytes_ = 0;
   bool rawImageInPlace_ = false;

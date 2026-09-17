@@ -30,7 +30,7 @@ Manufacturer data: `54 52 00 70 SCREEN_TYPE`.
 
 The observed original-device profile uses writable GATT characteristics without
 pairing or application authentication, and 0.8.2 compatibility mode preserves
-that behaviour. Nearby BLE peers may therefore issue supported commands. CRC42
+that behaviour. Nearby BLE peers may therefore issue supported commands. CRC32
 checks media integrity only; it is not an authentication mechanism. Mandatory
 pairing/encryption is intentionally not added in 0.8.2 because that would change
 the captured wire/client contract.
@@ -255,9 +255,7 @@ ACK: `05 00 08 80 01`
 - `2`: pause, preserving the current remaining time;
 - `3`: resume the preserved remaining time when it is non-zero.
 
-The display is a 16x16 `MM:SS` layout scaled through the normal renderer canvas.
-Values above 99 minutes wrap visually modulo 100, matching the reference artwork.
-The final five displayed seconds are red; earlier time is white.
+The display uses the reconstructed original-device 16x16 artwork: a 7x10 animated hourglass on the left and stacked `MM` / `SS` digits on the right. Minutes are white, seconds are gray and turn red during the final ten seconds. The hourglass uses ten 200 ms frames and freezes on its final frame at `00:00`. Values above 99 minutes wrap visually modulo 100.
 
 When the countdown reaches zero the original device reports completion
 asynchronously on FA03:
@@ -288,9 +286,7 @@ ACK: `05 00 09 80 01`
 - `2`: pause while preserving elapsed time;
 - `3`: resume from the preserved elapsed time.
 
-The visible output uses the same white 16x16 `MM:SS` renderer as countdown and
-remains under `iDotMatrix`. Stopwatch state also remains independent of
-native WLED effect selection.
+The visible output uses the reconstructed original-device 16x16 stopwatch artwork: white face, gray/lilac case, orange top button, red hand, white minutes and orange seconds. The red hand has eight positions at 100 ms intervals and derives its phase from elapsed time, so pause freezes the artwork naturally. Stopwatch state remains independent of native WLED effect selection.
 
 ## Scoreboard
 
@@ -302,10 +298,7 @@ native WLED effect selection.
 
 ACK: `05 00 0A 80 01`
 
-Both scores are little-endian 16-bit values on the wire. The verified reference
-artwork renders only the last two decimal digits of each value (`score % 100`):
-team A in blue, a white separator, and team B in red. The framebuffer remains
-owned by `iDotMatrix`; no native WLED colour/effect state is modified.
+Both scores are little-endian 16-bit values on the wire. The reconstructed original-device artwork renders each side as a three-digit row with leading zeroes (`score % 1000`): player A on rows 0..6 in `#7858F8`, player B on rows 9..15 in `#F82078`, with two blank scanlines between them. The framebuffer remains owned by `iDotMatrix`; no native WLED colour/effect state is modified.
 
 When date display is enabled, the integration preserves the experimentally
 verified emulator presentation: 30 seconds of `HH:MM`, followed by 5 seconds of
@@ -345,7 +338,7 @@ the 16x16-only build.
 | 3 | 1 | fixed `00` in confirmed packets |
 | 4 | 1 | unknown |
 | 5 | 4 | complete payload size, little-endian |
-| 9 | 4 | complete-payload CRC42, little-endian |
+| 9 | 4 | complete-payload CRC32, little-endian |
 | 13 | 3 | unknown header fields |
 | 16 | remaining | payload chunk |
 
@@ -374,7 +367,7 @@ One dedicated FA02 assembler provides **4112 bytes of permanent inline storage**
 for the observed 4096-byte payload chunk plus 16-byte header. The maximum logical
 FA02 packet is **8192 bytes**; packets above 4112 bytes use temporary dynamic
 reassembly storage. The NimBLE callback only copies a complete ATT write into a bounded queue;
-assembler ownership, allocation, timeout, logical-packet dispatch, CRC42, and
+assembler ownership, allocation, timeout, logical-packet dispatch, CRC32, and
 notification all happen in the normal Usermod loop. TEXT is
 bounded to 4096 payload bytes; RAW is bounded to the 12288 bytes required by a
 64x64 RGB frame. GIF is streamed to LittleFS and capped at 2 MiB here.
@@ -416,7 +409,7 @@ logical FA02 packet size**; 4112 bytes is only the permanent inline capacity.
 ## GIF payload
 
 **Confirmed by the reference:** common type `0x01` contains a standard
-`GIF87a` or `GIF89a` stream. CRC42 covers the complete compressed payload. The
+`GIF87a` or `GIF89a` stream. CRC32 covers the complete compressed payload. The
 WLED integration writes chunks to an RX file and starts playback only after a
 valid completion and deferred RX-to-PLAY promotion.
 
@@ -443,7 +436,7 @@ declared size must match the active logical profile:
 
 Each pixel is `R G B`; pixels advance left-to-right and rows top-to-bottom.
 The WLED mapping is intentionally separate from the protocol order: the
-logical image is published only after valid CRC42, then the existing display
+logical image is published only after valid CRC32, then the existing display
 effect lets WLED apply its configured matrix mapping or the optional rescale.
 
 ## TEXT payload and glyph records
@@ -469,10 +462,10 @@ Each glyph begins with a four-byte metadata prefix followed by its bitmap:
 | `0x05` | confirmed | 16x32 | 64 bytes | 68 bytes |
 | `0x03` | reference compatibility alias, unconfirmed | 8x16 | 16 bytes | 20 bytes |
 | `0x06` | reference compatibility alias, unconfirmed | 16x32 | 64 bytes | 68 bytes |
-| `0x08` / `0x09` | 0.9.0-dev.4 candidate family; hardware validation pending | 32x64 | 256 bytes | 260 bytes |
+| `0x08` / `0x09` | supported 64-pixel family | 32x64 | 256 bytes | 260 bytes |
 
-Build 0.9.0-dev.4 accepts the confirmed/reference 8x16 and 16x32 marker families
-and adds the 32x64 cell required by the app's 64-pixel TEXT size. For the 32x64
+The 0.9 implementation accepts the confirmed/reference 8x16 and 16x32 marker families
+and the 32x64 cell required by the app's 64-pixel TEXT size. For the 32x64
 case it also accepts a marker variant only when the complete payload has an exact
 260-byte-per-glyph record structure; this avoids silently treating arbitrary
 unknown TEXT formats as valid. Bitmap rows are consecutive, and the
@@ -542,10 +535,10 @@ Device-level display policy is intentionally not duplicated by the emulator.
 
 ### Timer rendering note
 
-The countdown (`08 80`) and stopwatch (`09 80`) wire formats are unchanged. The WLED renderer now preserves millisecond state internally so the BUILD80 timer-hand phase can be reproduced above the MM:SS display; this is a rendering change only, not a protocol change.
+The countdown (`08 80`) and stopwatch (`09 80`) wire formats are unchanged. The renderer uses millisecond state only for the original-device animation phase; dev.27 replaces the legacy BUILD80 shared timer icon with separate reconstructed countdown/hourglass and stopwatch artwork. This is a rendering change only, not a protocol change.
 
 
-## Alarm / Program multipart media (0.9.0-dev.21)
+## Alarm / Program multipart media
 
 64x64 captures established that `mediaSize` in Alarm (`00 80`, 24-byte header) and Program activity (`05 80`, 23-byte header) packets is the **total media size**, not the payload size of the current logical packet. The app may send multiple complete logical packets, each repeating its metadata header. An observed Alarm carrying 6706 media bytes arrived as 4096 bytes followed by 2610 bytes.
 
@@ -592,7 +585,7 @@ Original-hardware observations confirm one persistent Device Assets bank with 12
 
 ### Bulk metadata
 
-The normal 16-byte Bulk header is also used for Device Assets. In addition to data type, total length and CRC42:
+The normal 16-byte Bulk header is also used for Device Assets. In addition to data type, total length and CRC32:
 
 ```text
 bytes 13..14  timeSign   uint16 little-endian dwell time in seconds
@@ -630,7 +623,7 @@ when its slot is replaced or reset, avoiding repeated flash rewrites for
 unchanged content. A slot that cannot be started is quarantined for the current
 bank generation so later valid slots are not starved.
 
-## Preset / Default (`06 02`) — 0.9.0-dev.22
+## Preset / Default (`06 02`)
 
 The app's Preset / Default page is a dedicated temporary playlist, not a second persistent Carousel. Media objects are uploaded through the normal 16-byte Bulk header using protocol slots `14..19`. Types observed and supported are `0x01` (GIF/image media) and `0x03` (TEXT). The Bulk `timeSign` field is retained as opaque metadata; the value `5` observed in Preset traffic is **not** interpreted as a five-second dwell.
 
@@ -644,5 +637,5 @@ Activation format:
 
 `count` is `1..6`; every slot must be in `14..19`. The command contains only playback order. Uploads are staged without changing the active display. On `06/02`, pending media for the selected slots are promoted and playback restarts from the first requested entry. The playlist loops cyclically. Image/GIF entries use ~3000 ms visible dwell; TEXT duration is derived from the existing text renderer so horizontal scrolling completes before advancing and static/page-like presentation retains the final hold. Preset files are volatile and are cleared at boot/reset.
 
-### Preset upload indicator (0.9.0-dev.23)
+### Preset upload indicator
 The visual upload indicator is local UI only. It starts on the first accepted Bulk object routed to slot 14..19, remains indeterminate across subsequent Preset objects, and ends on `06/02` activation (or the local interrupted-upload timeout). It does not change Bulk ACK `0x01/0x03`, CRC, marker, or slot semantics.

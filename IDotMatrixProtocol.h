@@ -240,8 +240,6 @@ public:
   bool completePresetAsset(bool crcValid);
   void cancelPresetAsset();
   void suspendPreset();
-  void alarmRxDiagnostic(char* buffer, size_t length) const;
-  void programRxDiagnostic(char* buffer, size_t length) const;
 
 private:
   static bool hasValidLength(const uint8_t* data, size_t length);
@@ -281,57 +279,6 @@ private:
   uint8_t audioFrame_[21]{};
   uint8_t audioFrameLength_ = 0;
   uint8_t audioFrameExpected_ = 0;
-
-  struct AlarmRxDiag {
-    uint32_t count = 0;
-    size_t packetLength = 0;
-    uint8_t slot = 0;
-    uint8_t flags = 0;
-    uint8_t hour = 0;
-    uint8_t minute = 0;
-    uint8_t duration = 0;
-    uint8_t contentType = 0;
-    uint8_t buzzer = 0;
-    uint32_t mediaSize = 0;
-    size_t mediaAvailable = 0;
-    bool fullHeader = false;
-    bool mediaSizeValid = true;
-    bool crcValid = true;
-    bool slotValid = false;
-    bool automationPresent = false;
-    bool onAlarmCalled = false;
-    bool committed = false;
-    bool ackSent = false;
-    size_t chunkBytes = 0;
-    size_t receivedBytes = 0;
-    bool multipart = false;
-    bool transferReset = false;
-    bool timedOut = false;
-  } alarmRxDiag_;
-
-  struct ProgramRxDiag {
-    uint32_t count = 0;
-    size_t packetLength = 0;
-    uint8_t index = 0;
-    uint8_t flags = 0;
-    uint8_t startHour = 0;
-    uint8_t startMinute = 0;
-    uint8_t endHour = 0;
-    uint8_t endMinute = 0;
-    uint8_t contentType = 0;
-    uint8_t chunkMarker = 0;
-    uint8_t ackStatus = 0;
-    uint32_t mediaSize = 0;
-    size_t chunkBytes = 0;
-    size_t receivedBytes = 0;
-    bool indexValid = false;
-    bool crcValid = true;
-    bool committed = false;
-    bool ackSent = false;
-    bool multipart = false;
-    bool transferReset = false;
-    bool timedOut = false;
-  } programRxDiag_;
 
   MultipartTransfer alarmTransfer_{};
   MultipartTransfer programTransfer_{};

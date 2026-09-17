@@ -1,3 +1,80 @@
+## 0.9.0-rc.1 - 2026-09-17
+
+- Declared the planned 0.9 feature set complete and entered release-candidate qualification.
+- Consolidated documentation around the current S3/HUB75 architecture and final hardware-validation scope.
+- Removed development-only Alarm/Program RX telemetry and Carousel protocol-study counters while preserving multipart/CRC/timeout regression tests.
+- Retired per-development release-note files from the source package; detailed development history remains in this file.
+- Kept 0.8.2 as the last stable pre-0.9 release and deferred physical 32x32/iOS work beyond the 0.9 release gate.
+
+## 0.9.0-dev.35
+
+- Countdown and Stopwatch only: on 32x32 the blinking time separator moves one native LED to the right; on 64x64 it moves two native LEDs to the right.
+- This is a half-legacy-pixel optical-centering correction; timer digits, artwork, colours, blink cadence and 16x16 geometry are unchanged.
+- Added renderer regressions for the corrected separator positions on 32x32 and 64x64.
+
+## 0.9.0-dev.34
+
+- Native 64x64 clock style 3 now uses the same centered two-line HH:MM + DD/MM layout as style 0 while preserving its solid blue/selected background and black foreground.
+- Clock style 2 moves only the time separator half of a legacy 16x16 pixel to the left on larger canvases: 1 native LED on 32x32 and 2 native LEDs on 64x64.
+- 16x16 style-2 geometry and all other clock styles remain unchanged.
+
+## 0.9.0-dev.32
+
+- Fixed native 64x64 clock style 0 still losing the date when the Android app emits multiple transient `showDate=0` commands while entering Clock.
+- Replaced the dev.31 one-packet workaround with a short 1-second entry grace window that preserves an already enabled combined HH:MM + DD/MM layout across the whole command burst.
+- Commands received after the grace window remain authoritative, so the date can still be disabled normally.
+- No renderer geometry, other clock styles, profiles, or protocol formats are changed.
+
+## 0.9.0-dev.31
+
+- Fixed native 64x64 clock style 0 losing the previously enabled date option when re-entering the Clock section.
+- The first transient app command on Clock re-entry now preserves the last enabled date state for the combined HH:MM + DD/MM layout.
+- Commands received while Clock is already active remain authoritative, so disabling the date still works normally.
+- No other clock styles, logical profiles, protocol commands, or renderers are changed.
+
+## 0.9.0-dev.30
+
+- Pre-RC cleanup build.
+- Native 64x64 clock style 0: shifted the HH:MM row down by four physical pixels while leaving the centered DD/MM row and rainbow frame unchanged.
+- Retired per-build hardware checklists and test reports; `TESTING.md` is now the single consolidated validation/RC test document.
+- No runtime protocol or feature changes beyond the requested clock-position refinement.
+
+## 0.9.0-dev.29
+
+- Clock style 0 only: on the native 64x64 logical profile, enabling the date now keeps time and date visible simultaneously instead of alternating them.
+- HH:MM is rendered as the larger centered top row; DD/MM is rendered as a smaller independently centered lower row.
+- The existing animated rainbow border and 1 Hz time separator blink are preserved.
+- 16x16 and 32x32 clock behavior is unchanged; their existing time/date alternation remains in place.
+- No protocol, BLE, timer, audio, Carousel, Preset, Alarm or Schedule behavior changed.
+
+## 0.9.0-dev.28
+
+- Countdown seconds now use the same orange as Stopwatch during normal operation and turn red in the final ten seconds.
+- Countdown and Stopwatch separators now blink at 1 Hz (500 ms visible / 500 ms hidden) to mark elapsed seconds.
+- No protocol, timer-state, Scoreboard, audio-effect or other renderer behavior was changed.
+
+## 0.9.0-dev.27
+
+- Ported the reconstructed B154 original-device graphics for Countdown, Stopwatch and Scoreboard only; protocol/state semantics are unchanged.
+- Countdown now uses the 10-frame hourglass artwork, white minutes, gray seconds that turn red in the final ten seconds, and a fixed final frame at `00:00`.
+- Stopwatch now uses the dedicated white/lilac/orange face with red hand and 100 ms eight-position animation derived from elapsed time.
+- Scoreboard now renders two three-digit rows with leading zeroes (`000..999`) using the captured `#7858F8` / `#F82078` palette.
+- Removed the obsolete shared BUILD80 timer-icon helper and added renderer/adapter regressions for the new artwork.
+
+## 0.9.0-dev.26
+
+- Audio LEVEL 3 only: changed the cyan perimeter to a 1-pixel-on / 2-pixels-off pattern on the logical 16x16 canvas.
+- The perimeter phase advances counter-clockwise by one logical border pixel every 95 ms.
+- The coloured internal bars and every other audio effect remain unchanged from dev.25.
+- Added a renderer regression test for border density and direction.
+
+## 0.9.0-dev.25
+
+- Ported only the two requested LEVEL audio visuals from emulator B154.
+- LEVEL 1 breakdancer now recomposes independent head/arm/leg/checker variants and freezes without fresh non-silent audio samples.
+- LEVEL 5 observed face now uses the reconstructed independent eye/mouth atlas with blue lips and level-dependent cadences.
+- LEVEL 2/3/4 and all FFT effects are intentionally unchanged.
+
 ## 0.9.0-dev.24
 
 - Consolidation build: no new protocol feature.

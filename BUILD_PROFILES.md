@@ -272,11 +272,11 @@ The repository distinguishes three different claims:
 - **hardware-validated**: the resulting firmware has been exercised on the
   corresponding physical controller/display configuration.
 
-The supported stable 0.8.2 baselines remain the classic 4 MB ESP32 and the documented 4 MB ESP32-C3 16x16 profile. In the 0.9 development line, Adafruit MatrixPortal ESP32-S3 with 2 MB PSRAM and native WLED HUB75 has now been hardware-validated on a physical 64x64 panel, including logical 64x64, 32x32 -> 64x64 and 16x16 -> 64x64 operation.
+The supported stable 0.8.2 baselines remain the classic 4 MB ESP32 and the documented 4 MB ESP32-C3 16x16 profile. In the 0.9 line, Adafruit MatrixPortal ESP32-S3 with 2 MB PSRAM and native WLED HUB75 has now been hardware-validated on a physical 64x64 panel, including logical 64x64, 32x32 -> 64x64 and 16x16 -> 64x64 operation.
 
-## 0.9.0-dev.1: Adafruit MatrixPortal ESP32-S3 / native HUB75
+## 0.9: Adafruit MatrixPortal ESP32-S3 / native HUB75
 
-Use `platformio_override.ini.matrixportal-s3-hub75` with the WLED 0.17 development line.
+Use `platformio_override.ini.matrixportal-s3-hub75` with the WLED 0.17 line used for 0.9 qualification.
 The profile extends WLED's official `env:adafruit_matrixportal_esp32s3`, preserving
 its native HUB75 flags, MatrixPortal pinout, ESP-IDF 5.x stack, 8 MB partitioning,
 2 MB PSRAM configuration and OTA policy. iDotMatrix adds LZW12, 64x64 profile
@@ -290,4 +290,4 @@ cp ../wled-usermod-idotmatrix/platformio_override.ini.matrixportal-s3-hub75 plat
 pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
 
-This is the preferred and hardware-validated 0.9 development target. The older `platformio_override.ini.hub75` file remains a legacy WLED 16.x wrapper and must not be used for this MatrixPortal 0.17 qualification. Hardware validation through build `0.9.0-dev.5` covered native 64x64 HUB75 output, BLE/NimBLE 2.x, direct AnimatedGIF playback from PSRAM, persistent Carousel content, TEXT including the 32x64 glyph path, and logical 32x32/16x16 profiles automatically upscaled to the physical 64x64 panel.
+This is the preferred and hardware-validated 0.9 target. The older `platformio_override.ini.hub75` file remains a legacy WLED 16.x wrapper and must not be used for this MatrixPortal 0.17 qualification. Hardware validation covers native 64x64 HUB75 output, BLE/NimBLE 2.x, direct AnimatedGIF playback from PSRAM, persistent Carousel content, Alarm, Program/Schedule, Preset / Default, TEXT including the 32x64 glyph path, timer/scoreboard/clock artwork, audio visualizers, and logical 32x32/16x16 profiles automatically upscaled to the physical 64x64 panel.

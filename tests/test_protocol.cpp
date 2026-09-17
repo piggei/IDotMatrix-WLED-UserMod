@@ -461,19 +461,12 @@ int main() {
   assert(protocol.processFA02(alarmChunk1.data(), alarmChunk1.size(), reply));
   assert(!automation.alarmReceived);
   expectReply(reply, alarmAck, sizeof(alarmAck));
-  char alarmDiag[384]{};
-  protocol.alarmRxDiagnostic(alarmDiag, sizeof(alarmDiag));
-  assert(strstr(alarmDiag, "recv:4096") != nullptr && strstr(alarmDiag, "result:receiving") != nullptr);
-
   protocol.loop(1100);
   auto alarmChunk2 = makeAlarmChunk(4096, 2610, 0x02);
   assert(protocol.processFA02(alarmChunk2.data(), alarmChunk2.size(), reply));
   assert(automation.alarmReceived);
   assert(automation.alarmMediaLength == alarmLargeMedia.size());
   assert(automation.alarmFirstByte == alarmLargeMedia.front() && automation.alarmLastByte == alarmLargeMedia.back());
-  protocol.alarmRxDiagnostic(alarmDiag, sizeof(alarmDiag));
-  assert(strstr(alarmDiag, "commit:1") != nullptr && strstr(alarmDiag, "result:committed") != nullptr);
-
   // An incomplete transaction times out without committing or disturbing the
   // previously committed alarm.
   automation.alarmReceived = false;
@@ -481,8 +474,10 @@ int main() {
   assert(protocol.processFA02(alarmChunk1.data(), alarmChunk1.size(), reply));
   assert(!automation.alarmReceived);
   protocol.loop(8001);
-  protocol.alarmRxDiagnostic(alarmDiag, sizeof(alarmDiag));
-  assert(strstr(alarmDiag, "timeout:1") != nullptr);
+  // The stale first chunk must have been discarded by timeout. A continuation
+  // alone cannot complete or replace the previously committed alarm.
+  assert(protocol.processFA02(alarmChunk2.data(), alarmChunk2.size(), reply));
+  assert(!automation.alarmReceived);
   automation.alarmReceived = false;
 
   const uint8_t scheduleGlobal[] = {0x05,0x00,0x07,0x80,0x03};
@@ -543,17 +538,11 @@ int main() {
   assert(protocol.processFA02(programChunk2.data(), programChunk2.size(), reply));
   assert(!automation.scheduleActivityReceived);
   expectReply(reply, scheduleAckContinue, sizeof(scheduleAckContinue));
-  char programDiag[384]{};
-  protocol.programRxDiagnostic(programDiag, sizeof(programDiag));
-  assert(strstr(programDiag, "recv:8192") != nullptr && strstr(programDiag, "result:receiving") != nullptr);
   assert(protocol.processFA02(programChunk3.data(), programChunk3.size(), reply));
   expectReply(reply, scheduleAck, sizeof(scheduleAck));
   assert(automation.scheduleActivityReceived);
   assert(automation.scheduleMediaLength == programLargeMedia.size());
   assert(automation.scheduleFirstByte == programLargeMedia.front() && automation.scheduleLastByte == programLargeMedia.back());
-  protocol.programRxDiagnostic(programDiag, sizeof(programDiag));
-  assert(strstr(programDiag, "commit:1") != nullptr && strstr(programDiag, "result:committed") != nullptr);
-
   // A complete object that is rejected by the automation layer must not be
   // reported as successfully committed.
   automation.scheduleAccept = false;

@@ -1,10 +1,10 @@
 # Architecture
 
-This document describes the **stable 0.8.2 architecture**, built directly on the
-hardware-qualified 0.8.1 baseline. Release 0.8.2 keeps the existing AudioReactive source
-integration and concentrates on transport ownership, persistent-media lifetime,
-Carousel recovery, filesystem bounds and diagnostics. ESP32-S3 and HUB75 work
-remain outside this build.
+This document describes the **0.9 architecture** used by release candidate
+`0.9.0-rc.1`. It retains the qualified 0.8.2 ESP32/ESP32-C3 foundations and
+extends them with the ESP32-S3 / PSRAM / native WLED HUB75 path, universal
+16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and the
+volatile Preset / Default bank.
 
 ## Design goals
 
@@ -44,7 +44,7 @@ poisoned by stale reassembly state.
 
 ### `IDotMatrixBulkTransfer`
 
-Validates the common bulk header, enforces sequential chunks, calculates CRC42,
+Validates the common bulk header, enforces sequential chunks, calculates CRC32,
 and exposes decoded chunk spans. TEXT is retained in a bounded buffer; RAW and
 GIF are streamed onward chunk by chunk.
 
@@ -223,12 +223,7 @@ or frame-cache budgets that dominated 0.7.1.
 
 ### Timers and scoreboard
 
-Countdown, stopwatch, and scoreboard are also rendered locally under
-`iDotMatrix`; they never map to native WLED effects. Countdown and
-stopwatch share a small 16x16 `MM:SS` renderer, while scoreboard draws two
-2-digit fields and a separator. The artwork is scaled through the same
-logical/physical path already used by the clock, so no additional framebuffer is
-allocated.
+Countdown, stopwatch, and scoreboard are also rendered locally under `iDotMatrix`; they never map to native WLED effects. Countdown and stopwatch now use separate reconstructed original-device 16x16 artworks with stacked `MM` / `SS` digits, while scoreboard draws two full-width three-digit rows with leading zeroes. The artwork is scaled through the same logical/physical path already used by the clock, so no additional framebuffer is allocated.
 
 Timer **display ownership** and timer **device state** are deliberately separate.
 If the user selects a native WLED effect while a countdown or stopwatch is
@@ -342,7 +337,7 @@ When PSRAM is detected, the full AnimatedGIF 12-bit path is selected. The
 allocator first requests PSRAM for the decoder object. This preserves direct
 playback and avoids LittleFS frame-cache writes.
 
-This path is hardware-validated in the 0.9 development line on Adafruit MatrixPortal ESP32-S3 with 2 MB PSRAM and WLED 0.17 native HUB75 output. Repeated animated GIF transfers and Carousel playback use `animatedgif12/psram` without the no-PSRAM frame-cache path.
+This path is hardware-validated for 0.9 on Adafruit MatrixPortal ESP32-S3 with 2 MB PSRAM and WLED 0.17 native HUB75 output. Repeated animated GIF transfers and Carousel playback use `animatedgif12/psram` without the no-PSRAM frame-cache path.
 
 ### 64x64 without PSRAM
 
@@ -557,9 +552,9 @@ The active pattern matches the standalone emulator: three 90 ms pulses, 70 ms ga
 
 WLED 0.16.x requires a compile-time `PinOwner` enum value for true PinManager ownership, which an out-of-tree library cannot add safely. The module therefore does not borrow another usermod's owner. The configuration key ends in `pin` so WLED's Usermods settings page includes it in its pin-use scan, and runtime setup rejects GPIOs already allocated by WLED. If WLED later adds external PinOwner registration, only the hardware setup/teardown boundary needs to change.
 
-## Countdown and stopwatch timer icon
+## Countdown, stopwatch and scoreboard artwork
 
-The countdown and stopwatch use the 16x16 artwork recovered from standalone emulator BUILD80: a 9x9 orange timer in rows 0..8 and full-width MM:SS in rows 10..14. The red hand uses an eight-position, 125 ms phase; countdown derives phase from remaining milliseconds while stopwatch derives it from elapsed milliseconds. Rendering remains capped at 200 ms to match the validated standalone implementation and avoid unnecessary WLED effect work.
+Dev.27 ports the reconstructed original-device B154 visuals without changing protocol state. Countdown uses a 7x10 hourglass with ten 200 ms frames, white minutes, gray seconds and red seconds during the final ten seconds; at `00:00` the last hourglass frame remains visible. Stopwatch uses an independent 7x9 face with orange button, gray/lilac case, white dial, red hand and orange seconds. Its eight hand positions advance every 100 ms from elapsed time, which naturally freezes the hand while paused. Scoreboard uses two 4x7 three-digit rows (`000..999`) with player A at the top in `#7858F8` and player B at the bottom in `#F82078`. All three are composed on the legacy 16x16 canvas and then use the normal logical/physical scaling path.
 
 
 ## Alarm and program buzzer semantics
@@ -604,9 +599,9 @@ existing renderer canvas. There is no persistent second framebuffer. Animated
 visualizers are refreshed at an 80 ms cadence while `iDotMatrix` owns
 the selected segment; local AudioReactive data is sampled at a 40 ms cadence.
 
-## 0.9.0-dev.1 hardware transition
+## 0.9 hardware transition
 
-The 0.9 development line keeps the stable 0.8.2 protocol and ownership architecture
+The 0.9 line keeps the stable 0.8.2 protocol and ownership architecture
 but moves the primary hardware target to Adafruit MatrixPortal ESP32-S3, WLED's
 native HUB75 backend, a 64x64 logical/physical matrix and PSRAM-backed direct GIF
 playback. HUB75 remains a WLED output backend; the Usermod continues to render into
@@ -616,7 +611,7 @@ WLED's pixel/segment model rather than driving HUB75 pins directly.
 
 The iDotMatrix profile defines the logical protocol/rendering canvas, while WLED defines the physical 2D output. Output scaling is automatic and bidirectional at the final WLED segment emission stage for the 16x16, 32x32 and 64x64 profile family: enlargement uses nearest-neighbour replication and reduction uses box averaging. This preserves one renderer/protocol path for Clock, TEXT, images, GIF and procedural content and keeps WLED responsible for physical panel mapping. The historical `rescale` setting is retained for compatibility with the older low-memory storage path; it is not required for 0.9 native output scaling.
 
-## Transfer status rendering (consolidated in 0.9.0-dev.24)
+## Transfer status rendering
 
 Carousel replacement uses a procedural status layer owned by `IDotMatrixWLEDAdapter`. `IDotMatrixCarousel` reports transfer activity to the adapter. Hardware validation showed that the Device Assets setup count is the physical 12-slot bank/order count, not the number of assets in the current upload, so it must not be used as a percentage denominator. The adapter renders a canonical 16x16 red downward arrow and blue receiving tray, with a dedicated native 64x64 rendition and normal scaling for other supported profiles.
 
@@ -624,11 +619,11 @@ The activity bar is intentionally **indeterminate for its entire visible lifetim
 
 The layer remains delayed by 250 ms to avoid flashes on short transfers. The adapter API is shared by Carousel and Preset / Default uploads so both features use the same visual language without duplicating status-rendering code.
 
-## Preset / Default temporary playlist (0.9.0-dev.22)
+## Preset / Default temporary playlist
 
 Preset / Default is intentionally independent from the persistent Carousel subsystem. Bulk objects addressed to protocol slots 14..19 are staged into a six-slot volatile bank. Upload does not acquire display ownership. The `06/02` activation command promotes the selected pending objects and starts a cyclic player from the first requested slot. This keeps replacement atomic from the user's point of view and prevents a partially uploaded Preset from appearing on screen.
 
 The player reuses the normal GIF/TEXT render paths and Bulk CRC/flow-control implementation. Preset files are temporary LittleFS objects only; there is no NVS metadata and no boot restore.
 
-### Preset upload feedback (0.9.0-dev.23)
+### Preset upload feedback
 Preset Bulk uploads reuse the Carousel transfer indicator. The UI is kept active across consecutive slot uploads and is ended by the `06/02` activation command. A 5 s idle timeout prevents an abandoned upload from leaving the indicator on-screen indefinitely. This is presentation-only and does not alter the pending/active Preset transaction model.

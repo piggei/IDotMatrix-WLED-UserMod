@@ -1,25 +1,17 @@
-# Development line 0.9
+# WLED iDotMatrix Usermod — 0.9.0 Release Candidate
 
-**Current development release: 0.9.0 / build 0.9.0-dev.24.**
+**Current release line: 0.9.0 / build 0.9.0-rc.1.**
 
-This branch starts the ESP32-S3 / PSRAM / native WLED HUB75 generation. The first
-target is the Adafruit MatrixPortal ESP32-S3 driving one 64x64 HUB75 panel on
-WLED 0.17. Stable 0.8.2 remains the recommended ESP32-C3 / 16x16 release.
+The 0.9 line brings the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
+native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
+path from 0.8.2. The primary 0.9 target is an Adafruit MatrixPortal ESP32-S3
+driving a 64x64 HUB75 panel on WLED 0.17.
 
-For the first 64x64 hardware build use
+For the 64x64 reference build use
 `platformio_override.ini.matrixportal-s3-hub75`.
 
-# WLED iDotMatrix Usermod
-
-> **Release 0.8.2 / build 0.8.2:** stable release for the hardware-qualified ESP32/ESP32-C3 line, with protocol convergence, persistent Carousel support, optional AudioReactive input, and the audited transport/storage fixes validated through the 0.8.2 release-candidate cycle.
-
-> It is based on the hardware-qualified 0.8.1 code and keeps optional WLED
-> AudioReactive input for the existing iDotMatrix Audio/Rhythm visualizers.
-
-WLED Usermod for the ESP32 family that emulates an iDotMatrix BLE peripheral
-and lets the official iDotMatrix app drive a WLED 2D matrix. WLED remains the
-owner of normal LED output, effects, 2D segments, presets, playlists, brightness,
-HTTP/JSON APIs, Home Assistant, mapping and network realtime protocols; the
+WLED remains the owner of LED output, effects, 2D mapping, presets, playlists,
+brightness, HTTP/JSON APIs, Home Assistant and network realtime protocols. The
 Usermod adds the iDotMatrix-compatible BLE peripheral and renders app content
 through the `iDotMatrix` WLED effect.
 
@@ -31,22 +23,28 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-**0.8.2** is the current stable release. It keeps the AudioReactive source integration, Device Info /
-Schedule ACK alignment, the hardware-validated TEXT renderer and the persistent
-12-slot Device Assets bank. The release also hardens the current ESP32-C3 path with single-owner FA02 reassembly, audio/normal-command routing,
-Carousel bad-slot handling, reusable per-slot GIF caches, transactional cached
-GIF replacement, strict framebuffer ownership during GIF staging (preventing
-Clock/TEXT bleed into cold caches), filesystem recovery/capacity checks, reset
-verification, and WLED-playlist termination when iDotMatrix explicitly takes
-display ownership.
-ESP32-S3, native HUB75, PSRAM and 16/32/64 logical-profile output scaling are hardware-validated on MatrixPortal S3. Build 0.9.0-dev.24 is a consolidation build: Alarm and Program/Schedule multi-packet transfers are hardware-validated, Preset / Default transfer and playback are hardware-validated, and the shared Carousel/Preset upload indicator remains fully indeterminate for its visible lifetime. Carousel remains a separate persistent 12-slot bank, while Preset / Default is a volatile six-slot bank.
+**0.9.0-rc.1** is the current release candidate. It is feature-complete for the
+planned 0.9 scope and is entering final hardware qualification. On the primary
+MatrixPortal S3 + 64x64 HUB75 target, the 16/32/64 logical profiles, native
+64x64 TEXT/font path, GIF playback, persistent Carousel, Alarm, Program/Schedule,
+Preset / Default, audio visualizers, clocks, Countdown, Stopwatch and Scoreboard
+have all been exercised on hardware.
 
+Alarm and Program/Schedule support repeated-header multi-packet media with
+complete-object CRC validation and the observed Schedule `0x01`/`0x03` flow
+control. Carousel remains a persistent 12-slot bank; Preset / Default is a
+separate volatile six-slot bank. Upload indicators are indeterminate for their
+visible lifetime.
 
-### 0.9.0-dev.24 consolidation status
+The former ESP32-C3 long-run OFF investigation was closed after the transition
+was traced to an external Home Assistant light-group command, not to the
+iDotMatrix firmware. Physical 32x32 validation and iOS work are explicitly
+deferred and are not release blockers for 0.9.
 
-This build intentionally adds no new protocol feature. It reconciles the source, tests and documentation after the Alarm/Program multi-packet fixes and the Preset / Default implementation. Hardware validation has confirmed Alarm and Program/Schedule operation with the corrected repeated-header framing and Schedule `0x01`/`0x03` flow control, as well as Preset media transfer/playback. The former C3 burn-test power-off investigation was traced to an external Home Assistant light-group command rather than to an iDotMatrix renderer, BLE, Alarm, Schedule or Carousel fault; diagnostic burn-test firmware remains outside this development source line.
+Release 0.8.2 remains the last stable pre-0.9 release for the qualified
+ESP32/ESP32-C3 16x16 hardware line.
 
-## Preset / Default (consolidated in dev.24)
+## Preset / Default
 
 The official app's **Preset / Default** page is implemented separately from Device Assets / Carousel. It uses protocol media slots `14..19` (maximum six entries), uploads objects through the existing Bulk transport, and activates the ordered list with command `06/02`. Uploading Preset media never changes the display by itself; the new playlist becomes active only when the activation command arrives.
 
@@ -138,9 +136,9 @@ On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile an
 | Full-screen RGB | FA02 | `iDotMatrix` framebuffer | Verified; isolated from native WLED state |
 | Standalone light effects (7) | FA02 `03 02` | locally rendered by `iDotMatrix` | Hardware-validated, including one-pixel scrolling for effects 3/4/5 |
 | Audio/Rhythm (5 LEVEL + 5 FFT) | FA02 stream `06 00 00 02` / `21 00 01 02`; optional WLED AudioReactive source | locally rendered by `iDotMatrix` | Phone/BLE path retained; local AudioReactive/external-microphone path hardware-validated in 0.8.2 |
-| Countdown | FA02 `08 80` | local timer icon + `MM:SS` under `iDotMatrix` | Hardware-validated; async finish status on FA03 |
-| Stopwatch | FA02 `09 80` | local timer icon + `MM:SS` under `iDotMatrix` | Hardware-validated |
-| Scoreboard | FA02 `0A 80` | locally rendered blue/white/red score under `iDotMatrix` | Hardware-validated |
+| Countdown | FA02 `08 80` | original-device hourglass + stacked `MM` / `SS` under `iDotMatrix` | Hardware-validated; async finish status on FA03 |
+| Stopwatch | FA02 `09 80` | original-device stopwatch + stacked `MM` / `SS` under `iDotMatrix` | Hardware-validated |
+| Scoreboard | FA02 `0A 80` | two original-device 3-digit score rows under `iDotMatrix` | Hardware-validated |
 | Alarms | FA02 `00 80` | persistent time/day/media trigger under `iDotMatrix` | Implemented and hardware-tested with the official app |
 | Programs / schedules | FA02 `07 80` + `05 80` | persistent weekday/time-window GIF/PNG/TEXT activities | Implemented and hardware-tested; finite activation sound |
 | DIY/Graffiti | FA02 | `iDotMatrix` | Verified on 16x16; larger logical coordinates supported |
@@ -469,14 +467,14 @@ more flash writes than the PSRAM/direct backend. The cache has a 512 KiB limit.
 
 ### Validation boundaries
 
-The PSRAM/direct backend, native physical 64x64 output and WLED native HUB75 DMA remain outside the 0.8.2 stable release matrix, but are hardware-validated in the 0.9 development line on Adafruit MatrixPortal ESP32-S3 with one physical 64x64 HUB75 panel. Validation includes native 64x64 operation plus logical 32x32 -> 64x64 and 16x16 -> 64x64 automatic upscale, BLE, direct AnimatedGIF/PSRAM playback, Carousel, TEXT including the 32x64 glyph path, and WLED/iDotMatrix ownership transitions.
+The PSRAM/direct backend, native physical 64x64 output and WLED native HUB75 DMA remain outside the 0.8.2 stable release matrix, but are hardware-validated for 0.9 on Adafruit MatrixPortal ESP32-S3 with one physical 64x64 HUB75 panel. Validation includes native 64x64 operation plus logical 32x32 -> 64x64 and 16x16 -> 64x64 automatic upscale, BLE, direct AnimatedGIF/PSRAM playback, Carousel, TEXT including the 32x64 glyph path, and WLED/iDotMatrix ownership transitions.
 
 ## Repository layout
 
 - `usermod_idotmatrix.cpp` — Usermod lifecycle, configuration, startup guards, runtime status;
 - `IDotMatrixBLEServer.*` — NimBLE GATT server, reassembly, notifications;
 - `IDotMatrixFA02Assembler.*` — bounded fragmented FA02 reconstruction;
-- `IDotMatrixBulkTransfer.*` — bulk framing, CRC42, TEXT/RAW/GIF chunk state;
+- `IDotMatrixBulkTransfer.*` — bulk framing, CRC32, TEXT/RAW/GIF chunk state;
 - `IDotMatrixProtocol.*` — protocol validation and command decoding;
 - `IDotMatrixBuildProfile.h` — compile-time ScreenType/Rescale capability policy;
 - `IDotMatrixRenderer.*` — RGB storage canvas and all local visual rendering;
@@ -496,14 +494,9 @@ Further documentation:
 - [`PROTOCOL.md`](PROTOCOL.md) — implemented wire-protocol subset;
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — component boundaries, current memory model, and RAM-engineering history;
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
-- [`HARDWARE_TEST_CHECKLIST_0.8.2.md`](HARDWARE_TEST_CHECKLIST_0.8.2.md) — final ESP32-C3 0.8.2 hardware qualification record/checklist;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
-- [`TODO.md`](TODO.md) — post-0.8.2/new-hardware roadmap;
+- [`TODO.md`](TODO.md) — deferred/post-0.9 work;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable 0.8.2 release notes;
-- [`TEST_REPORT_0.8.2.md`](TEST_REPORT_0.8.2.md) — stable 0.8.2 qualification report;
-- [`RELEASE_NOTES_0.8.1.md`](RELEASE_NOTES_0.8.1.md) — stable Release 0.8.1 notes;
-- [`AUDIT_REMEDIATION_0.8.1.md`](AUDIT_REMEDIATION_0.8.1.md) — corrective audit pass and deferred items;
-- [`TEST_REPORT_0.8.1-audit-fix1.md`](TEST_REPORT_0.8.1-audit-fix1.md) — stable 0.8.1 host regression and sanitizer results.
 
 Older release/development history is consolidated in `HISTORY.md`; this source
 archive does not rely on release-note files that are not actually packaged.

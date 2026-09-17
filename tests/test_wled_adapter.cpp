@@ -316,8 +316,8 @@ int main() {
   assert(adapter.isCountdownRunning());
   assert(adapter.isDisplayEffectActive());
   strip.renderEffect();
-  assert(strip.segmentRef().colorAt(6, 0) == RGBW32(255, 145, 0, 0));
-  assert(strip.segmentRef().colorAt(7, 4) == RGBW32(255, 220, 120, 0));
+  assert(strip.segmentRef().colorAt(0, 4) == RGBW32(146, 86, 61, 0));
+  assert(strip.segmentRef().colorAt(1, 5) == RGBW32(242, 119, 6, 0));
   assert(adapter.countdownRemainingMillis(testMillis) == 3000);
 
   testMillis = 11500;
@@ -380,16 +380,16 @@ int main() {
   assert(adapter.isStopwatchActive());
   assert(!adapter.isStopwatchRunning());
   strip.renderEffect();
-  assert(strip.segmentRef().colorAt(6, 0) == RGBW32(255, 145, 0, 0));
-  assert(strip.segmentRef().colorAt(7, 11) == RGBW32(255, 255, 255, 0));
+  assert(strip.segmentRef().colorAt(2, 4) == RGBW32(242, 119, 6, 0));
+  assert(strip.segmentRef().colorAt(3, 7) == RGBW32(255, 255, 255, 0));
 
   adapter.onScoreboard(7, 42);
   assert(adapter.isScoreboardActive());
   assert(adapter.scoreA() == 7 && adapter.scoreB() == 42);
   assert(adapter.isDisplayEffectActive());
   strip.renderEffect();
-  assert(strip.segmentRef().colorAt(3, 5) == RGBW32(0, 0, 255, 0));
-  assert(strip.segmentRef().colorAt(9, 5) == RGBW32(255, 0, 0, 0));
+  assert(strip.segmentRef().colorAt(1, 0) == RGBW32(120, 88, 248, 0));
+  assert(strip.segmentRef().colorAt(1, 9) == RGBW32(248, 32, 120, 0));
 
   IDotMatrixTextSettings text;
   text.glyphCount = 1;
@@ -433,6 +433,45 @@ int main() {
   // 0.9 native-matrix behavior: logical and physical dimensions are
   // independent. Every 16/32/64 combination scales automatically.
   adapter.setRescaleEnabled(false);
+
+  // dev.34: native 64x64 combined-date styles 0 and 3 preserve the last
+  // enabled date preference across the app's transient entry/style-change
+  // commands.  A stable showDate=0 command after the grace window still
+  // disables the date intentionally.
+  assert(renderer.begin(0x04));
+  strip.segmentRef().width = 64;
+  strip.segmentRef().height = 64;
+  IDotMatrixClockSettings nativeClock{};
+  nativeClock.style = 0;
+  nativeClock.showDate = true;
+  adapter.onClock(nativeClock);
+  assert(adapter.clockShowsDate());
+
+  adapter.onSolidColor(1, 2, 3);
+  assert(!adapter.isClockActive());
+  nativeClock.showDate = false;
+  adapter.onClock(nativeClock);
+  assert(adapter.clockShowsDate());
+  adapter.onClock(nativeClock);
+  assert(adapter.clockShowsDate());
+
+  // Paging to style 3 must not discard the date preference simply because
+  // the app emits a transient showDate=0 command during the style change.
+  nativeClock.style = 3;
+  adapter.onClock(nativeClock);
+  assert(adapter.clockShowsDate());
+  adapter.onClock(nativeClock);
+  assert(adapter.clockShowsDate());
+
+  // The same preference survives leaving and re-entering style 0.
+  adapter.onSolidColor(4, 5, 6);
+  nativeClock.style = 0;
+  adapter.onClock(nativeClock);
+  assert(adapter.clockShowsDate());
+
+  testMillis += 1200u;
+  adapter.onClock(nativeClock);
+  assert(!adapter.clockShowsDate());
 
   // 64 -> 32: box-average a 2x2 source block into one destination pixel.
   assert(renderer.begin(0x04));

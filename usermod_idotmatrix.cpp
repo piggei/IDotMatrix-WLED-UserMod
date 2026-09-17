@@ -47,7 +47,7 @@
 #endif
 
 static constexpr const char* IDOTMATRIX_RELEASE = "0.9.0";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-dev.24";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-rc.1";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -703,12 +703,6 @@ public:
       char alarmDiag[192];
       automation_.alarmDiagnosticSummary(alarmDiag, sizeof(alarmDiag), millis());
       info.add(alarmDiag);
-      char alarmRx[384];
-      protocol_.alarmRxDiagnostic(alarmRx, sizeof(alarmRx));
-      info.add(alarmRx);
-      char programRx[384];
-      protocol_.programRxDiagnostic(programRx, sizeof(programRx));
-      info.add(programRx);
       for (uint8_t slot = 0; slot < IDotMatrixAlarmSettings::SLOT_COUNT; ++slot) {
         char slotDiag[160];
         if (automation_.alarmDiagnosticSlot(slot, slotDiag, sizeof(slotDiag))) info.add(slotDiag);
@@ -732,27 +726,6 @@ public:
       unsigned(carousel_.currentDwellSeconds())
     );
     info.add(carouselLine);
-    {
-      char cfgLine[128];
-      size_t used = size_t(snprintf(cfgLine, sizeof(cfgLine), "carouselCfg=count:%u order:",
-        unsigned(carousel_.diagnosticConfiguredCount())));
-      const uint8_t* order = carousel_.diagnosticConfiguredOrder();
-      for (uint8_t i = 0; i < carousel_.diagnosticConfiguredCount() && used < sizeof(cfgLine); ++i) {
-        used += size_t(snprintf(cfgLine + used, sizeof(cfgLine) - used, "%s%u", i ? "," : "", unsigned(order[i])));
-      }
-      info.add(cfgLine);
-    }
-    {
-      char upLine[128];
-      size_t used = size_t(snprintf(upLine, sizeof(upLine), "carouselUpload=begin:"));
-      const uint8_t* slots = carousel_.diagnosticUploadBeginSlots();
-      for (uint8_t i = 0; i < carousel_.diagnosticUploadBeginCount() && used < sizeof(upLine); ++i) {
-        used += size_t(snprintf(upLine + used, sizeof(upLine) - used, "%s%u", i ? "," : "", unsigned(slots[i])));
-      }
-      if (used < sizeof(upLine))
-        snprintf(upLine + used, sizeof(upLine) - used, " complete:%u", unsigned(carousel_.diagnosticUploadCompleteCount()));
-      info.add(upLine);
-    }
     if (carousel_.failedMask() != 0) {
       char failedLine[72];
       snprintf(failedLine, sizeof(failedLine), "carouselFailed=0x%03X last=%d",

@@ -73,14 +73,10 @@ bool IDotMatrixProtocol::appendMultipart(
 }
 
 void IDotMatrixProtocol::expireMultipartTransfers(uint32_t now) {
-  if (alarmTransfer_.active && uint32_t(now - alarmTransfer_.lastRxMs) > AUTOMATION_TRANSFER_TIMEOUT_MS) {
+  if (alarmTransfer_.active && uint32_t(now - alarmTransfer_.lastRxMs) > AUTOMATION_TRANSFER_TIMEOUT_MS)
     resetMultipart(alarmTransfer_);
-    alarmRxDiag_.timedOut = true;
-  }
-  if (programTransfer_.active && uint32_t(now - programTransfer_.lastRxMs) > AUTOMATION_TRANSFER_TIMEOUT_MS) {
+  if (programTransfer_.active && uint32_t(now - programTransfer_.lastRxMs) > AUTOMATION_TRANSFER_TIMEOUT_MS)
     resetMultipart(programTransfer_);
-    programRxDiag_.timedOut = true;
-  }
 }
 
 bool IDotMatrixProtocol::sameAlarmTransfer(
@@ -222,19 +218,11 @@ bool IDotMatrixProtocol::processFA02(
     return true;
   }
 
-  // Alarm slot command.  64x64 media may span multiple complete logical
+  // Alarm slot command. 64x64 media may span multiple complete logical
   // Alarm packets, each repeating the 24-byte header. mediaSize is the total
-  // asset size, not the current packet payload size. Assemble the chunks
-  // transactionally and only replace the existing slot after the full CRC
-  // validates. reserved2 is diagnostic only; continuation does not depend on it.
+  // asset size, not the current packet payload size. Assemble all chunks and
+  // only replace the existing slot after the complete-object CRC validates.
   if (length >= 12 && command == 0x00 && subcommand == 0x80) {
-    const uint32_t alarmRxCount = alarmRxDiag_.count + 1;
-    const bool previousTimeout = alarmRxDiag_.timedOut;
-    alarmRxDiag_ = AlarmRxDiag{};
-    alarmRxDiag_.count = alarmRxCount;
-    alarmRxDiag_.timedOut = previousTimeout;
-    alarmRxDiag_.packetLength = length;
-
     IDotMatrixAlarmSettings settings;
     settings.slot = data[4];
     settings.flags = data[5];
@@ -242,19 +230,11 @@ bool IDotMatrixProtocol::processFA02(
     settings.minute = data[7];
     settings.durationSeconds = data[8];
     settings.packetLength = length;
-    alarmRxDiag_.slot = settings.slot;
-    alarmRxDiag_.flags = settings.flags;
-    alarmRxDiag_.hour = settings.hour;
-    alarmRxDiag_.minute = settings.minute;
-    alarmRxDiag_.duration = settings.durationSeconds;
     if (length > 9) settings.reserved1 = data[9];
     if (length > 10) settings.contentType = data[10];
     if (length > 11) settings.buzzer = data[11];
-    alarmRxDiag_.contentType = settings.contentType;
-    alarmRxDiag_.buzzer = settings.buzzer;
-    alarmRxDiag_.slotValid = settings.slot < IDotMatrixAlarmSettings::SLOT_COUNT;
-    alarmRxDiag_.automationPresent = automationEvents_ != nullptr;
 
+    const bool slotValid = settings.slot < IDotMatrixAlarmSettings::SLOT_COUNT;
     if (length >= IDotMatrixAlarmSettings::FULL_HEADER_SIZE) {
       settings.fullHeader = true;
       settings.reserved2 = data[12];
@@ -264,25 +244,16 @@ bool IDotMatrixProtocol::processFA02(
       settings.mediaId = data[23];
       const uint8_t* chunk = data + IDotMatrixAlarmSettings::FULL_HEADER_SIZE;
       const size_t chunkLength = length - IDotMatrixAlarmSettings::FULL_HEADER_SIZE;
-
-      alarmRxDiag_.fullHeader = true;
-      alarmRxDiag_.mediaSize = settings.mediaSize;
-      alarmRxDiag_.mediaAvailable = chunkLength;
-      alarmRxDiag_.chunkBytes = chunkLength;
-      alarmRxDiag_.mediaSizeValid = settings.mediaSize <= AUTOMATION_TRANSFER_MAX_BYTES &&
+      const bool sizeValid = settings.mediaSize <= AUTOMATION_TRANSFER_MAX_BYTES &&
         chunkLength <= settings.mediaSize;
 
-      if (alarmRxDiag_.slotValid && alarmRxDiag_.mediaSizeValid && automationEvents_ != nullptr) {
+      if (slotValid && sizeValid && automationEvents_ != nullptr) {
         if (settings.mediaSize == 0) {
           resetMultipart(alarmTransfer_);
-          alarmRxDiag_.onAlarmCalled = true;
-          alarmRxDiag_.crcValid = true;
-          alarmRxDiag_.committed = automationEvents_->onAlarm(settings, nullptr, 0);
+          automationEvents_->onAlarm(settings, nullptr, 0);
         } else {
-          if (alarmTransfer_.active && !sameAlarmTransfer(settings, alarmTransferSettings_)) {
+          if (alarmTransfer_.active && !sameAlarmTransfer(settings, alarmTransferSettings_))
             resetMultipart(alarmTransfer_);
-            alarmRxDiag_.transferReset = true;
-          }
           if (!alarmTransfer_.active) alarmTransferSettings_ = settings;
 
           const bool appended = appendMultipart(
@@ -290,42 +261,29 @@ bool IDotMatrixProtocol::processFA02(
           );
           if (!appended) {
             resetMultipart(alarmTransfer_);
-            alarmRxDiag_.mediaSizeValid = false;
-          } else {
-            alarmRxDiag_.receivedBytes = alarmTransfer_.received;
-            alarmRxDiag_.multipart = alarmTransfer_.received < alarmTransfer_.expected ||
-              alarmTransfer_.received != chunkLength;
-            if (alarmTransfer_.received == alarmTransfer_.expected) {
-              alarmRxDiag_.crcValid = crc32(alarmTransfer_.buffer, alarmTransfer_.received) == settings.mediaCRC;
-              if (alarmRxDiag_.crcValid) {
-                alarmRxDiag_.onAlarmCalled = true;
-                alarmRxDiag_.committed = automationEvents_->onAlarm(
-                  alarmTransferSettings_, alarmTransfer_.buffer, alarmTransfer_.received
-                );
-              }
-              resetMultipart(alarmTransfer_);
+          } else if (alarmTransfer_.received == alarmTransfer_.expected) {
+            if (crc32(alarmTransfer_.buffer, alarmTransfer_.received) == settings.mediaCRC) {
+              automationEvents_->onAlarm(
+                alarmTransferSettings_, alarmTransfer_.buffer, alarmTransfer_.received
+              );
             }
+            resetMultipart(alarmTransfer_);
           }
         }
       }
-    } else if (alarmRxDiag_.slotValid && automationEvents_ != nullptr) {
+    } else if (slotValid && automationEvents_ != nullptr) {
       // Metadata-only legacy form remains supported and cancels any incomplete
       // media transfer for that slot.
-      if (alarmTransfer_.active) {
-        resetMultipart(alarmTransfer_);
-        alarmRxDiag_.transferReset = true;
-      }
-      alarmRxDiag_.onAlarmCalled = true;
-      alarmRxDiag_.committed = automationEvents_->onAlarm(settings, nullptr, 0);
+      if (alarmTransfer_.active) resetMultipart(alarmTransfer_);
+      automationEvents_->onAlarm(settings, nullptr, 0);
     }
 
     makeCommandAck(command, subcommand, reply);
-    alarmRxDiag_.ackSent = true;
     return true;
   }
 
   // Program/schedule global state: bit0 enables the schedule and bit1 enables
-  // its audible trill.  Starting an enabled upload also opens a new staging
+  // its audible trill. Starting an enabled upload also opens a new staging
   // generation in the persistent automation subsystem.
   if (length == 5 && command == 0x07 && subcommand == 0x80) {
     if ((data[4] & 0x01u) == 0 && programTransfer_.active) resetMultipart(programTransfer_);
@@ -336,19 +294,11 @@ bool IDotMatrixProtocol::processFA02(
     return true;
   }
 
-  // Program/schedule activity. As with Alarm, 64x64 media can be split
-  // across multiple complete logical packets with the 23-byte activity header
-  // repeated in every packet. Assemble by stable metadata + total size + CRC;
-  // do not depend on the still-partially-understood reserved field.
+  // Program/schedule activity. Large media can be split across complete logical
+  // packets with the 23-byte activity header repeated in every packet. Byte 11
+  // is the per-chunk marker and is intentionally excluded from transfer identity.
   if (length >= IDotMatrixScheduleActivitySettings::HEADER_SIZE &&
       command == 0x05 && subcommand == 0x80) {
-    const uint32_t programRxCount = programRxDiag_.count + 1;
-    const bool previousTimeout = programRxDiag_.timedOut;
-    programRxDiag_ = ProgramRxDiag{};
-    programRxDiag_.count = programRxCount;
-    programRxDiag_.timedOut = previousTimeout;
-    programRxDiag_.packetLength = length;
-
     IDotMatrixScheduleActivitySettings settings;
     settings.index = data[4];
     settings.flags = data[5];
@@ -365,26 +315,14 @@ bool IDotMatrixProtocol::processFA02(
 
     const uint8_t* chunk = data + IDotMatrixScheduleActivitySettings::HEADER_SIZE;
     const size_t chunkLength = length - IDotMatrixScheduleActivitySettings::HEADER_SIZE;
-    programRxDiag_.index = settings.index;
-    programRxDiag_.flags = settings.flags;
-    programRxDiag_.startHour = settings.startHour;
-    programRxDiag_.startMinute = settings.startMinute;
-    programRxDiag_.endHour = settings.endHour;
-    programRxDiag_.endMinute = settings.endMinute;
-    programRxDiag_.contentType = settings.contentType;
-    programRxDiag_.chunkMarker = settings.chunkMarker;
-    programRxDiag_.mediaSize = settings.mediaSize;
-    programRxDiag_.chunkBytes = chunkLength;
-    programRxDiag_.indexValid = settings.index < IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES;
-
     uint8_t ackStatus = 0x02; // validation/rejection
+    const bool indexValid = settings.index < IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES;
     const bool sizeValid = settings.mediaSize > 0 &&
       settings.mediaSize <= AUTOMATION_TRANSFER_MAX_BYTES && chunkLength <= settings.mediaSize;
-    if (programRxDiag_.indexValid && sizeValid && automationEvents_ != nullptr) {
-      if (programTransfer_.active && !sameProgramTransfer(settings, programTransferSettings_)) {
+
+    if (indexValid && sizeValid && automationEvents_ != nullptr) {
+      if (programTransfer_.active && !sameProgramTransfer(settings, programTransferSettings_))
         resetMultipart(programTransfer_);
-        programRxDiag_.transferReset = true;
-      }
       if (!programTransfer_.active) programTransferSettings_ = settings;
 
       const bool appended = appendMultipart(
@@ -392,32 +330,24 @@ bool IDotMatrixProtocol::processFA02(
       );
       if (!appended) {
         resetMultipart(programTransfer_);
-      } else {
-        programRxDiag_.receivedBytes = programTransfer_.received;
-        programRxDiag_.multipart = programTransfer_.received < programTransfer_.expected ||
-          programTransfer_.received != chunkLength;
-        if (programTransfer_.received < programTransfer_.expected) {
-          // The official app only sends the next logical activity packet after
-          // receiving status 0x01 for an accepted incomplete object.
-          ackStatus = 0x01;
-        } else if (programTransfer_.received == programTransfer_.expected) {
-          programRxDiag_.crcValid = crc32(programTransfer_.buffer, programTransfer_.received) == settings.mediaCRC;
-          if (programRxDiag_.crcValid) {
-            programRxDiag_.committed = automationEvents_->onScheduleActivity(
+      } else if (programTransfer_.received < programTransfer_.expected) {
+        // The official app only sends the next logical activity packet after
+        // status 0x01 acknowledges an accepted incomplete object.
+        ackStatus = 0x01;
+      } else if (programTransfer_.received == programTransfer_.expected) {
+        if (crc32(programTransfer_.buffer, programTransfer_.received) == settings.mediaCRC &&
+            automationEvents_->onScheduleActivity(
               programTransferSettings_, programTransfer_.buffer, programTransfer_.received
-            );
-            if (programRxDiag_.committed) ackStatus = 0x03;
-          }
-          resetMultipart(programTransfer_);
+            )) {
+          ackStatus = 0x03;
         }
+        resetMultipart(programTransfer_);
       }
     }
 
     const uint8_t response[] = {0x05, 0x00, 0x05, 0x80, ackStatus};
     memcpy(reply.data, response, sizeof(response));
     reply.length = sizeof(response);
-    programRxDiag_.ackStatus = ackStatus;
-    programRxDiag_.ackSent = true;
     return true;
   }
 
@@ -866,51 +796,4 @@ void IDotMatrixProtocol::makeCommandAck(
   const uint8_t response[] = {0x05, 0x00, command, subcommand, 0x01};
   memcpy(reply.data, response, sizeof(response));
   reply.length = sizeof(response);
-}
-
-void IDotMatrixProtocol::alarmRxDiagnostic(char* buffer, size_t length) const {
-  if (buffer == nullptr || length == 0) return;
-  const char* result = alarmRxDiag_.committed ? "committed" :
-    (alarmTransfer_.active ? "receiving" :
-    (alarmRxDiag_.timedOut ? "timeout" :
-    (!alarmRxDiag_.slotValid ? "bad-slot" :
-    (!alarmRxDiag_.mediaSizeValid ? "bad-size" :
-    (!alarmRxDiag_.crcValid ? "bad-crc" :
-    (!alarmRxDiag_.automationPresent ? "no-automation" :
-    (!alarmRxDiag_.onAlarmCalled ? "not-called" : "rejected")))))));
-  snprintf(buffer, length,
-    "alarmRx=count:%lu len:%u slot:%u flags:0x%02X time:%02u:%02u dur:%us type:%u buzz:%u full:%u media:%lu chunk:%u recv:%u multipart:%u reset:%u timeout:%u crc:%u called:%u commit:%u ack:%u result:%s",
-    static_cast<unsigned long>(alarmRxDiag_.count), unsigned(alarmRxDiag_.packetLength),
-    unsigned(alarmRxDiag_.slot), unsigned(alarmRxDiag_.flags), unsigned(alarmRxDiag_.hour),
-    unsigned(alarmRxDiag_.minute), unsigned(alarmRxDiag_.duration), unsigned(alarmRxDiag_.contentType),
-    unsigned(alarmRxDiag_.buzzer), alarmRxDiag_.fullHeader ? 1u : 0u,
-    static_cast<unsigned long>(alarmRxDiag_.mediaSize), unsigned(alarmRxDiag_.chunkBytes),
-    unsigned(alarmTransfer_.active ? alarmTransfer_.received : alarmRxDiag_.receivedBytes),
-    alarmRxDiag_.multipart ? 1u : 0u, alarmRxDiag_.transferReset ? 1u : 0u,
-    alarmRxDiag_.timedOut ? 1u : 0u, alarmRxDiag_.crcValid ? 1u : 0u,
-    alarmRxDiag_.onAlarmCalled ? 1u : 0u, alarmRxDiag_.committed ? 1u : 0u,
-    alarmRxDiag_.ackSent ? 1u : 0u, result);
-}
-
-void IDotMatrixProtocol::programRxDiagnostic(char* buffer, size_t length) const {
-  if (buffer == nullptr || length == 0) return;
-  const char* result = programRxDiag_.committed ? "committed" :
-    (programTransfer_.active ? "receiving" :
-    (programRxDiag_.timedOut ? "timeout" :
-    (!programRxDiag_.indexValid ? "bad-index" :
-    (!programRxDiag_.crcValid ? "bad-crc" : "not-committed"))));
-  snprintf(buffer, length,
-    "programRx=count:%lu len:%u idx:%u flags:0x%02X time:%02u:%02u-%02u:%02u type:%u marker:0x%02X media:%lu chunk:%u recv:%u multipart:%u reset:%u timeout:%u crc:%u commit:%u ack:%u status:%u result:%s",
-    static_cast<unsigned long>(programRxDiag_.count), unsigned(programRxDiag_.packetLength),
-    unsigned(programRxDiag_.index), unsigned(programRxDiag_.flags),
-    unsigned(programRxDiag_.startHour), unsigned(programRxDiag_.startMinute),
-    unsigned(programRxDiag_.endHour), unsigned(programRxDiag_.endMinute),
-    unsigned(programRxDiag_.contentType), unsigned(programRxDiag_.chunkMarker),
-    static_cast<unsigned long>(programRxDiag_.mediaSize),
-    unsigned(programRxDiag_.chunkBytes),
-    unsigned(programTransfer_.active ? programTransfer_.received : programRxDiag_.receivedBytes),
-    programRxDiag_.multipart ? 1u : 0u, programRxDiag_.transferReset ? 1u : 0u,
-    programRxDiag_.timedOut ? 1u : 0u, programRxDiag_.crcValid ? 1u : 0u,
-    programRxDiag_.committed ? 1u : 0u, programRxDiag_.ackSent ? 1u : 0u,
-    unsigned(programRxDiag_.ackStatus), result);
 }

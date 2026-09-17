@@ -50,11 +50,6 @@ public:
   uint16_t failedMask() const { return failedMask_; }
   int8_t lastFailedSlot() const { return lastFailedSlot_; }
   bool lastResetOk() const { return lastResetOk_; }
-  uint8_t diagnosticConfiguredCount() const { return diagnosticConfiguredCount_; }
-  const uint8_t* diagnosticConfiguredOrder() const { return diagnosticConfiguredOrder_; }
-  uint8_t diagnosticUploadBeginCount() const { return diagnosticUploadBeginCount_; }
-  const uint8_t* diagnosticUploadBeginSlots() const { return diagnosticUploadBeginSlots_; }
-  uint8_t diagnosticUploadCompleteCount() const { return diagnosticUploadCompleteCount_; }
 
 private:
   struct SlotMeta {
@@ -114,11 +109,6 @@ private:
   int8_t lastFailedSlot_ = -1;
   bool lastResetOk_ = true;
   uint16_t uploadCompletedMask_ = 0;
-  uint8_t diagnosticConfiguredCount_ = 0;
-  uint8_t diagnosticConfiguredOrder_[SLOT_COUNT] = {0};
-  uint8_t diagnosticUploadBeginCount_ = 0;
-  uint8_t diagnosticUploadBeginSlots_[SLOT_COUNT] = {0};
-  uint8_t diagnosticUploadCompleteCount_ = 0;
 
   uint8_t uploadCompletedCountExcluding(uint8_t slot) const;
 };
