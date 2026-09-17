@@ -1,11 +1,12 @@
 # WLED iDotMatrix Usermod — 0.9.0 Release Candidate
 
-**Current release line: 0.9.0 / build 0.9.0-rc.1.**
+**Current release line: 0.9.0 / build 0.9.0-rc.3.**
 
 The 0.9 line brings the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
 native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
 path from 0.8.2. The primary 0.9 target is an Adafruit MatrixPortal ESP32-S3
-driving a 64x64 HUB75 panel on WLED 0.17.
+driving a 64x64 HUB75 panel on the qualified WLED 0.17.0-devV5 baseline
+`06ae26db67107cb3f6a3d107a92340035991a063`.
 
 For the 64x64 reference build use
 `platformio_override.ini.matrixportal-s3-hub75`.
@@ -23,7 +24,7 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-**0.9.0-rc.1** is the current release candidate. It is feature-complete for the
+**0.9.0-rc.3** is the current release candidate. It is feature-complete for the
 planned 0.9 scope and is entering final hardware qualification. On the primary
 MatrixPortal S3 + 64x64 HUB75 target, the 16/32/64 logical profiles, native
 64x64 TEXT/font path, GIF playback, persistent Carousel, Alarm, Program/Schedule,
@@ -48,7 +49,7 @@ ESP32/ESP32-C3 16x16 hardware line.
 
 The official app's **Preset / Default** page is implemented separately from Device Assets / Carousel. It uses protocol media slots `14..19` (maximum six entries), uploads objects through the existing Bulk transport, and activates the ordered list with command `06/02`. Uploading Preset media never changes the display by itself; the new playlist becomes active only when the activation command arrives.
 
-Preset media are deliberately volatile. They are stored in temporary LittleFS files, are not written to NVS, and are not restored at boot. A new Preset may be uploaded while an older Preset continues to play; the pending bank is promoted only on the next activation. Image/GIF entries use an approximately 3000 ms visible dwell, while TEXT uses the existing renderer timing so scrolling content can complete before the next entry.
+Preset media are deliberately volatile. They are stored in temporary LittleFS files, are not written to NVS, and are not restored at boot. A new Preset may be uploaded while an older Preset continues to play; the pending bank is promoted only on the next activation. RC2 makes this promotion transactional within the current session: a filesystem failure rolls the active bank back to its previous complete state. Transaction backup files are temporary and are deliberately removed at boot rather than recovered across reboot. Image/GIF entries use an approximately 3000 ms visible dwell, while TEXT uses the existing renderer timing so scrolling content can complete before the next entry.
 
 The new audio-source setting has three modes:
 
@@ -81,7 +82,7 @@ the WLED boot effect and a valid stored Carousel exists, that Carousel becomes
 the startup content. Selecting a native WLED effect suspends Carousel playback
 without deleting the bank; selecting `iDotMatrix` again resumes it.
 
-0.8.2 retains Carousel GIF playback so an unchanged stored slot can reuse its
+Carousel GIF playback lets an unchanged stored slot reuse its
 per-slot frame cache instead of copying the GIF and rebuilding `/idot_cache.bin`
 on every visit. Invalid slots are quarantined for the current bank generation
 and later valid slots continue to play. Feature-owned temp/backup files are
@@ -106,7 +107,7 @@ The 0.8.2 C3 qualification additionally covered persistent mixed Carousel playba
 | 16x16 logical / 16x16 physical, ESP32-C3 4 MB | `compact12/cache` | **supported and hardware-validated on IDF5/shared-RMT** |
 | 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | hardware-validated |
 | 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` | `compact12/cache` | hardware-validated |
-| 64x64 logical / 64x64 physical, MatrixPortal ESP32-S3 + PSRAM | `animatedgif12/psram` | **hardware-validated on WLED 0.17 beta / native HUB75** |
+| 64x64 logical / 64x64 physical, MatrixPortal ESP32-S3 + PSRAM | `animatedgif12/psram` | **hardware-validated on WLED 0.17.0-devV5 / `06ae26db67107cb3f6a3d107a92340035991a063` / native HUB75** |
 | 32x32 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 2x nearest-neighbour upscale** |
 | 16x16 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 4x nearest-neighbour upscale** |
 
@@ -143,7 +144,7 @@ On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile an
 | Programs / schedules | FA02 `07 80` + `05 80` | persistent weekday/time-window GIF/PNG/TEXT activities | Implemented and hardware-tested; finite activation sound |
 | DIY/Graffiti | FA02 | `iDotMatrix` | Verified on 16x16; larger logical coordinates supported |
 | Clock | FA02 | `iDotMatrix`, WLED local time | Verified on 16x16, 32x32 and 64->16 rescale |
-| Text | bulk type `0x03` | app bitmaps rendered by `iDotMatrix` | Verified at matching logical/physical resolution |
+| Text | bulk type `0x03` | app bitmaps rendered by `iDotMatrix` | Verified at matching logical/physical resolution; non-scrolling effects use multi-row pages (64x64: 1x64 / 2x32 / 4x16, 32x32: 1x32 / 2x16, 16x16: 1x16) |
 | RAW/cloud image | bulk type `0x02` | atomic/downscaled RGB framebuffer | Verified on 16x16 and 64->16 rescale |
 | Compact PNG | inline type `0x00` | decoded RGB/RGBA framebuffer | Verified on 16x16; larger-profile coverage remains partial |
 | GIF animation | bulk type `0x01` | direct decoder or LittleFS frame cache | Verified on 16x16, 32->16 and 64->16 no-PSRAM path |
@@ -251,110 +252,66 @@ documented in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Installation
 
-### 1. Place the Usermod beside WLED
+### Current 0.9 qualification target: MatrixPortal S3 / HUB75 64x64
 
-The directory name is significant because the supplied overrides use a relative
-symlink:
+The reference 0.9 build is qualified against:
+
+```text
+Hardware : Adafruit MatrixPortal ESP32-S3 (8 MB flash / 2 MB PSRAM)
+Display  : one 64x64 HUB75 RGB panel
+WLED     : 0.17.0-devV5
+Commit   : 06ae26db67107cb3f6a3d107a92340035991a063
+Profile  : adafruit_matrixportal_esp32s3_idotmatrix_64x64
+```
+
+Keep the repositories beside one another because the supplied override uses a relative symlink:
 
 ```text
 <workdir>/WLED/
 <workdir>/wled-usermod-idotmatrix/
 ```
 
-### 2. Choose the matching release profile
+Prepare the exact qualified WLED base and copy the MatrixPortal override:
+
+```bash
+git clone https://github.com/wled/WLED.git WLED
+cd WLED
+git checkout 06ae26db67107cb3f6a3d107a92340035991a063
+cp ../wled-usermod-idotmatrix/platformio_override.ini.matrixportal-s3-hub75 platformio_override.ini
+```
+
+Clean and build:
+
+```bash
+pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64 -t clean
+pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
+```
+
+Upload over USB/serial with PlatformIO, or use WLED OTA if the installed MatrixPortal firmware uses the same upstream-compatible partition layout:
+
+```bash
+pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64 -t upload
+```
+
+The MatrixPortal profile intentionally inherits the upstream WLED partition and OTA policy and also inherits `${common.default_usermods}` from this exact pinned WLED revision. That inheritance is therefore part of the qualification baseline rather than an unbounded dependency on future WLED revisions.
+
+For first boot, configure the physical WLED matrix as 64x64 with the MatrixPortal/native HUB75 setup, configure Wi-Fi/timezone/NTP as desired, then leave the iDotMatrix logical profile at 64x64 for native operation. Logical 16x16 and 32x32 profiles are automatically upscaled to the physical 64x64 panel.
+
+Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.0`, `build=0.9.0-rc.3`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
+
+### Legacy qualified profiles
+
+The source also retains the previously qualified pre-0.9 profiles:
 
 - classic ESP32 16x16: `platformio_override.ini.example` with WLED 16.0.1;
-- ESP32-C3 16x16: `platformio_override.ini.c3` with the pinned WLED IDF5 commit;
-- ESP32-C3 16x16 + AudioReactive: `platformio_override.ini.c3-audio` on the same
-  pinned WLED base;
-- larger logical classic/S3/HUB75 profiles remain in the repository for the
-  previously documented validation/development cases and are not promoted by
-  this 0.8.2 release.
+- ESP32-C3 16x16: `platformio_override.ini.c3` with pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a`;
+- ESP32-C3 16x16 + AudioReactive: `platformio_override.ini.c3-audio` on the same pinned C3 base.
 
-Normal overrides keep only iDotMatrix in `custom_usermods`. The C3 audio profile
-explicitly lists `audioreactive` plus iDotMatrix; no profile inherits WLED's
-default Usermod list implicitly.
-
-### 2a. ESP32-C3: pinned WLED source
-
-A reproducible C3 checkout is:
-
-```bash
-git clone https://github.com/wled/WLED.git WLED-idot-c3
-cd WLED-idot-c3
-git checkout d55037f7510541eddc390c8f3d01afc5787aa44a
-cp ../wled-usermod-idotmatrix/platformio_override.ini.c3 platformio_override.ini
-```
-
-Use Node.js 20+ and PlatformIO. Under WSL/Linux, the normal C3 build is:
-
-```bash
-pio run -e esp32c3dev_idotmatrix_16x16 -t clean
-pio run -e esp32c3dev_idotmatrix_16x16
-```
-
-For C3 + AudioReactive, replace the copied override and build its separate
-environment:
-
-```bash
-cp ../wled-usermod-idotmatrix/platformio_override.ini.c3-audio platformio_override.ini
-pio run -e esp32c3dev_idotmatrix_audio_16x16 -t clean
-pio run -e esp32c3dev_idotmatrix_audio_16x16
-```
-
-Do not substitute WLED 16.0.1 or a random nightly for the C3 release build. The
-source intentionally fails compilation if IDF5/shared-RMT/NimBLE 2.x are absent.
-
-### 3. Clean and build
-
-Classic ESP32 / WLED 16.0.1:
-
-```bash
-cp ../wled-usermod-idotmatrix/platformio_override.ini.example platformio_override.ini
-pio run -e esp32dev_idotmatrix_16x16 -t clean
-pio run -e esp32dev_idotmatrix_16x16
-```
-
-C3 uses the commands in the previous section.
-
-### 4. Upload
-
-```bash
-# classic ESP32
-pio run -e esp32dev_idotmatrix_16x16 -t upload
-
-# ESP32-C3
-pio run -e esp32c3dev_idotmatrix_16x16 -t upload
-
-# ESP32-C3 + AudioReactive
-pio run -e esp32c3dev_idotmatrix_audio_16x16 -t upload
-```
-
-With WSL2, attach the USB device to WSL using `usbipd-win` before upload. The
-one-time `usbipd bind` persists; `usbipd attach --wsl --busid <BUSID>` normally
-must be repeated after reconnect/reboot. PlatformIO can then use `/dev/ttyACM*`.
-
-### 5. Configure WLED
-
-For the supported 16x16 setups:
-
-1. configure a **16x16 2D matrix**;
-2. classic ESP32: select an **I2S** digital LED output, not RMT;
-3. C3: use the normal WLED C3 digital output on the pinned shared-RMT stack;
-4. configure Wi-Fi/timezone/NTP as required;
-5. keep `screenType=16x16`; `Rescale` is hidden in the supported 16x16 profiles;
-6. optionally change the BLE name suffix;
-7. reboot/reconnect the iDotMatrix app after BLE-name/profile changes;
-8. buzzer support is optional and is not required for target validation.
-
-### 6. Pair from the iDotMatrix app
-
-Open the official iDotMatrix app and scan for the configured `IDM-...` device.
-A successful connection should let the app control the WLED matrix directly.
+These are retained compatibility/qualification baselines; they are not the primary 0.9 release target. See [`BUILD_PROFILES.md`](BUILD_PROFILES.md) for their exact build commands and partition policy.
 
 ## Configuration options
 
-- `enabled`: enables the BLE emulator;
+- `enabled`: enables the BLE emulator. Changing this setting after boot requires a reboot; RC2 deliberately does not implement a partial hot start/stop lifecycle;
 - `screenType`: logical profile (`16x16`, `32x32`, `64x64`);
 - `deviceName`: editable BLE-name suffix shown after the fixed `IDM-` prefix;
   when no name is saved, a stable six-digit default (`IDM-xxxxxx`) is derived
@@ -376,8 +333,8 @@ BLE connected
 profile=64x64
 canvas=16x16
 name=IDM-123456
-release=0.8.2
-build=0.8.2
+release=0.9.0
+build=0.9.0-rc.3
 audioSource=phone active=phone
 audioReactive=absent
 gifDecoder=compact12/cache
@@ -400,8 +357,8 @@ RMT+BLE=ESP32-C3 shared-RMT
 framework=WLED IDF5/shared-RMT
 wledBase=d55037f
 nimble=2.x API
-release=0.8.2
-build=0.8.2
+release=0.9.0
+build=0.9.0-rc.3
 audioSource=phone active=phone
 audioReactive=absent
 ```
@@ -427,7 +384,7 @@ brightness elsewhere in WLED does not necessarily move the app slider.
 
 ### Alarm / Program multipart media
 
-On 64x64 profiles the official app can split one Alarm or Program media asset across multiple complete logical FA02 packets. Each packet repeats the full Alarm/Program metadata header; `mediaSize` and `mediaCRC` describe the complete asset, while the bytes after that packet's header are only the current chunk. Build dev.21 assembles chunks by stable media identity, total size and CRC. For Schedule, byte 10 is the one-byte content type and byte 11 is a transport chunk marker (`0x00` first, observed `0x02` continuation); the marker is not part of media identity. Schedule returns ACK status `0x01` for accepted incomplete media and `0x03` only after complete CRC-valid commit. An incomplete, mismatched, oversized, timed-out or CRC-invalid transfer is discarded without replacing the previously committed Alarm/Program. The current transaction timeout is 5 seconds and the defensive per-asset limit is 512 KiB.
+On 64x64 profiles the official app can split one Alarm or Program media asset across multiple complete logical FA02 packets. Each packet repeats the full Alarm/Program metadata header; `mediaSize` and `mediaCRC` describe the complete asset, while the bytes after that packet's header are only the current chunk. The current 0.9 implementation assembles chunks by stable media identity, total size and CRC. For Schedule, byte 10 is the one-byte content type and byte 11 is a transport chunk marker (`0x00` first, observed `0x02` continuation); the marker is not part of media identity. Schedule returns ACK status `0x01` for accepted incomplete media and `0x03` only after complete CRC-valid commit. An incomplete, mismatched, oversized, timed-out or CRC-invalid transfer is discarded without replacing the previously committed Alarm/Program. The current transaction timeout is 5 seconds and the defensive per-asset limit is 512 KiB.
 
 ### Clock source
 
@@ -482,6 +439,8 @@ The PSRAM/direct backend, native physical 64x64 output and WLED native HUB75 DMA
 - `IDotMatrixCompactGif.*` — compact-safe full-code-space LZW12 predecoder for no-PSRAM 64x64;
 - `IDotMatrixWLEDAdapter.*` — protocol-to-WLED state, ownership, staging, timers, scoreboard, audio, and display effect;
 - `IDotMatrixAutomation.*` — persistent alarms and program/schedule execution;
+- `IDotMatrixPreset.*` — volatile six-slot Preset / Default staging and transactional activation;
+- `IDotMatrixAudioSource.*` — Phone/BLE vs WLED AudioReactive source selection and band mapping;
 - `IDotMatrixBuzzer.*` — non-blocking active-buzzer pattern engine;
 - `patch_animatedgif_profiles.py` — selects 10/11/12-bit AnimatedGIF build profile;
 - `WLED_ESP32_*MB_IDOT_NO_OTA.csv` — 4/8/16/32 MB single-app partition tables;
@@ -496,7 +455,8 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9 work;
-- [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable 0.8.2 release notes;
+- [`RELEASE_NOTES_0.9.0-rc.3.md`](RELEASE_NOTES_0.9.0-rc.3.md) — current release-candidate notes;
+- [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 
 Older release/development history is consolidated in `HISTORY.md`; this source
 archive does not rely on release-note files that are not actually packaged.
@@ -517,7 +477,7 @@ WLED behave as the BLE peripheral expected by the official app.
 
 ## Optional active buzzer
 
-Version 0.8.2 retains the optional active-buzzer support from 0.8.1. Choose the buzzer GPIO in
+The current implementation retains the optional active-buzzer support introduced in the 0.8 line. Choose the buzzer GPIO in
 **Config → Usermods → iDotMatrix** and set `buzzerActiveHigh` to match the module
 polarity. Leaving the pin unassigned disables buzzer hardware. After saving,
 **Test buzzer** emits one finite three-short-beep trill so wiring and polarity
@@ -542,7 +502,3 @@ The licence was chosen to align this WLED usermod with the current licensing of
 WLED, which is distributed under EUPL v1.2 or later. WLED remains copyright of
 Christian Schwinne and the individual WLED contributors. Third-party dependencies
 used by this project remain subject to their respective licences.
-
-### Automatic native-matrix upscale
-
-In the 0.9 line, an iDotMatrix logical profile smaller than the selected WLED 2D matrix is automatically enlarged at output using nearest-neighbour sampling. This makes 16x16 -> 32x32, 16x16 -> 64x64 and 32x32 -> 64x64 normal supported display paths. The legacy `rescale` switch remains for deliberate logical-downscale tests.

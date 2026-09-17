@@ -50,6 +50,7 @@ public:
   uint16_t failedMask() const { return failedMask_; }
   int8_t lastFailedSlot() const { return lastFailedSlot_; }
   bool lastResetOk() const { return lastResetOk_; }
+  bool lastManifestSaveOk() const { return lastManifestSaveOk_; }
 
 private:
   struct SlotMeta {
@@ -108,6 +109,7 @@ private:
   uint16_t failedMask_ = 0;
   int8_t lastFailedSlot_ = -1;
   bool lastResetOk_ = true;
+  bool lastManifestSaveOk_ = true;
   uint16_t uploadCompletedMask_ = 0;
 
   uint8_t uploadCompletedCountExcluding(uint8_t slot) const;

@@ -1,8 +1,9 @@
-; WLED iDotMatrix Usermod - 0.9.0-dev.3
+; WLED iDotMatrix Usermod - 0.9.x MatrixPortal qualification profile
 ; Adafruit MatrixPortal ESP32-S3 + native WLED HUB75 + 64x64 iDotMatrix profile
 ;
-; Target: WLED 0.17 development line using the official
-;         env:adafruit_matrixportal_esp32s3 environment.
+; Qualified WLED baseline: 0.17.0-devV5
+; Commit: 06ae26db67107cb3f6a3d107a92340035991a063
+; using the official env:adafruit_matrixportal_esp32s3 environment.
 ;
 ; This profile deliberately inherits the exact WLED HUB75 board/pinout,
 ; ESP-IDF 5.x stack, PSRAM setup, partition table and OTA policy from the

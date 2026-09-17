@@ -47,8 +47,9 @@ private:
   static void activePath(uint8_t localSlot, char* out, size_t outSize);
   static void pendingPath(uint8_t localSlot, char* out, size_t outSize);
   static void cachePath(uint8_t localSlot, char* out, size_t outSize);
+  static void backupPath(uint8_t localSlot, char* out, size_t outSize);
   void clearFiles();
-  bool promotePending(uint8_t localSlot);
+  bool activateTransactional(const uint8_t* mapped, uint8_t count);
   bool playPosition(uint8_t position, uint32_t now);
   bool playCurrent(uint32_t now);
   void finishUploadIndicator(uint32_t now, bool resumeCurrent);

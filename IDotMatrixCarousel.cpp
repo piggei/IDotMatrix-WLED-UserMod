@@ -1,7 +1,11 @@
 #include "IDotMatrixCarousel.h"
 
 #include "IDotMatrixProtocol.h"
+#if defined(IDOT_CAROUSEL_HOST_TEST)
+#include "tests/carousel_stub/IDotMatrixCarouselDeps.h"
+#else
 #include "IDotMatrixWLEDAdapter.h"
+#endif
 #include "wled.h"
 #include <cstring>
 #include <cstdio>
@@ -122,7 +126,7 @@ void IDotMatrixCarousel::begin() {
     }
     if (!recovered) {
       resetManifest();
-      saveManifest();
+      lastManifestSaveOk_ = saveManifest();
     }
   }
   WLED_FS.remove(MANIFEST_TMP);
@@ -165,7 +169,7 @@ void IDotMatrixCarousel::begin() {
       dirty = true;
     }
   }
-  if (dirty) saveManifest();
+  if (dirty) lastManifestSaveOk_ = saveManifest();
   // Boot playback is deliberately decided by the WLED Usermod layer.  A
   // stored Carousel starts at boot only when the dedicated iDotMatrix
   // effect is the WLED boot effect (or is selected manually later).
@@ -220,6 +224,7 @@ void IDotMatrixCarousel::resetPersistent() {
   // Keep an explicit empty manifest so a later reboot cannot resurrect stale
   // metadata even if the reset was the last command received before power loss.
   lastResetOk_ = saveManifest();
+  lastManifestSaveOk_ = lastResetOk_;
   for (uint8_t slot = 0; slot < SLOT_COUNT; ++slot) {
     char path[24];
     slotPath(slot, TYPE_GIF, path, sizeof(path)); if (WLED_FS.exists(path)) lastResetOk_ = false;
@@ -254,7 +259,7 @@ void IDotMatrixCarousel::configure(const uint8_t* slots, uint8_t count) {
       manifest_.order[i] = slots[i] < SLOT_COUNT ? slots[i] : i;
     }
   }
-  saveManifest();
+  lastManifestSaveOk_ = saveManifest();
 }
 
 void IDotMatrixCarousel::enter() {
@@ -271,7 +276,7 @@ void IDotMatrixCarousel::enter() {
   currentOrderPos_ = -1;
   currentSlot_ = -1;
   nextSwitchAt_ = 0;
-  saveManifest();
+  lastManifestSaveOk_ = saveManifest();
 }
 
 void IDotMatrixCarousel::suspend() {
@@ -406,7 +411,7 @@ bool IDotMatrixCarousel::completeAsset(bool crcValid) {
   // transfer stream becomes quiet.  beginAsset() below keeps extending this
   // boundary while the page is still being downloaded.
   resumeOnBoot_ = true;
-  if (!saveManifest()) {
+  if (!(lastManifestSaveOk_ = saveManifest())) {
     manifest_.slots[rxSlot_] = previous;
     resumeOnBoot_ = previousResume;
     WLED_FS.remove(finalPath);

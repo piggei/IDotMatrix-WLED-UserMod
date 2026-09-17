@@ -1403,9 +1403,25 @@ bool IDotMatrixRenderer::beginText(
 }
 
 uint8_t IDotMatrixRenderer::textVisibleCapacity() const {
-  if (textGlyphWidth_ == 0 || logicalWidth_ == 0) return 0;
-  const uint16_t capacity = uint16_t(logicalWidth_) / textGlyphWidth_;
-  if (capacity == 0) return 1;
+  if (textGlyphWidth_ == 0 || textGlyphHeight_ == 0 ||
+      logicalWidth_ == 0 || logicalHeight_ == 0) return 0;
+
+  uint16_t columns = uint16_t(logicalWidth_) / textGlyphWidth_;
+  if (columns == 0) columns = 1;
+
+  // The original iDotMatrix uses the complete matrix height for text effects
+  // that do not scroll.  Glyphs fill the page row-by-row, so a 64x64 matrix
+  // can show four 16-pixel rows or two 32-pixel rows at once.  Scrolling
+  // effects remain a single text line/tape and therefore keep the historical
+  // horizontal-only capacity.
+  uint16_t rows = 1;
+  if (textMotionEffect_ != 1 && textMotionEffect_ != 2 &&
+      textMotionEffect_ != 3 && textMotionEffect_ != 4) {
+    rows = uint16_t(logicalHeight_) / textGlyphHeight_;
+    if (rows == 0) rows = 1;
+  }
+
+  const uint16_t capacity = columns * rows;
   return capacity > 255u ? 255u : uint8_t(capacity);
 }
 
@@ -1603,7 +1619,37 @@ void IDotMatrixRenderer::renderText(uint32_t now) {
         : textOffsetY_ - verticalPageStep;
       drawGlyphRange(following, pageCapacity, 0, followingY);
     } else {
-      drawGlyphRange(textFirstVisibleGlyph_, pageCapacity, 0, centeredY);
+      // Non-scrolling text effects use the full matrix as a page, matching the
+      // original device: 64x64 shows 1x64, 2x32 or 4x16 rows; 32x32 shows
+      // 1x32 or 2x16 rows; 16x16 remains a single 16-pixel row.  Center the
+      // block of actually used rows vertically, including short final pages.
+      uint8_t columns = textGlyphWidth_ == 0 ? 1u : uint8_t(logicalWidth_ / textGlyphWidth_);
+      if (columns == 0) columns = 1;
+      uint8_t maxRows = textGlyphHeight_ == 0 ? 1u : uint8_t(logicalHeight_ / textGlyphHeight_);
+      if (maxRows == 0) maxRows = 1;
+      const uint8_t remaining = textFirstVisibleGlyph_ < textGlyphCount_
+        ? uint8_t(textGlyphCount_ - textFirstVisibleGlyph_) : 0u;
+      const uint8_t glyphsOnPage = remaining < pageCapacity ? remaining : pageCapacity;
+      uint8_t rowsUsed = glyphsOnPage == 0 ? 1u : uint8_t((glyphsOnPage + columns - 1u) / columns);
+      if (rowsUsed > maxRows) rowsUsed = maxRows;
+      const uint16_t blockHeight = uint16_t(rowsUsed) * textGlyphHeight_;
+      const int16_t pageY = logicalHeight_ > blockHeight
+        ? int16_t(logicalHeight_ - blockHeight) / 2
+        : 0;
+
+      for (uint8_t row = 0; row < rowsUsed; ++row) {
+        const uint16_t consumed = uint16_t(row) * columns;
+        if (consumed >= glyphsOnPage) break;
+        const uint8_t rowCount = uint8_t(
+          (glyphsOnPage - consumed) < columns ? (glyphsOnPage - consumed) : columns
+        );
+        drawGlyphRange(
+          uint8_t(textFirstVisibleGlyph_ + consumed),
+          rowCount,
+          0,
+          int16_t(pageY + uint16_t(row) * textGlyphHeight_)
+        );
+      }
     }
   }
 

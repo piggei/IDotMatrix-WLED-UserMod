@@ -47,7 +47,7 @@
 #endif
 
 static constexpr const char* IDOTMATRIX_RELEASE = "0.9.0";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-rc.1";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.0-rc.3";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -121,6 +121,7 @@ private:
   bool startPending_ = false;
   uint32_t startAt_ = 0;
   bool bleRestartRequired_ = false;
+  bool runtimeRestartRequired_ = false;
 #if defined(ARDUINO_ARCH_ESP32)
   esp_reset_reason_t bootResetReason_ = ESP_RST_UNKNOWN;
   CrashSnapshot previousSnapshot_{};
@@ -567,6 +568,7 @@ public:
     JsonArray info = user.createNestedArray(FPSTR(USERMOD_NAME));
     if (!enabled_) {
       info.add(F("Disabled"));
+      if (runtimeRestartRequired_) info.add(F("Restart required after Enabled change"));
       return;
     }
 
@@ -594,6 +596,7 @@ public:
 #if defined(IDOT_S3_HUB75_WLED_IDF5)
     info.add(F("framework=WLED IDF5/HUB75"));
     info.add(F("target=MatrixPortal-S3"));
+    info.add(F("wledBase=06ae26d"));
 #if defined(IDOT_NIMBLE_V2_API)
     info.add(F("nimble=2.x API"));
 #else
@@ -732,6 +735,7 @@ public:
         unsigned(carousel_.failedMask()), int(carousel_.lastFailedSlot()));
       info.add(failedLine);
     }
+    if (!carousel_.lastManifestSaveOk()) info.add(F("carouselManifest=save-failed"));
     {
       char presetLine[128];
       snprintf(
@@ -786,6 +790,7 @@ public:
         F(" automation:") + (automationResetOk ? F("ok") : F("fail")));
     }
     if (bleRestartRequired_) info.add(F("Restart required after name/profile change"));
+    if (runtimeRestartRequired_) info.add(F("Restart required after Enabled change"));
     if (media_.lastError() != IDotMatrixMedia::Error::None) {
       info.add(String(F("mediaError=")) + media_.lastErrorText());
     }
@@ -872,6 +877,7 @@ public:
       audioReactiveDataAvailable_ = false;
       adapter_.setAudioDataOverride(audioSourceMode_ == IDotMatrixAudioSourceMode::AudioReactive);
     }
+    if (setupComplete_ && previousEnabled != enabled_) runtimeRestartRequired_ = true;
     if (setupComplete_ &&
         (previousBuzzerPin != buzzerPin_ ||
          previousBuzzerActiveHigh != buzzerActiveHigh_ ||
@@ -911,6 +917,7 @@ public:
     oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
 #endif
     oappend(F("(()=>{let e=document.querySelector('[name=\"iDotMatrix:deviceName\"]');if(!e){let r=[...document.querySelectorAll('tr')].find(x=>x.cells&&x.cells[0]&&x.cells[0].textContent.trim()==='DeviceName');e=r&&r.querySelector('input');}if(e&&!document.getElementById('idotmatrix-prefix'))e.insertAdjacentHTML('beforebegin','<span id=\"idotmatrix-prefix\">IDM-</span>');})();"));
+    oappend(F("addInfo('iDotMatrix:enabled',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Changing Enabled requires reboot.</div>');"));
     oappend(F("addInfo('iDotMatrix:deviceName',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
     oappend(F("addInfo('iDotMatrix:audioSource',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">AudioReactive uses WLED Usermod data when that Usermod is compiled and enabled. Auto falls back to Phone / BLE; explicit AudioReactive becomes silent if local audio data is unavailable.</div>');"));
     oappend(F("addInfo('iDotMatrix:buzzerActiveHigh',1,'<button type=\"button\" onclick=\"fetch(&quot;/idotmatrix/buzzer-test&quot;,{method:&quot;POST&quot;}).then(async r=>{if(!r.ok)alert(await r.text())}).catch(()=>alert(&quot;Buzzer test failed&quot;))\">Test buzzer</button><div style=\"color:#fa0;font-style:italic;margin-top:8px\">Save before testing.</div>');"));

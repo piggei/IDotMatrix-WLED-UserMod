@@ -1,5 +1,9 @@
 #include "IDotMatrixPreset.h"
+#if defined(IDOT_PRESET_HOST_TEST)
+#include "tests/preset_stub/IDotMatrixPresetDeps.h"
+#else
 #include "IDotMatrixWLEDAdapter.h"
+#endif
 #include "wled.h"
 
 #include <cstdio>
@@ -22,6 +26,9 @@ void IDotMatrixPreset::pendingPath(uint8_t localSlot, char* out, size_t outSize)
 void IDotMatrixPreset::cachePath(uint8_t localSlot, char* out, size_t outSize) {
   snprintf(out, outSize, "/pre%u.cac", unsigned(localSlot));
 }
+void IDotMatrixPreset::backupPath(uint8_t localSlot, char* out, size_t outSize) {
+  snprintf(out, outSize, "/pre%u.bak", unsigned(localSlot));
+}
 
 void IDotMatrixPreset::clearFiles() {
   for (uint8_t i = 0; i < SLOT_COUNT; ++i) {
@@ -29,12 +36,14 @@ void IDotMatrixPreset::clearFiles() {
     activePath(i, path, sizeof(path)); WLED_FS.remove(path);
     pendingPath(i, path, sizeof(path)); WLED_FS.remove(path);
     cachePath(i, path, sizeof(path)); WLED_FS.remove(path);
+    backupPath(i, path, sizeof(path)); WLED_FS.remove(path);
   }
 }
 
 void IDotMatrixPreset::begin() {
-  // Preset/Default is intentionally volatile: no boot restore and no NVS.
-  clearFiles();
+  // Preset/Default is intentionally volatile: no boot restore, journaling or NVS.
+  // reset() removes active, pending, cache and transaction-backup files so a
+  // reboot always starts with an empty Preset bank.
   reset();
 }
 
@@ -147,17 +156,96 @@ void IDotMatrixPreset::onPresetAssetCancel() {
   finishUploadIndicator(millis(), true);
 }
 
-bool IDotMatrixPreset::promotePending(uint8_t localSlot) {
-  if (localSlot >= SLOT_COUNT || !pending_[localSlot].valid) return active_[localSlot].valid;
-  char src[20], dst[20], cache[20];
-  pendingPath(localSlot, src, sizeof(src));
-  activePath(localSlot, dst, sizeof(dst));
-  cachePath(localSlot, cache, sizeof(cache));
-  WLED_FS.remove(cache);
-  WLED_FS.remove(dst);
-  if (!WLED_FS.rename(src, dst)) return false;
-  active_[localSlot] = pending_[localSlot];
-  pending_[localSlot] = SlotMeta{};
+bool IDotMatrixPreset::activateTransactional(const uint8_t* mapped, uint8_t count) {
+  bool replace[SLOT_COUNT]{};
+  bool hadActive[SLOT_COUNT]{};
+
+  for (uint8_t i = 0; i < count; ++i) {
+    const uint8_t slot = mapped[i];
+    if (slot >= SLOT_COUNT) return false;
+    for (uint8_t j = 0; j < i; ++j) if (mapped[j] == slot) return false;
+    if (!pending_[slot].valid && !active_[slot].valid) return false;
+    replace[slot] = pending_[slot].valid;
+  }
+
+  // Phase 1: move every active file that will be replaced to a transaction
+  // backup. Pending files are not touched until all backups are ready.
+  for (uint8_t slot = 0; slot < SLOT_COUNT; ++slot) {
+    if (!replace[slot]) continue;
+    char active[20], backup[20];
+    activePath(slot, active, sizeof(active));
+    backupPath(slot, backup, sizeof(backup));
+    WLED_FS.remove(backup);
+    hadActive[slot] = active_[slot].valid && WLED_FS.exists(active);
+    if (hadActive[slot] && !WLED_FS.rename(active, backup)) {
+      // Restore any backups already prepared. Pending files remain staged.
+      for (uint8_t restore = 0; restore < slot; ++restore) {
+        if (!replace[restore] || !hadActive[restore]) continue;
+        char oldActive[20], oldBackup[20];
+        activePath(restore, oldActive, sizeof(oldActive));
+        backupPath(restore, oldBackup, sizeof(oldBackup));
+        if (WLED_FS.exists(oldBackup)) WLED_FS.rename(oldBackup, oldActive);
+      }
+      return false;
+    }
+  }
+
+  // Phase 2: promote all pending files. Metadata is deliberately left untouched
+  // until every filesystem rename succeeds.
+  bool promoted[SLOT_COUNT]{};
+  bool promotionFailed = false;
+  for (uint8_t slot = 0; slot < SLOT_COUNT; ++slot) {
+    if (!replace[slot]) continue;
+    char pending[20], active[20];
+    pendingPath(slot, pending, sizeof(pending));
+    activePath(slot, active, sizeof(active));
+    if (!WLED_FS.rename(pending, active)) {
+      promotionFailed = true;
+      break;
+    }
+    promoted[slot] = true;
+  }
+
+  if (promotionFailed) {
+    bool rollbackOk = true;
+    // Return any newly promoted file to its pending name so a retry remains
+    // possible. If that rename fails, discard only the new file; the old bank
+    // is still restored below and remains the authoritative state.
+    for (uint8_t slot = 0; slot < SLOT_COUNT; ++slot) {
+      if (!promoted[slot]) continue;
+      char pending[20], active[20];
+      pendingPath(slot, pending, sizeof(pending));
+      activePath(slot, active, sizeof(active));
+      WLED_FS.remove(pending);
+      if (!WLED_FS.rename(active, pending)) {
+        WLED_FS.remove(active);
+        pending_[slot] = SlotMeta{};
+        rollbackOk = false;
+      }
+    }
+    for (uint8_t slot = 0; slot < SLOT_COUNT; ++slot) {
+      if (!replace[slot] || !hadActive[slot]) continue;
+      char active[20], backup[20];
+      activePath(slot, active, sizeof(active));
+      backupPath(slot, backup, sizeof(backup));
+      WLED_FS.remove(active);
+      if (!WLED_FS.rename(backup, active)) rollbackOk = false;
+    }
+    (void)rollbackOk; // The previous logical bank remains selected either way.
+    return false;
+  }
+
+  // Commit metadata only after the complete filesystem transaction succeeded.
+  for (uint8_t slot = 0; slot < SLOT_COUNT; ++slot) {
+    if (!replace[slot]) continue;
+    char backup[20], cache[20];
+    backupPath(slot, backup, sizeof(backup));
+    cachePath(slot, cache, sizeof(cache));
+    WLED_FS.remove(backup);
+    WLED_FS.remove(cache);
+    active_[slot] = pending_[slot];
+    pending_[slot] = SlotMeta{};
+  }
   return true;
 }
 
@@ -166,18 +254,21 @@ void IDotMatrixPreset::onPresetActivate(const uint8_t* slots, uint8_t count) {
   uint8_t mapped[SLOT_COUNT]{};
   for (uint8_t i = 0; i < count; ++i) {
     if (!protocolSlotToLocal(slots[i], mapped[i])) return;
-    if (!pending_[mapped[i]].valid && !active_[mapped[i]].valid) return;
   }
 
   // The upload indicator intentionally spans the full Preset replacement and
   // disappears only when 06/02 activates the new bank. This avoids a black or
   // unrelated frame between consecutive large assets.
   finishUploadIndicator(millis(), false);
-  // Stop any decoder using the old bank before promotion. Uploading itself did
-  // not publish any pending media; the activation command is the atomic switch.
+  // Stop any decoder using the old bank before filesystem mutation. Pending
+  // media remains private until activateTransactional() commits the whole bank.
   adapter_.beginCarouselPlayback();
-  for (uint8_t i = 0; i < count; ++i) {
-    if (!promotePending(mapped[i])) return;
+  if (!activateTransactional(mapped, count)) {
+    // The active metadata was never committed on failure. Restart the previous
+    // item if there was one; Preset remains volatile and no reboot recovery is
+    // attempted or desired.
+    if (playing_ && activeCount_ > 0 && position_ >= 0) playCurrent(millis());
+    return;
   }
   for (uint8_t i = 0; i < count; ++i) order_[i] = mapped[i];
   activeCount_ = count;

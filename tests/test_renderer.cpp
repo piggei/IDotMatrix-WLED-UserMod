@@ -685,16 +685,68 @@ int main() {
   renderer.renderText(500);
   assert(countNonBlack(renderer) >= 12);
 
-  // The same viewport math scales naturally to larger logical profiles.
+  // Non-scrolling text uses the full matrix height, as on the original
+  // iDotMatrix. 64x64 therefore fits four 16px rows (8 glyphs each) or two
+  // 32px rows (4 glyphs each). Scrolling effects remain one-line tapes.
   assert(renderer.begin(0x04));
   assert(renderer.beginText(
-    9, 8, 16, 16, 0, 50, 1,
+    33, 8, 16, 16, 0, 50, 1,
+    1, 1, 1, false, 0, 0, 0, 0
+  ));
+  assert(renderer.textVisibleCapacity() == 32);
+  for (uint8_t glyph = 0; glyph < 33; ++glyph) {
+    assert(renderer.setTextGlyph(glyph, solidGlyph, sizeof(solidGlyph)));
+  }
+  renderer.renderText(0);
+  // Four rows occupy y=0..63 on a full first page.
+  expectPixel(renderer.pixel(0, 0), 1, 1, 1);
+  expectPixel(renderer.pixel(0, 16), 1, 1, 1);
+  expectPixel(renderer.pixel(0, 32), 1, 1, 1);
+  expectPixel(renderer.pixel(0, 48), 1, 1, 1);
+
+  // A short final/static page is vertically centered. One 16px row on 64px
+  // starts at y=24 rather than staying pinned to the top.
+  assert(renderer.beginText(
+    1, 8, 16, 16, 0, 50, 1,
+    2, 3, 4, false, 0, 0, 0, 0
+  ));
+  assert(renderer.setTextGlyph(0, solidGlyph, sizeof(solidGlyph)));
+  renderer.renderText(0);
+  expectBlack(renderer.pixel(0, 23));
+  expectPixel(renderer.pixel(0, 24), 2, 3, 4);
+  expectPixel(renderer.pixel(0, 39), 2, 3, 4);
+  expectBlack(renderer.pixel(0, 40));
+
+  assert(renderer.beginText(
+    9, 8, 16, 16, 1, 50, 1,
+    1, 1, 1, false, 0, 0, 0, 0
+  ));
+  assert(renderer.textVisibleCapacity() == 8); // horizontal scroll: one row
+
+  assert(renderer.beginText(
+    9, 16, 32, 64, 0, 50, 1,
     1, 1, 1, false, 0, 0, 0, 0
   ));
   assert(renderer.textVisibleCapacity() == 8);
+
+  // 32x32 follows the same rule: two 16px rows, or one 32px row.
+  assert(renderer.begin(0x03));
   assert(renderer.beginText(
-    5, 16, 32, 64, 0, 50, 1,
-    1, 1, 1, false, 0, 0, 0, 0
+    5, 8, 16, 16, 0, 50, 1,
+    5, 6, 7, false, 0, 0, 0, 0
   ));
-  assert(renderer.textVisibleCapacity() == 4);
+  assert(renderer.textVisibleCapacity() == 8);
+  assert(renderer.beginText(
+    3, 16, 32, 64, 0, 50, 1,
+    5, 6, 7, false, 0, 0, 0, 0
+  ));
+  assert(renderer.textVisibleCapacity() == 2);
+
+  // 16x16 remains exactly one 16px row.
+  assert(renderer.begin(0x01));
+  assert(renderer.beginText(
+    3, 8, 16, 16, 0, 50, 1,
+    8, 9, 10, false, 0, 0, 0, 0
+  ));
+  assert(renderer.textVisibleCapacity() == 2);
 }

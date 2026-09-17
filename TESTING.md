@@ -1,7 +1,7 @@
 # Testing
 
 This document is the consolidated validation plan for iDotMatrix WLED Usermod
-`0.9.0-rc.1`. Historical per-build test reports and checklists are intentionally
+`0.9.0-rc.3`. Historical per-build test reports and checklists are intentionally
 not shipped; regression coverage lives in `tests/` and release qualification is
 tracked here.
 
@@ -25,7 +25,7 @@ This builds the main protocol, renderer, media and automation regressions with A
 
 ## Current 0.9 hardware status
 
-Validated on Adafruit MatrixPortal S3 + 64x64 HUB75 with WLED 0.17.0-devV5/native HUB75 backend:
+Validated on Adafruit MatrixPortal S3 + 64x64 HUB75 with WLED 0.17.0-devV5/native HUB75 backend, qualification commit `06ae26db67107cb3f6a3d107a92340035991a063`:
 
 - logical profiles 16x16, 32x32 and 64x64 rendered through the universal scaler on the 64x64 panel;
 - native 64x64 TEXT/font path, including large glyph payloads and scrolling;
@@ -67,3 +67,8 @@ iOS work remains isolated on its dedicated branch and is not a 0.9 release block
 ## Build profiles
 
 `tests/test_platformio_profiles.py` statically checks the supported override/profile matrix and version contract during every host-test run. A successful compile proves build compatibility; physical validation remains target-specific.
+
+
+## RC2 filesystem failure-path qualification
+
+RC2 adds host behavioral tests for Preset and Carousel LittleFS transactions. Preset activation is all-or-nothing within a running session and is tested for intermediate backup/promotion failures, write failure and CRC rejection. Preset remains intentionally volatile: `begin()`/reboot removes active, pending and backup files instead of recovering the previous session. Carousel tests cover manifest-save failure rollback and reporting. These host fault-injection tests complement, rather than replace, hardware LittleFS and soak testing.

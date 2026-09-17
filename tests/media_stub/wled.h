@@ -12,8 +12,8 @@ enum SeekMode { SeekSet };
 class File {
 public:
   File() = default;
-  File(std::vector<uint8_t>* data, bool writable, bool failWrite = false)
-    : data_(data), writable_(writable), failWrite_(failWrite) {}
+  File(std::vector<uint8_t>* data, bool writable, bool failWrite = false, bool append = false)
+    : data_(data), pos_(append && data ? data->size() : 0), writable_(writable), failWrite_(failWrite) {}
   explicit operator bool() const { return data_ != nullptr; }
   size_t write(const uint8_t* src, size_t n) {
     if (!data_ || !writable_ || !src || failWrite_) return 0;
@@ -51,16 +51,17 @@ public:
   File open(const char* path, const char* mode) {
     if (!path || !mode) return File();
     const std::string key(path);
-    if (mode[0] == 'w') {
+    if (mode[0] == 'w' || mode[0] == 'a') {
       if (failOpenWrite_.count(key) && failOpenWrite_[key] > 0) {
         --failOpenWrite_[key];
         return File();
       }
       auto& data = files_[key];
-      data.clear();
+      const bool append = mode[0] == 'a';
+      if (!append) data.clear();
       const bool failWrite = failWrite_.count(key) && failWrite_[key] > 0;
       if (failWrite) --failWrite_[key];
-      return File(&data, true, failWrite);
+      return File(&data, true, failWrite, append);
     }
     auto it = files_.find(key);
     if (it == files_.end()) return File();

@@ -1,6 +1,6 @@
 # Build profiles and hardware targets
 
-Stable Release 0.8.2 keeps the 0.8.1 hardware/media profile model and retains the
+The legacy 0.8.2 qualification keeps the 0.8.1 hardware/media profile model and retains the
 explicit optional AudioReactive profile for ESP32-C3. The two independent build
 choices remain:
 
@@ -131,7 +131,7 @@ pin maps:
 | `esp32dev_hub75_idotmatrix` | `esp32dev_hub75` | classic ESP32, WLED default HUB75 pinout | pending |
 | `esp32dev_hub75_forum_pinout_idotmatrix` | `esp32dev_hub75_forum_pinout` | classic ESP32, SmartMatrix/forum pinout | pending |
 | `esp32s3dev_4MB_qspi_hub75_idotmatrix` | `esp32s3dev_4MB_qspi_hub75` | Huidu HD-WF2 profile; WLED explicitly removes PSRAM for this target | pending; memory-constrained |
-| `adafruit_matrixportal_esp32s3_idotmatrix` | `adafruit_matrixportal_esp32s3` | Adafruit MatrixPortal ESP32-S3 | **hardware-validated on WLED 0.17 beta, native 64x64 HUB75 + PSRAM** |
+| `adafruit_matrixportal_esp32s3_idotmatrix` | `adafruit_matrixportal_esp32s3` | legacy WLED 16.x wrapper | historical wrapper only; **not** the 0.9 qualification environment |
 | `esp32s3dev_16MB_opi_hub75_idotmatrix` | `esp32s3dev_16MB_opi_hub75` | MOONHUB / LilyGo T7-S3 | pending; preferred PSRAM-class test target |
 | `waveshare_esp32s3_32MB_hub75_idotmatrix` | `waveshare_esp32s3_32MB_hub75` | Waveshare ESP32-S3-RGB-Matrix | pending |
 
@@ -146,7 +146,7 @@ HUB75 geometry remains WLED's responsibility.
 
 ## Usermod inheritance policy
 
-Normal supplied overrides explicitly set `custom_usermods` to only:
+Legacy supplied overrides normally set `custom_usermods` to only:
 
 ```ini
 custom_usermods =
@@ -155,8 +155,7 @@ custom_usermods =
 
 Do not inherit `${env:<base>.custom_usermods}`. WLED base environments may gain
 additional Usermods over time, which would silently change memory and behaviour.
-The deliberate 0.8.2 exception is `platformio_override.ini.c3-audio`,
-which explicitly lists **exactly** `audioreactive` plus iDotMatrix.
+The deliberate legacy exception is `platformio_override.ini.c3-audio`, which explicitly lists **exactly** `audioreactive` plus iDotMatrix. The 0.9 MatrixPortal profile is a second deliberate exception: it inherits `${common.default_usermods}` from the **pinned qualification commit** `06ae26db67107cb3f6a3d107a92340035991a063`, then adds iDotMatrix. Do not interpret this as permission to qualify arbitrary future WLED revisions without retesting.
 
 ## Framework pinning
 
@@ -178,16 +177,13 @@ Other optional features disabled by the release profile remain unchanged.
 
 Do not add `esp-nimble-cpp` or `ESP32 BLE Arduino`.
 
-## No-OTA partition policy
+## OTA / partition policy
 
-All supplied iDotMatrix environments define `WLED_DISABLE_OTA` and use a
-single-application partition table. This is intentional for two reasons:
+The legacy classic/C3 profiles use `WLED_DISABLE_OTA` and the supplied single-application partition tables. This prevents an official WLED OTA image from silently replacing the out-of-tree Usermod and provides a larger application slot on constrained targets.
 
-- BLE plus the Usermod can exceed smaller WLED OTA application slots;
-- an official WLED OTA image does not contain this out-of-tree Usermod and would
-  replace the customized firmware.
+The **0.9 MatrixPortal profile is intentionally different**: it inherits the upstream WLED MatrixPortal partition table and OTA policy from the pinned qualification commit. OTA is therefore available when the installed firmware and update image use that same compatible layout.
 
-The project provides:
+Legacy no-OTA partition tables remain:
 
 | Flash | Partition table | Application slot | Filesystem |
 |---:|---|---:|---:|
@@ -195,15 +191,6 @@ The project provides:
 | 8 MB | `WLED_ESP32_8MB_IDOT_NO_OTA.csv` | `0x400000` | `0x3E0000` |
 | 16 MB | `WLED_ESP32_16MB_IDOT_NO_OTA.csv` | `0x600000` | `0x9E0000` |
 | 32 MB | `WLED_ESP32_32MB_IDOT_NO_OTA.csv` | `0x600000` | `0x19E0000` |
-
-For 8/16/32 MB, the filesystem starts at the same offset used by the
-corresponding WLED v16.0.1 partition layout; the two OTA app regions are merged
-into one factory application region. Flash these profiles over USB/serial.
-
-An advanced user can create an OTA-capable custom build, but it must be compiled
-with this Usermod, must fit both OTA slots, and must use exactly the same
-partition layout already installed on the controller. OTA-capable variants are
-not release-validated or supplied by this project.
 
 ## Choosing and building a target
 
@@ -243,7 +230,7 @@ pio run -e esp32c3dev_idotmatrix_audio_16x16
 ```
 
 Expected `/json/info` markers for this development tree include
-`release=0.8.2`, `build=0.8.2`, `RMT+BLE=ESP32-C3 shared-RMT`,
+`release=0.9.0`, `build=0.9.0-rc.3`, `RMT+BLE=ESP32-C3 shared-RMT`,
 `framework=WLED IDF5/shared-RMT`, `wledBase=d55037f`, `nimble=2.x API`, and the
 new audio-source diagnostics.
 
@@ -276,7 +263,7 @@ The supported stable 0.8.2 baselines remain the classic 4 MB ESP32 and the docum
 
 ## 0.9: Adafruit MatrixPortal ESP32-S3 / native HUB75
 
-Use `platformio_override.ini.matrixportal-s3-hub75` with the WLED 0.17 line used for 0.9 qualification.
+Use `platformio_override.ini.matrixportal-s3-hub75` with the exact WLED 0.17.0-devV5 qualification commit `06ae26db67107cb3f6a3d107a92340035991a063`.
 The profile extends WLED's official `env:adafruit_matrixportal_esp32s3`, preserving
 its native HUB75 flags, MatrixPortal pinout, ESP-IDF 5.x stack, 8 MB partitioning,
 2 MB PSRAM configuration and OTA policy. iDotMatrix adds LZW12, 64x64 profile
@@ -290,4 +277,4 @@ cp ../wled-usermod-idotmatrix/platformio_override.ini.matrixportal-s3-hub75 plat
 pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
 
-This is the preferred and hardware-validated 0.9 target. The older `platformio_override.ini.hub75` file remains a legacy WLED 16.x wrapper and must not be used for this MatrixPortal 0.17 qualification. Hardware validation covers native 64x64 HUB75 output, BLE/NimBLE 2.x, direct AnimatedGIF playback from PSRAM, persistent Carousel content, Alarm, Program/Schedule, Preset / Default, TEXT including the 32x64 glyph path, timer/scoreboard/clock artwork, audio visualizers, and logical 32x32/16x16 profiles automatically upscaled to the physical 64x64 panel.
+This is the preferred and hardware-validated 0.9 target. Its environment is `adafruit_matrixportal_esp32s3_idotmatrix_64x64`. The older `platformio_override.ini.hub75` file remains a legacy WLED 16.x wrapper and must not be used for this MatrixPortal 0.17 qualification. Hardware validation covers native 64x64 HUB75 output, BLE/NimBLE 2.x, direct AnimatedGIF playback from PSRAM, persistent Carousel content, Alarm, Program/Schedule, Preset / Default, TEXT including the 32x64 glyph path, timer/scoreboard/clock artwork, audio visualizers, and logical 32x32/16x16 profiles automatically upscaled to the physical 64x64 panel.

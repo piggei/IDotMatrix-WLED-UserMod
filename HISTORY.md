@@ -1,3 +1,17 @@
+## 0.9.0-rc.3 - 2026-09-18
+
+- Match original-device TEXT pagination on larger matrices for non-scrolling effects: 64x64 supports 1x64, 2x32 or 4x16 rows; 32x32 supports 1x32 or 2x16 rows; 16x16 remains single-row.
+- Center the block of rows vertically, including short final pages.
+- Keep horizontal and vertical scrolling effects on the established single-line/tape renderer.
+- Add host regressions for multi-row capacity, vertical centering and scroll-mode isolation.
+
+## 0.9.0-rc.2 - 2026-09-18
+
+- Preset activation made transactional within a boot session with rollback on intermediate LittleFS failures; Preset remains intentionally non-persistent across reboot.
+- Added behavioral/fault-injection host tests for Preset and Carousel persistence failure paths.
+- Pinned the MatrixPortal qualification baseline to WLED commit `06ae26db67107cb3f6a3d107a92340035991a063` and reconciled OTA/Usermod inheritance documentation.
+- Reworked installation/documentation around the primary 0.9 MatrixPortal target and corrected remaining 0.8/dev-era operational references.
+
 ## 0.9.0-rc.1 - 2026-09-17
 
 - Declared the planned 0.9 feature set complete and entered release-candidate qualification.
@@ -120,8 +134,6 @@
 - Added `programRx` diagnostics and extended `alarmRx` with chunk/received/multipart/reset/timeout state.
 - Added host regressions for single-packet compatibility, observed two-packet Alarm (4096+2610), three-packet Program and incomplete-transfer timeout.
 
-## 0.9.0-dev.17 - 2026-09-16 - Consolidation and release-hygiene pass
-
 ## 0.9.0-dev.19
 
 - Added `alarmRx` telemetry for the Alarm `00/80` receive, media-validation, automation-call, commit and ACK path.
@@ -133,6 +145,10 @@
 - Hardened release-package regression checks so `.orig` and `.bak` files are rejected as repository artifacts.
 - Extended `.gitignore` to exclude `.orig` backup files in addition to existing temporary-file patterns.
 - Refreshed development version metadata and documentation to establish a clean baseline before further graphics work.
+
+## 0.9.0-dev.17 - 2026-09-16 - Consolidation and release-hygiene pass
+
+- Consolidated the development line and release hygiene after multipart/Carousel work.
 
 ## 0.9.0-dev.15 - 2026-09-15 - Native-resolution light-effect tuning pass 2
 

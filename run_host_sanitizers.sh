@@ -33,4 +33,10 @@ $CXX $FLAGS -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp I
 $CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media12_san"
 "$TMP/idotmatrix_media12_san"
 
+$CXX $FLAGS -DIDOT_PRESET_HOST_TEST -Itests/media_stub IDotMatrixProtocol.cpp IDotMatrixPreset.cpp tests/test_preset.cpp -o "$TMP/idotmatrix_preset_san"
+"$TMP/idotmatrix_preset_san"
+
+$CXX $FLAGS -DIDOT_CAROUSEL_HOST_TEST -Itests/media_stub IDotMatrixProtocol.cpp IDotMatrixCarousel.cpp tests/test_carousel.cpp -o "$TMP/idotmatrix_carousel_san"
+"$TMP/idotmatrix_carousel_san"
+
 echo "ASan/UBSan host tests passed."
