@@ -23,8 +23,11 @@ public:
   void onStopwatch(uint8_t) override {}
   void onScoreboard(uint16_t, uint16_t) override {}
   bool takeCountdownFinished() override { return false; }
-  bool onTextBegin(const IDotMatrixTextSettings&) override { return true; }
-  void onTextGlyph(uint8_t, const uint8_t*, size_t) override {}
+  int textBegins = 0;
+  int textGlyphs = 0;
+  IDotMatrixTextSettings lastText{};
+  bool onTextBegin(const IDotMatrixTextSettings& settings) override { ++textBegins; lastText = settings; return true; }
+  void onTextGlyph(uint8_t, const uint8_t*, size_t) override { ++textGlyphs; }
   void onTextComplete() override {}
   bool onRawImageBegin(size_t) override { return true; }
   bool onRawImageData(size_t, const uint8_t*, size_t) override { return true; }
@@ -60,6 +63,24 @@ static void expectBytes(const char* path, uint8_t marker) {
   const auto bytes = readFile(path);
   assert(bytes.size() == 3);
   assert(bytes[0] == marker && bytes[1] == uint8_t(marker + 1u) && bytes[2] == uint8_t(marker + 2u));
+}
+
+static std::vector<uint8_t> makeMaxFont64Text() {
+  constexpr size_t header = 14;
+  constexpr size_t record = 260;
+  std::vector<uint8_t> data(header + 64u * record, 0);
+  data[0] = 64;
+  data[4] = 0; // non-scroll effect
+  data[5] = 50;
+  data[6] = 1;
+  data[7] = 0xFF;
+  for (size_t glyph = 0; glyph < 64u; ++glyph) {
+    const size_t base = header + glyph * record;
+    data[base] = 0x08; // 32x64 family marker
+    data[base + 4u + (glyph % 256u)] = uint8_t(glyph + 1u);
+  }
+  assert(data.size() == 16654u);
+  return data;
 }
 
 int main() {
@@ -136,6 +157,22 @@ int main() {
   assert(preset.onPresetAssetData(0, one, sizeof(one)));
   assert(!preset.onPresetAssetComplete(false));
   expectBytes("/pre0.bin", 40);
+
+
+  // Full original-device 64-glyph 32x64 TEXT must stage and play from Preset.
+  WLED_FS.resetFailures();
+  const auto largeText = makeMaxFont64Text();
+  assert(preset.onPresetAssetBegin(IDotMatrixPreset::TYPE_TEXT, 14, 5, largeText.size()));
+  assert(preset.onPresetAssetData(0, largeText.data(), largeText.size()));
+  assert(preset.onPresetAssetComplete(true));
+  const int beginsBefore = events.textBegins;
+  const int glyphsBefore = events.textGlyphs;
+  activate(preset, {14});
+  assert(events.textBegins == beginsBefore + 1);
+  assert(events.textGlyphs == glyphsBefore + 64);
+  assert(events.lastText.glyphWidth == 32 && events.lastText.glyphHeight == 64);
+  assert(events.lastText.glyphBytes == 256);
+  assert(!preset.onPresetAssetBegin(IDotMatrixPreset::TYPE_TEXT, 15, 5, largeText.size() + 1u));
 
   // Preset is intentionally volatile. begin() models reboot/startup and must
   // clean active, pending, cache and transaction-backup files rather than

@@ -467,6 +467,10 @@ void IDotMatrixBLEServer::processFA02Complete(
         bulkTransfer_.textPayload(),
         bulkTransfer_.textPayloadLength()
       );
+      // processTextPayload() synchronously copies the glyph bitmaps into the
+      // renderer, so the potentially large Bulk scratch buffer can be released
+      // immediately instead of remaining resident until the next TEXT transfer.
+      bulkTransfer_.reset();
     }
     if (bulkResult.replyAvailable) {
       const uint8_t response[] = {

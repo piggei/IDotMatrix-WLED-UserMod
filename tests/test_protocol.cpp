@@ -730,7 +730,14 @@ int main() {
   textPayload[18] = 0x01;
   textPayload[34] = 0x02;
   textPayload[38] = 0x80;
+
+  // Live/app TEXT is an explicit display takeover. It must stop autonomous
+  // Preset/Carousel timers before the text is published.
+  const uint32_t carouselSuspendBeforeText = carousel.suspendCount;
+  const uint32_t presetSuspendBeforeText = preset.suspendCount;
   assert(protocol.processTextPayload(textPayload, sizeof(textPayload)));
+  assert(carousel.suspendCount == carouselSuspendBeforeText + 1u);
+  assert(preset.suspendCount == presetSuspendBeforeText + 1u);
   assert(events.textBeginReceived && events.textCompleteReceived);
   assert(events.textSettings.glyphCount == 2);
   assert(events.textSettings.glyphWidth == 8);
@@ -742,6 +749,13 @@ int main() {
   assert(events.textSettings.backgroundEnabled);
   assert(events.textGlyphsReceived == 2 && events.textLastGlyph == 1);
   assert(events.textLastBitmapLength == 16 && events.textLastBitmap[0] == 0x80);
+
+  // Stored TEXT rendered by Preset/Carousel must not suspend its own owner.
+  const uint32_t carouselSuspendBeforeInternalText = carousel.suspendCount;
+  const uint32_t presetSuspendBeforeInternalText = preset.suspendCount;
+  assert(protocol.processTextPayload(textPayload, sizeof(textPayload), false));
+  assert(carousel.suspendCount == carouselSuspendBeforeInternalText);
+  assert(preset.suspendCount == presetSuspendBeforeInternalText);
 
   textPayload[14] = 0x03;
   assert(protocol.processTextPayload(textPayload, sizeof(textPayload)));
@@ -784,6 +798,25 @@ int main() {
   assert(events.textLastBitmapLength == 256);
   assert(events.textLastBitmap[0] == 0x01);
   assert(events.textLastBitmap[255] == 0x80);
+
+  // Maximum original-device 64px TEXT object: 64 x 260-byte records plus
+  // the 14-byte global header. The parser must accept the complete object.
+  const uint8_t glyphsBeforeMax = events.textGlyphsReceived;
+  std::vector<uint8_t> font64Max(14u + 64u * 260u, 0);
+  font64Max[0] = 64;
+  font64Max[6] = 1;
+  for (size_t glyph = 0; glyph < 64u; ++glyph) {
+    const size_t base = 14u + glyph * 260u;
+    font64Max[base] = 0x08;
+    font64Max[base + 4u + (glyph % 256u)] = uint8_t(glyph + 1u);
+  }
+  assert(font64Max.size() == 16654u);
+  assert(protocol.processTextPayload(font64Max.data(), font64Max.size()));
+  assert(events.textSettings.glyphCount == 64);
+  assert(events.textSettings.glyphWidth == 32);
+  assert(events.textSettings.glyphHeight == 64);
+  assert(events.textSettings.glyphBytes == 256);
+  assert(events.textGlyphsReceived == uint8_t(glyphsBeforeMax + 64u));
 
   // Also accept a structurally identical record with an app/firmware-specific
   // marker; exact 260-byte records make the 32x64 cell unambiguous.

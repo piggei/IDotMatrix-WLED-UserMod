@@ -1,4 +1,5 @@
 #include "IDotMatrixPreset.h"
+#include "IDotMatrixBulkTransfer.h"
 #if defined(IDOT_PRESET_HOST_TEST)
 #include "tests/preset_stub/IDotMatrixPresetDeps.h"
 #else
@@ -7,6 +8,36 @@
 #include "wled.h"
 
 #include <cstdio>
+#include <cstdlib>
+
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_heap_caps.h>
+#include <esp32-hal-psram.h>
+#endif
+
+namespace {
+uint8_t* allocateTextScratch(size_t bytes) {
+  if (bytes == 0 || bytes > IDotMatrixBulkTransfer::MAX_TEXT_PAYLOAD) return nullptr;
+#if defined(ARDUINO_ARCH_ESP32)
+  if (psramFound()) {
+    void* external = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (external != nullptr) return static_cast<uint8_t*>(external);
+  }
+  return static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT));
+#else
+  return static_cast<uint8_t*>(std::malloc(bytes));
+#endif
+}
+
+void freeTextScratch(uint8_t* buffer) {
+  if (buffer == nullptr) return;
+#if defined(ARDUINO_ARCH_ESP32)
+  heap_caps_free(buffer);
+#else
+  std::free(buffer);
+#endif
+}
+}
 
 IDotMatrixPreset::IDotMatrixPreset(IDotMatrixProtocol& protocol, IDotMatrixWLEDAdapter& adapter)
   : protocol_(protocol), adapter_(adapter) {}
@@ -92,7 +123,8 @@ int8_t IDotMatrixPreset::currentProtocolSlot() const {
 
 bool IDotMatrixPreset::onPresetAssetBegin(uint8_t type, uint8_t protocolSlot, uint16_t timeSign, size_t totalLength) {
   uint8_t local = 0;
-  if (!protocolSlotToLocal(protocolSlot, local) || (type != TYPE_GIF && type != TYPE_TEXT) || totalLength == 0) return false;
+  if (!protocolSlotToLocal(protocolSlot, local) || (type != TYPE_GIF && type != TYPE_TEXT) || totalLength == 0 ||
+      (type == TYPE_TEXT && totalLength > IDotMatrixBulkTransfer::MAX_TEXT_PAYLOAD)) return false;
   char path[20];
   pendingPath(local, path, sizeof(path));
   WLED_FS.remove(path);
@@ -291,10 +323,13 @@ bool IDotMatrixPreset::playPosition(uint8_t position, uint32_t now) {
     shown = adapter_.playStoredGif(path, cache);
   } else if (active_[slot].type == TYPE_TEXT) {
     File file = WLED_FS.open(path, "r");
-    if (file && file.size() <= 4096u) {
-      static uint8_t textBuffer[4096];
+    if (file && file.size() <= IDotMatrixBulkTransfer::MAX_TEXT_PAYLOAD) {
       const size_t bytes = file.size();
-      shown = file.read(textBuffer, bytes) == bytes && protocol_.processTextPayload(textBuffer, bytes);
+      uint8_t* textBuffer = allocateTextScratch(bytes);
+      if (textBuffer != nullptr) {
+        shown = file.read(textBuffer, bytes) == bytes && protocol_.processTextPayload(textBuffer, bytes, false);
+        freeTextScratch(textBuffer);
+      }
       if (shown) hold = adapter_.textPresentationDurationMs();
     }
     if (file) file.close();

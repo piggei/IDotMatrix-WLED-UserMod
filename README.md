@@ -1,6 +1,6 @@
 # WLED iDotMatrix Usermod — 0.9.0 Release Candidate
 
-**Current release line: 0.9.0 / build 0.9.0-rc.3.**
+**Current release line: 0.9.0 / build 0.9.0-rc.5.**
 
 The 0.9 line brings the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
 native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
@@ -24,10 +24,10 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-**0.9.0-rc.3** is the current release candidate. It is feature-complete for the
+**0.9.0-rc.5** is the current release candidate. It is feature-complete for the
 planned 0.9 scope and is entering final hardware qualification. On the primary
 MatrixPortal S3 + 64x64 HUB75 target, the 16/32/64 logical profiles, native
-64x64 TEXT/font path, GIF playback, persistent Carousel, Alarm, Program/Schedule,
+64x64 TEXT/font path, including the complete 64-glyph / 16654-byte 32x64 TEXT payload, GIF playback, persistent Carousel, Alarm, Program/Schedule,
 Preset / Default, audio visualizers, clocks, Countdown, Stopwatch and Scoreboard
 have all been exercised on hardware.
 
@@ -69,6 +69,11 @@ The normal `platformio_override.ini.c3` remains iDotMatrix-only so users who do
 not need local audio keep the lower RAM footprint. The C3 audio profile uses the
 same pinned WLED IDF5/shared-RMT base and NimBLE 2.5.1 as the validated 0.8.1
 C3 build; it only adds `audioreactive` to `custom_usermods`.
+
+
+### Large 64-pixel TEXT payloads
+
+The original 64x64 device can send up to 64 glyphs at the 32x64 font size. That is a 16654-byte TEXT object: a 14-byte global header plus 64 records of 260 bytes each. RC4 accepts that complete size end-to-end for live Bulk TEXT, Carousel and Preset playback. The large payload is not stored in a permanent 16 KiB array: temporary buffers are allocated only while receiving or replaying TEXT and prefer PSRAM on ESP32-S3 when available.
 
 ### Persistent Device Assets / Carousel
 
@@ -297,7 +302,7 @@ The MatrixPortal profile intentionally inherits the upstream WLED partition and 
 
 For first boot, configure the physical WLED matrix as 64x64 with the MatrixPortal/native HUB75 setup, configure Wi-Fi/timezone/NTP as desired, then leave the iDotMatrix logical profile at 64x64 for native operation. Logical 16x16 and 32x32 profiles are automatically upscaled to the physical 64x64 panel.
 
-Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.0`, `build=0.9.0-rc.3`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
+Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.0`, `build=0.9.0-rc.5`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
 
 ### Legacy qualified profiles
 
@@ -334,7 +339,7 @@ profile=64x64
 canvas=16x16
 name=IDM-123456
 release=0.9.0
-build=0.9.0-rc.3
+build=0.9.0-rc.5
 audioSource=phone active=phone
 audioReactive=absent
 gifDecoder=compact12/cache
@@ -358,7 +363,7 @@ framework=WLED IDF5/shared-RMT
 wledBase=d55037f
 nimble=2.x API
 release=0.9.0
-build=0.9.0-rc.3
+build=0.9.0-rc.5
 audioSource=phone active=phone
 audioReactive=absent
 ```
@@ -455,7 +460,7 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9 work;
-- [`RELEASE_NOTES_0.9.0-rc.3.md`](RELEASE_NOTES_0.9.0-rc.3.md) — current release-candidate notes;
+- [`RELEASE_NOTES_0.9.0-rc.5.md`](RELEASE_NOTES_0.9.0-rc.5.md) — current release-candidate notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 
 Older release/development history is consolidated in `HISTORY.md`; this source

@@ -368,9 +368,7 @@ for the observed 4096-byte payload chunk plus 16-byte header. The maximum logica
 FA02 packet is **8192 bytes**; packets above 4112 bytes use temporary dynamic
 reassembly storage. The NimBLE callback only copies a complete ATT write into a bounded queue;
 assembler ownership, allocation, timeout, logical-packet dispatch, CRC32, and
-notification all happen in the normal Usermod loop. TEXT is
-bounded to 4096 payload bytes; RAW is bounded to the 12288 bytes required by a
-64x64 RGB frame. GIF is streamed to LittleFS and capped at 2 MiB here.
+notification all happen in the normal Usermod loop. TEXT accepts up to **16654 payload bytes**, matching the original-device 64-glyph 32x64 format (14-byte TEXT header + 64 x 260-byte glyph records). The TEXT payload buffer is allocated only for the active transfer, preferring PSRAM on ESP32-S3 and falling back to internal heap when required; it is not a permanent 16 KiB reservation. RAW is bounded to the 12288 bytes required by a 64x64 RGB frame. GIF is streamed to LittleFS and capped at 2 MiB here.
 
 Matching BUILD 80, an otherwise unknown complete short FA02 command is
 tolerated and receives `05 00 COMMAND SUBCOMMAND 01`.

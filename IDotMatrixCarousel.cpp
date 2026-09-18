@@ -1,4 +1,5 @@
 #include "IDotMatrixCarousel.h"
+#include "IDotMatrixBulkTransfer.h"
 
 #include "IDotMatrixProtocol.h"
 #if defined(IDOT_CAROUSEL_HOST_TEST)
@@ -9,8 +10,36 @@
 #include "wled.h"
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
+
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_heap_caps.h>
+#include <esp32-hal-psram.h>
+#endif
 
 namespace {
+uint8_t* allocateTextScratch(size_t bytes) {
+  if (bytes == 0 || bytes > IDotMatrixBulkTransfer::MAX_TEXT_PAYLOAD) return nullptr;
+#if defined(ARDUINO_ARCH_ESP32)
+  if (psramFound()) {
+    void* external = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (external != nullptr) return static_cast<uint8_t*>(external);
+  }
+  return static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT));
+#else
+  return static_cast<uint8_t*>(std::malloc(bytes));
+#endif
+}
+
+void freeTextScratch(uint8_t* buffer) {
+  if (buffer == nullptr) return;
+#if defined(ARDUINO_ARCH_ESP32)
+  heap_caps_free(buffer);
+#else
+  std::free(buffer);
+#endif
+}
+
 constexpr char MANIFEST_PATH[] = "/idot_car.bin";
 constexpr char MANIFEST_TMP[] = "/idot_car.tmp";
 constexpr char MANIFEST_BACKUP[] = "/idot_car.bak";
@@ -317,6 +346,7 @@ bool IDotMatrixCarousel::beginAsset(
   // previous slot's quiet-period timer start playback between two transfers.
   autoStartPending_ = false;
   if (!validType(type) || slot >= SLOT_COUNT || totalLength == 0 ||
+      (type == TYPE_TEXT && totalLength > IDotMatrixBulkTransfer::MAX_TEXT_PAYLOAD) ||
       !carouselHasRoom(totalLength)) return false;
   WLED_FS.remove(ASSET_RX);
   carouselRxFile = WLED_FS.open(ASSET_RX, "w");
@@ -480,10 +510,13 @@ bool IDotMatrixCarousel::playSlot(uint8_t slot, uint32_t now) {
     shown = adapter_.playStoredGif(path, cache);
   } else if (manifest_.slots[slot].type == TYPE_TEXT) {
     File file = WLED_FS.open(path, "r");
-    if (file && file.size() <= 4096u) {
-      static uint8_t textBuffer[4096];
+    if (file && file.size() <= IDotMatrixBulkTransfer::MAX_TEXT_PAYLOAD) {
       const size_t bytes = file.size();
-      shown = file.read(textBuffer, bytes) == bytes && protocol_.processTextPayload(textBuffer, bytes);
+      uint8_t* textBuffer = allocateTextScratch(bytes);
+      if (textBuffer != nullptr) {
+        shown = file.read(textBuffer, bytes) == bytes && protocol_.processTextPayload(textBuffer, bytes, false);
+        freeTextScratch(textBuffer);
+      }
     }
     if (file) file.close();
   }

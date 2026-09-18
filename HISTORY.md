@@ -1,3 +1,10 @@
+## 0.9.0-rc.5 - 2026-09-18
+
+- Raise the TEXT transport limit from 4096 to 16654 bytes, matching the original-device maximum of 14-byte header + 64 x 260-byte 32x64 glyph records.
+- Replace the permanent Bulk TEXT array with temporary dynamic allocation that prefers PSRAM on ESP32-S3 and falls back to internal heap.
+- Allow Carousel and Preset to replay stored TEXT objects up to the same 16654-byte limit using temporary playback scratch buffers.
+- Add regressions for a complete 16654-byte multi-chunk Bulk transfer and full-size 64-glyph TEXT playback through Carousel and Preset.
+
 ## 0.9.0-rc.3 - 2026-09-18
 
 - Match original-device TEXT pagination on larger matrices for non-scrolling effects: 64x64 supports 1x64, 2x32 or 4x16 rows; 32x32 supports 1x32 or 2x16 rows; 16x16 remains single-row.

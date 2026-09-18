@@ -1,7 +1,7 @@
 # Testing
 
 This document is the consolidated validation plan for iDotMatrix WLED Usermod
-`0.9.0-rc.3`. Historical per-build test reports and checklists are intentionally
+`0.9.0-rc.5`. Historical per-build test reports and checklists are intentionally
 not shipped; regression coverage lives in `tests/` and release qualification is
 tracked here.
 
@@ -13,7 +13,7 @@ From the repository root:
 ./run_host_tests.sh
 ```
 
-The suite covers protocol framing and ACKs, BLE FA02 assembly, Bulk/multipart media, Alarm and Program/Schedule transactions, Carousel and Preset routing, clock/text/timer/scoreboard/audio rendering, GIF/media handling, WLED ownership, build-profile normalization, partition geometry and release-package consistency.
+The suite covers protocol framing and ACKs, BLE FA02 assembly, Bulk/multipart media, Alarm and Program/Schedule transactions, Carousel and Preset routing, clock/text/timer/scoreboard/audio rendering, GIF/media handling, WLED ownership, build-profile normalization, partition geometry and release-package consistency. RC4 adds an explicit 16654-byte Bulk regression plus stored Carousel/Preset playback tests for a complete 64-glyph 32x64 TEXT object.
 
 Where supported by the host compiler:
 
@@ -72,3 +72,5 @@ iOS work remains isolated on its dedicated branch and is not a 0.9 release block
 ## RC2 filesystem failure-path qualification
 
 RC2 adds host behavioral tests for Preset and Carousel LittleFS transactions. Preset activation is all-or-nothing within a running session and is tested for intermediate backup/promotion failures, write failure and CRC rejection. Preset remains intentionally volatile: `begin()`/reboot removes active, pending and backup files instead of recovering the previous session. Carousel tests cover manifest-save failure rollback and reporting. These host fault-injection tests complement, rather than replace, hardware LittleFS and soak testing.
+
+RC5 adds a TEXT ownership regression: live TEXT must suspend active Preset/Carousel playback, while stored TEXT rendered by those players must not self-suspend. This specifically protects the app flow Preset -> Text where the previous Preset dwell timer could overwrite the newly selected text after about three seconds.

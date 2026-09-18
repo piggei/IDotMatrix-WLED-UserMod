@@ -575,7 +575,7 @@ bool IDotMatrixProtocol::pollAsyncReply(IDotMatrixReply& reply) {
   return true;
 }
 
-bool IDotMatrixProtocol::processTextPayload(const uint8_t* data, size_t length) {
+bool IDotMatrixProtocol::processTextPayload(const uint8_t* data, size_t length, bool takeDisplayOwnership) {
   constexpr size_t GLOBAL_HEADER = 14;
   constexpr size_t GLYPH_META = 4;
   constexpr uint8_t MAX_GLYPHS = 64;
@@ -644,6 +644,17 @@ bool IDotMatrixProtocol::processTextPayload(const uint8_t* data, size_t length) 
   settings.backgroundRed = data[11];
   settings.backgroundGreen = data[12];
   settings.backgroundBlue = data[13];
+
+  // A TEXT payload received directly from the app/automation is an explicit
+  // display takeover, just like clock, effects, raw images and GIFs. Suspend
+  // autonomous Preset/Carousel players before publishing the new text so their
+  // dwell timers cannot overwrite it a few seconds later. Stored TEXT played
+  // *by* Preset/Carousel passes takeDisplayOwnership=false to avoid suspending
+  // its own owner.
+  if (takeDisplayOwnership) {
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
+    if (presetEvents_ != nullptr) presetEvents_->onPresetSuspend();
+  }
 
   if (!events_.onTextBegin(settings)) return false;
   for (uint8_t glyph = 0; glyph < settings.glyphCount; ++glyph) {

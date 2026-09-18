@@ -222,7 +222,7 @@ public:
   bool processAudioStream(const uint8_t* data, size_t length, IDotMatrixReply& reply);
   void resetAudioStream();
   bool pollAsyncReply(IDotMatrixReply& reply);
-  bool processTextPayload(const uint8_t* data, size_t length);
+  bool processTextPayload(const uint8_t* data, size_t length, bool takeDisplayOwnership = true);
   bool beginRawImage(size_t byteLength);
   bool writeRawImage(size_t offset, const uint8_t* data, size_t length);
   bool completeRawImage(bool crcValid);

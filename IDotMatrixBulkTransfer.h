@@ -26,9 +26,11 @@ struct IDotMatrixBulkResult {
 class IDotMatrixBulkTransfer {
 public:
   static constexpr size_t HEADER_SIZE = 16;
-  static constexpr size_t MAX_TEXT_PAYLOAD = 4096;
+  static constexpr size_t MAX_TEXT_PAYLOAD = 16654;
   static constexpr size_t MAX_RAW_PAYLOAD = 64u * 64u * 3u;
   static constexpr size_t MAX_GIF_PAYLOAD = 2u * 1024u * 1024u;
+
+  ~IDotMatrixBulkTransfer();
 
   bool processPacket(
     const uint8_t* data,
@@ -47,6 +49,9 @@ public:
 
 private:
   static uint32_t updateCRC32(uint32_t crc, const uint8_t* data, size_t length);
+  static uint8_t* allocateTextBuffer(size_t bytes);
+  static void freeTextBuffer(uint8_t* buffer);
+  void clearTextBuffer();
   void resetActive();
 
   bool active_ = false;
@@ -58,7 +63,7 @@ private:
   uint8_t option_ = 0;
   uint16_t timeSign_ = 0;
   uint8_t imageIndex_ = 12;
-  uint8_t textPayload_[MAX_TEXT_PAYLOAD]{};
+  uint8_t* textPayload_ = nullptr;
   size_t textPayloadLength_ = 0;
   bool textReady_ = false;
 };

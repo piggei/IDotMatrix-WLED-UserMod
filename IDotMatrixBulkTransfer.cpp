@@ -1,6 +1,12 @@
 #include "IDotMatrixBulkTransfer.h"
 
 #include <cstring>
+#include <cstdlib>
+
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_heap_caps.h>
+#include <esp32-hal-psram.h>
+#endif
 
 namespace {
 constexpr uint8_t TEXT_TYPE = 0x03;
@@ -15,6 +21,39 @@ uint32_t readLE32(const uint8_t* data) {
     (uint32_t(data[2]) << 16) |
     (uint32_t(data[3]) << 24);
 }
+}
+
+IDotMatrixBulkTransfer::~IDotMatrixBulkTransfer() {
+  clearTextBuffer();
+}
+
+uint8_t* IDotMatrixBulkTransfer::allocateTextBuffer(size_t bytes) {
+  if (bytes == 0 || bytes > MAX_TEXT_PAYLOAD) return nullptr;
+#if defined(ARDUINO_ARCH_ESP32)
+  if (psramFound()) {
+    void* external = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (external != nullptr) return static_cast<uint8_t*>(external);
+  }
+  return static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT));
+#else
+  return static_cast<uint8_t*>(std::malloc(bytes));
+#endif
+}
+
+void IDotMatrixBulkTransfer::freeTextBuffer(uint8_t* buffer) {
+  if (buffer == nullptr) return;
+#if defined(ARDUINO_ARCH_ESP32)
+  heap_caps_free(buffer);
+#else
+  std::free(buffer);
+#endif
+}
+
+void IDotMatrixBulkTransfer::clearTextBuffer() {
+  freeTextBuffer(textPayload_);
+  textPayload_ = nullptr;
+  textPayloadLength_ = 0;
+  textReady_ = false;
 }
 
 bool IDotMatrixBulkTransfer::processPacket(
@@ -48,6 +87,7 @@ bool IDotMatrixBulkTransfer::processPacket(
   const uint32_t maximumSize = type == TEXT_TYPE ? MAX_TEXT_PAYLOAD :
     type == RAW_TYPE ? MAX_RAW_PAYLOAD : MAX_GIF_PAYLOAD;
   if (totalSize == 0 || totalSize > maximumSize) {
+    if (activeType_ == TEXT_TYPE || textPayload_ != nullptr) clearTextBuffer();
     resetActive();
     result.replyAvailable = true;
     result.status = ACK_COMPLETE;
@@ -66,8 +106,15 @@ bool IDotMatrixBulkTransfer::processPacket(
     timeSign_ = timeSign;
     imageIndex_ = imageIndex;
     if (type == TEXT_TYPE) {
-      textPayloadLength_ = 0;
-      textReady_ = false;
+      clearTextBuffer();
+      textPayload_ = allocateTextBuffer(expectedSize_);
+      if (textPayload_ == nullptr) {
+        resetActive();
+        result.replyAvailable = true;
+        result.status = ACK_COMPLETE;
+        result.completed = true;
+        return true;
+      }
     }
     result.began = true;
   } else if (type != activeType_ || totalSize != expectedSize_ ||
@@ -77,6 +124,7 @@ bool IDotMatrixBulkTransfer::processPacket(
     // bytes are repeated verbatim in every continuation packet.  Latch option,
     // dwell and slot from the first packet and expose those latched values for
     // the whole transaction instead of aborting a valid multi-chunk asset.
+    if (activeType_ == TEXT_TYPE) clearTextBuffer();
     resetActive();
     result.aborted = true;
     return true;
@@ -114,10 +162,7 @@ bool IDotMatrixBulkTransfer::processPacket(
   if (result.crcValid) {
     if (type == TEXT_TYPE) textReady_ = true;
   } else {
-    if (type == TEXT_TYPE) {
-      textReady_ = false;
-      textPayloadLength_ = 0;
-    }
+    if (type == TEXT_TYPE) clearTextBuffer();
   }
   resetActive();
   return true;
@@ -151,6 +196,5 @@ void IDotMatrixBulkTransfer::resetActive() {
 
 void IDotMatrixBulkTransfer::reset() {
   resetActive();
-  textPayloadLength_ = 0;
-  textReady_ = false;
+  clearTextBuffer();
 }

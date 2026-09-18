@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <vector>
 
 static size_t makePacket(
   uint8_t* packet,
@@ -35,6 +36,17 @@ static size_t makePacket(
   return packetLength;
 }
 
+
+static uint32_t crc32(const uint8_t* data, size_t length) {
+  uint32_t crc = 0xFFFFFFFFu;
+  for (size_t i = 0; i < length; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0; bit < 8; ++bit)
+      crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
+  }
+  return crc ^ 0xFFFFFFFFu;
+}
+
 int main() {
   IDotMatrixBulkTransfer transfer;
   IDotMatrixBulkResult result;
@@ -54,6 +66,30 @@ int main() {
   assert(transfer.textReady());
   assert(transfer.textPayloadLength() == 5);
   assert(memcmp(transfer.textPayload(), "hello", 5) == 0);
+
+  // Full 64-glyph 32x64 TEXT object: 14-byte global header plus
+  // 64 x (4-byte glyph metadata + 256-byte bitmap) = 16654 bytes.
+  std::vector<uint8_t> largeText(IDotMatrixBulkTransfer::MAX_TEXT_PAYLOAD);
+  for (size_t i = 0; i < largeText.size(); ++i) largeText[i] = uint8_t(i & 0xFFu);
+  const uint32_t largeCrc = crc32(largeText.data(), largeText.size());
+  transfer.reset();
+  size_t offset = 0;
+  std::vector<uint8_t> largePacket(IDotMatrixBulkTransfer::HEADER_SIZE + 4096u);
+  while (offset < largeText.size()) {
+    const size_t chunk = (largeText.size() - offset) < 4096u ? (largeText.size() - offset) : 4096u;
+    const size_t n = makePacket(largePacket.data(), 0x03, largeText.data() + offset, chunk,
+                                uint32_t(largeText.size()), largeCrc);
+    assert(transfer.processPacket(largePacket.data(), n, result));
+    offset += chunk;
+    if (offset < largeText.size()) {
+      assert(result.status == 0x01 && !result.completed);
+    } else {
+      assert(result.status == 0x03 && result.completed && result.crcValid);
+    }
+  }
+  assert(transfer.textReady());
+  assert(transfer.textPayloadLength() == largeText.size());
+  assert(memcmp(transfer.textPayload(), largeText.data(), largeText.size()) == 0);
 
   const uint8_t bad[] = {'x'};
   packetLength = makePacket(packet, 0x03, bad, sizeof(bad), 1, 0x12345678u);

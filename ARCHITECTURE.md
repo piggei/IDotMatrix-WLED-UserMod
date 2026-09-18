@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes the **0.9 architecture** used by release candidate
-`0.9.0-rc.3`. It retains the qualified 0.8.2 ESP32/ESP32-C3 foundations and
+`0.9.0-rc.5`. It retains the qualified 0.8.2 ESP32/ESP32-C3 foundations and
 extends them with the ESP32-S3 / PSRAM / native WLED HUB75 path, universal
 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and the
 volatile Preset / Default bank.
@@ -45,8 +45,7 @@ poisoned by stale reassembly state.
 ### `IDotMatrixBulkTransfer`
 
 Validates the common bulk header, enforces sequential chunks, calculates CRC32,
-and exposes decoded chunk spans. TEXT is retained in a bounded buffer; RAW and
-GIF are streamed onward chunk by chunk.
+and exposes decoded chunk spans. TEXT supports the original-device maximum of 16654 bytes and is retained in a temporary dynamically allocated buffer for the active transfer only; ESP32 builds prefer PSRAM when available. RAW and GIF are streamed onward chunk by chunk.
 
 ### `IDotMatrixProtocol`
 
@@ -632,4 +631,4 @@ Preset Bulk uploads reuse the Carousel transfer indicator. The UI is kept active
 
 Preset / Default remains intentionally volatile. RC2 makes activation transactional only within the current boot/session: active files are moved to temporary `.bak` names, every pending replacement is promoted, and metadata is committed only after the full filesystem operation succeeds. On any intermediate failure the previous active bank is restored. At boot, Preset active/pending/cache/backup files are removed; no Preset journaling or cross-reboot recovery is performed.
 
-The current implementation also contains three independent 4096-byte TEXT scratch areas: BulkTransfer, Carousel playback and Preset playback (about 12 KiB total), in addition to the FA02 inline assembler, BLE queue, renderer/media storage and WLED/NimBLE allocations. RC2 documents this cost but deliberately does not merge those buffers immediately before release, because their lifetimes/ownership differ and the primary MatrixPortal target has PSRAM. A future memory-focused release may consolidate them after dedicated regression testing.
+RC4 removes the former three permanent 4096-byte TEXT scratch areas. BulkTransfer now allocates exactly the declared TEXT payload size, up to 16654 bytes, only for the lifetime of the transfer/result and prefers PSRAM on ESP32 when available. Carousel and Preset allocate a temporary scratch buffer only while reading a stored TEXT object for playback, then free it immediately after `processTextPayload()`. This supports the complete 64-glyph 32x64 payload without permanently reserving roughly 50 KiB simply to raise all three old buffers to the new maximum.
