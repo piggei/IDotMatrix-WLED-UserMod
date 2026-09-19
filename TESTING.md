@@ -1,7 +1,7 @@
 # Testing
 
 This document is the consolidated validation plan for iDotMatrix WLED Usermod
-`0.9.0-rc.5`. Historical per-build test reports and checklists are intentionally
+`0.9.0`. Historical per-build test reports and checklists are intentionally
 not shipped; regression coverage lives in `tests/` and release qualification is
 tracked here.
 

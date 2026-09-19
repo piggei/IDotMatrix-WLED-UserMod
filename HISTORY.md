@@ -1,3 +1,8 @@
+## 0.9.0
+
+- Final release promoted from the qualified 0.9.0-rc.5 codebase with no functional changes during final promotion.
+- Added final documentation of LittleFS coexistence with unrelated WLED/PixelForge media.
+
 ## 0.9.0-rc.5 - 2026-09-18
 
 - Raise the TEXT transport limit from 4096 to 16654 bytes, matching the original-device maximum of 14-byte header + 64 x 260-byte 32x64 glyph records.

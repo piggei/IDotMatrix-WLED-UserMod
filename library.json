@@ -1,6 +1,6 @@
 {
   "name": "wled-usermod-idotmatrix",
-  "version": "0.9.0-rc.5",
+  "version": "0.9.0",
   "description": "iDotMatrix BLE server/emulator usermod for WLED with ESP32-S3/HUB75 64x64 support",
   "keywords": [
     "wled",

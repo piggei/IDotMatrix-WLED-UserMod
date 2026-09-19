@@ -1,6 +1,6 @@
 # WLED iDotMatrix Usermod — 0.9.0 Release Candidate
 
-**Current release line: 0.9.0 / build 0.9.0-rc.5.**
+**Current release line: 0.9.0 / build 0.9.0.**
 
 The 0.9 line brings the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
 native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
@@ -24,7 +24,7 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-**0.9.0-rc.5** is the current release candidate. It is feature-complete for the
+**0.9.0** is the current release candidate. It is feature-complete for the
 planned 0.9 scope and is entering final hardware qualification. On the primary
 MatrixPortal S3 + 64x64 HUB75 target, the 16/32/64 logical profiles, native
 64x64 TEXT/font path, including the complete 64-glyph / 16654-byte 32x64 TEXT payload, GIF playback, persistent Carousel, Alarm, Program/Schedule,
@@ -302,7 +302,7 @@ The MatrixPortal profile intentionally inherits the upstream WLED partition and 
 
 For first boot, configure the physical WLED matrix as 64x64 with the MatrixPortal/native HUB75 setup, configure Wi-Fi/timezone/NTP as desired, then leave the iDotMatrix logical profile at 64x64 for native operation. Logical 16x16 and 32x32 profiles are automatically upscaled to the physical 64x64 panel.
 
-Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.0`, `build=0.9.0-rc.5`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
+Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.0`, `build=0.9.0`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
 
 ### Legacy qualified profiles
 
@@ -339,7 +339,7 @@ profile=64x64
 canvas=16x16
 name=IDM-123456
 release=0.9.0
-build=0.9.0-rc.5
+build=0.9.0
 audioSource=phone active=phone
 audioReactive=absent
 gifDecoder=compact12/cache
@@ -363,7 +363,7 @@ framework=WLED IDF5/shared-RMT
 wledBase=d55037f
 nimble=2.x API
 release=0.9.0
-build=0.9.0-rc.5
+build=0.9.0
 audioSource=phone active=phone
 audioReactive=absent
 ```
@@ -460,7 +460,7 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9 work;
-- [`RELEASE_NOTES_0.9.0-rc.5.md`](RELEASE_NOTES_0.9.0-rc.5.md) — current release-candidate notes;
+- [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — current release-candidate notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 
 Older release/development history is consolidated in `HISTORY.md`; this source
@@ -497,6 +497,10 @@ On WLED 0.16.x an out-of-tree Usermod cannot register its own unique `PinOwner`
 without modifying the WLED core. This Usermod therefore refuses GPIOs already
 owned by WLED and exposes the configured pin to the Usermods settings pin scanner,
 but deliberately does not reuse another Usermod's owner ID.
+
+### LittleFS media coexistence
+
+iDotMatrix stores media in the same LittleFS filesystem used by WLED. Tools such as PixelForge may therefore see and reuse iDotMatrix-created media. iDotMatrix manages only its own media namespaces: hardware validation confirmed that unrelated WLED/PixelForge images remain intact after Carousel uploads, Preset uploads, and an iDotMatrix reset. The official iDotMatrix app does not enumerate media already stored on the display; its media library comes from the phone.
 
 ## License
 

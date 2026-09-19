@@ -230,7 +230,7 @@ pio run -e esp32c3dev_idotmatrix_audio_16x16
 ```
 
 Expected `/json/info` markers for this development tree include
-`release=0.9.0`, `build=0.9.0-rc.5`, `RMT+BLE=ESP32-C3 shared-RMT`,
+`release=0.9.0`, `build=0.9.0`, `RMT+BLE=ESP32-C3 shared-RMT`,
 `framework=WLED IDF5/shared-RMT`, `wledBase=d55037f`, `nimble=2.x API`, and the
 new audio-source diagnostics.
 

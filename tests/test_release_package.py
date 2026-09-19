@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-candidate and critical-section regression checks for 0.9.0-rc.5."""
+"""Release-candidate and critical-section regression checks for 0.9.0."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.0-rc.5"
+    assert library["version"] == "0.9.0"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     assert 'IDOTMATRIX_RELEASE = "0.9.0"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.0-rc.5"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.0"' in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
     assert '"iDotMatrix@;;;2"' in adapter
@@ -34,7 +34,7 @@ def check_release_surface() -> None:
         "platformio_override.ini.c3",
         "platformio_override.ini.c3-audio",
         "platformio_override.ini.matrixportal-s3-hub75",
-        "RELEASE_NOTES_0.9.0-rc.5.md",
+        "RELEASE_NOTES_0.9.0.md",
         "RELEASE_NOTES_0.8.2.md",
         "IDotMatrixAudioSource.h",
         "IDotMatrixAudioSource.cpp",
@@ -90,7 +90,7 @@ def check_documentation_contract() -> None:
     assert "not a general-purpose PNG" in protocol
     assert "LZW10/default" not in protocol
 
-    assert "0.9.0-rc.5" in readme.lower()
+    assert "0.9.0" in readme.lower()
     assert "release candidate" in readme.lower()
     assert "release 0.8.2 remains the last stable pre-0.9 release" in readme.lower()
     assert "phone / ble" in readme.lower()
@@ -159,7 +159,7 @@ def check_device_reset_contract() -> None:
     assert 'schedulePrefs_->remove("flags")' in automation_cpp
     assert "Device reset (`03 80`)" in protocol_doc
     assert "not an ESP32/WLED reboot" in protocol_doc
-    assert (ROOT / "RELEASE_NOTES_0.9.0-rc.5.md").is_file()
+    assert (ROOT / "RELEASE_NOTES_0.9.0.md").is_file()
 
 def check_no_heap_free_inside_queue_spinlock() -> None:
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
@@ -242,7 +242,7 @@ def check_rc2_consolidation_contract() -> None:
 
     assert sha in readme and sha in profiles and sha in override
     assert "adafruit_matrixportal_esp32s3_idotmatrix_64x64" in readme
-    assert "RELEASE_NOTES_0.9.0-rc.5.md" in readme
+    assert "RELEASE_NOTES_0.9.0.md" in readme
     assert "release=0.8.2\nbuild=0.8.2" not in readme
     assert "0.9.0-dev.3" not in override
     assert "iDotMatrix Display" not in protocol
@@ -260,7 +260,7 @@ def check_rc4_large_text_contract() -> None:
     bulk_cpp = (ROOT / "IDotMatrixBulkTransfer.cpp").read_text(encoding="utf-8")
     carousel = (ROOT / "IDotMatrixCarousel.cpp").read_text(encoding="utf-8")
     preset = (ROOT / "IDotMatrixPreset.cpp").read_text(encoding="utf-8")
-    notes = (ROOT / "RELEASE_NOTES_0.9.0-rc.5.md").read_text(encoding="utf-8")
+    notes = (ROOT / "RELEASE_NOTES_0.9.0.md").read_text(encoding="utf-8")
     assert "MAX_TEXT_PAYLOAD = 16654" in bulk_h
     assert "uint8_t* textPayload_ = nullptr" in bulk_h
     assert "psramFound()" in bulk_cpp

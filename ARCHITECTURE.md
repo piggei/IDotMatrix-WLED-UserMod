@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes the **0.9 architecture** used by release candidate
-`0.9.0-rc.5`. It retains the qualified 0.8.2 ESP32/ESP32-C3 foundations and
+`0.9.0`. It retains the qualified 0.8.2 ESP32/ESP32-C3 foundations and
 extends them with the ESP32-S3 / PSRAM / native WLED HUB75 path, universal
 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and the
 volatile Preset / Default bank.

@@ -1,4 +1,4 @@
-# iDotMatrix WLED Usermod 0.9.0-rc.5
+# iDotMatrix WLED Usermod 0.9.0
 
 RC5 fixes autonomous Preset/Carousel ownership when a live TEXT payload takes over the display.
 
