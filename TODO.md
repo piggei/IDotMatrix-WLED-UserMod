@@ -1,7 +1,6 @@
 # Deferred / post-0.9 work
 
-The planned 0.9 feature set is complete. Items below are intentionally deferred
-and are not release blockers for `0.9.0`.
+The 0.9.0 feature set is complete. Items below are intentionally deferred to later releases.
 
 - Validate a physical 32x32 panel when hardware is available. The 32x32 logical
   path is already exercised through the 64x64 scaler.

@@ -1,7 +1,6 @@
 # Architecture
 
-This document describes the **0.9 architecture** used by release candidate
-`0.9.0`. It retains the qualified 0.8.2 ESP32/ESP32-C3 foundations and
+This document describes the architecture of the stable **0.9.0** release. It retains the qualified 0.8.2 ESP32/ESP32-C3 foundations and
 extends them with the ESP32-S3 / PSRAM / native WLED HUB75 path, universal
 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and the
 volatile Preset / Default bank.
@@ -484,7 +483,7 @@ optimizations were unsafe or simply moved the failure elsewhere.
 
 ### Why the unsafe truncated LZW12 experiments matter
 
-The dangerous dev.4/dev.5 approach retained 12-bit code-width handling but made
+An earlier experimental approach retained 12-bit code-width handling but made
 the physical dictionary smaller than the legal code space. Complex GIFs could
 then index beyond the arrays. Hardware symptoms included panics and impossible
 heap diagnostics, which are classic signs of memory corruption rather than a
@@ -553,7 +552,7 @@ WLED 0.16.x requires a compile-time `PinOwner` enum value for true PinManager ow
 
 ## Countdown, stopwatch and scoreboard artwork
 
-Dev.27 ports the reconstructed original-device B154 visuals without changing protocol state. Countdown uses a 7x10 hourglass with ten 200 ms frames, white minutes, gray seconds and red seconds during the final ten seconds; at `00:00` the last hourglass frame remains visible. Stopwatch uses an independent 7x9 face with orange button, gray/lilac case, white dial, red hand and orange seconds. Its eight hand positions advance every 100 ms from elapsed time, which naturally freezes the hand while paused. Scoreboard uses two 4x7 three-digit rows (`000..999`) with player A at the top in `#7858F8` and player B at the bottom in `#F82078`. All three are composed on the legacy 16x16 canvas and then use the normal logical/physical scaling path.
+The current implementation ports the reconstructed original-device B154 visuals without changing protocol state. Countdown uses a 7x10 hourglass with ten 200 ms frames, white minutes, gray seconds and red seconds during the final ten seconds; at `00:00` the last hourglass frame remains visible. Stopwatch uses an independent 7x9 face with orange button, gray/lilac case, white dial, red hand and orange seconds. Its eight hand positions advance every 100 ms from elapsed time, which naturally freezes the hand while paused. Scoreboard uses two 4x7 three-digit rows (`000..999`) with player A at the top in `#7858F8` and player B at the bottom in `#F82078`. All three are composed on the legacy 16x16 canvas and then use the normal logical/physical scaling path.
 
 
 ## Alarm and program buzzer semantics
@@ -627,8 +626,8 @@ The player reuses the normal GIF/TEXT render paths and Bulk CRC/flow-control imp
 ### Preset upload feedback
 Preset Bulk uploads reuse the Carousel transfer indicator. The UI is kept active across consecutive slot uploads and is ended by the `06/02` activation command. A 5 s idle timeout prevents an abandoned upload from leaving the indicator on-screen indefinitely. This is presentation-only and does not alter the pending/active Preset transaction model.
 
-## RC2 filesystem transactions and TEXT scratch RAM
+## Filesystem transactions and TEXT scratch RAM
 
-Preset / Default remains intentionally volatile. RC2 makes activation transactional only within the current boot/session: active files are moved to temporary `.bak` names, every pending replacement is promoted, and metadata is committed only after the full filesystem operation succeeds. On any intermediate failure the previous active bank is restored. At boot, Preset active/pending/cache/backup files are removed; no Preset journaling or cross-reboot recovery is performed.
+Preset / Default remains intentionally volatile. Activation is transactional only within the current boot/session: active files are moved to temporary `.bak` names, every pending replacement is promoted, and metadata is committed only after the full filesystem operation succeeds. On any intermediate failure the previous active bank is restored. At boot, Preset active/pending/cache/backup files are removed; no Preset journaling or cross-reboot recovery is performed.
 
-RC4 removes the former three permanent 4096-byte TEXT scratch areas. BulkTransfer now allocates exactly the declared TEXT payload size, up to 16654 bytes, only for the lifetime of the transfer/result and prefers PSRAM on ESP32 when available. Carousel and Preset allocate a temporary scratch buffer only while reading a stored TEXT object for playback, then free it immediately after `processTextPayload()`. This supports the complete 64-glyph 32x64 payload without permanently reserving roughly 50 KiB simply to raise all three old buffers to the new maximum.
+The 0.9.0 large-TEXT path removes the former three permanent 4096-byte TEXT scratch areas. BulkTransfer now allocates exactly the declared TEXT payload size, up to 16654 bytes, only for the lifetime of the transfer/result and prefers PSRAM on ESP32 when available. Carousel and Preset allocate a temporary scratch buffer only while reading a stored TEXT object for playback, then free it immediately after `processTextPayload()`. This supports the complete 64-glyph 32x64 payload without permanently reserving roughly 50 KiB simply to raise all three old buffers to the new maximum.

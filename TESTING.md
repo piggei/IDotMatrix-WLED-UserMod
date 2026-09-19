@@ -13,7 +13,7 @@ From the repository root:
 ./run_host_tests.sh
 ```
 
-The suite covers protocol framing and ACKs, BLE FA02 assembly, Bulk/multipart media, Alarm and Program/Schedule transactions, Carousel and Preset routing, clock/text/timer/scoreboard/audio rendering, GIF/media handling, WLED ownership, build-profile normalization, partition geometry and release-package consistency. RC4 adds an explicit 16654-byte Bulk regression plus stored Carousel/Preset playback tests for a complete 64-glyph 32x64 TEXT object.
+The suite covers protocol framing and ACKs, BLE FA02 assembly, Bulk/multipart media, Alarm and Program/Schedule transactions, Carousel and Preset routing, clock/text/timer/scoreboard/audio rendering, GIF/media handling, WLED ownership, build-profile normalization, partition geometry and release-package consistency. The suite includes an explicit 16654-byte Bulk regression plus stored Carousel/Preset playback tests for a complete 64-glyph 32x64 TEXT object.
 
 Where supported by the host compiler:
 
@@ -41,9 +41,9 @@ Validated on Adafruit MatrixPortal S3 + 64x64 HUB75 with WLED 0.17.0-devV5/nativ
 
 The previous ESP32-C3 long-running OFF investigation was closed: the captured WLED global OFF transitions were traced to an external Home Assistant light-group command, not to the iDotMatrix firmware.
 
-## Release-candidate hardware validation
+## Final 0.9.0 hardware qualification
 
-Before 0.9.0 final release, perform a full RC pass on the 64x64 target:
+The final 0.9.0 qualification uses the following hardware-validation checklist on the primary 64x64 target:
 
 1. verify all clock styles, including date mode and 12/24-hour handling;
 2. exercise font sizes, static text, paging and horizontal/vertical scrolling;
@@ -62,15 +62,15 @@ Before 0.9.0 final release, perform a full RC pass on the 64x64 target:
 
 A physical 32x32 panel is not a blocker for 0.9. The 32x32 logical path has been exercised through the 64x64 hardware/scaler and remains available for later physical validation.
 
-iOS work remains isolated on its dedicated branch and is not a 0.9 release blocker unless a new requirement makes it necessary.
+Additional iOS-specific work remains isolated on its dedicated branch and is deferred beyond 0.9.0 unless a new requirement makes it necessary.
 
 ## Build profiles
 
 `tests/test_platformio_profiles.py` statically checks the supported override/profile matrix and version contract during every host-test run. A successful compile proves build compatibility; physical validation remains target-specific.
 
 
-## RC2 filesystem failure-path qualification
+## Filesystem failure-path qualification
 
-RC2 adds host behavioral tests for Preset and Carousel LittleFS transactions. Preset activation is all-or-nothing within a running session and is tested for intermediate backup/promotion failures, write failure and CRC rejection. Preset remains intentionally volatile: `begin()`/reboot removes active, pending and backup files instead of recovering the previous session. Carousel tests cover manifest-save failure rollback and reporting. These host fault-injection tests complement, rather than replace, hardware LittleFS and soak testing.
+Host behavioral tests cover Preset and Carousel LittleFS transactions. Preset activation is all-or-nothing within a running session and is tested for intermediate backup/promotion failures, write failure and CRC rejection. Preset remains intentionally volatile: `begin()`/reboot removes active, pending and backup files instead of recovering the previous session. Carousel tests cover manifest-save failure rollback and reporting. These host fault-injection tests complement, rather than replace, hardware LittleFS and soak testing.
 
-RC5 adds a TEXT ownership regression: live TEXT must suspend active Preset/Carousel playback, while stored TEXT rendered by those players must not self-suspend. This specifically protects the app flow Preset -> Text where the previous Preset dwell timer could overwrite the newly selected text after about three seconds.
+The final regression suite includes a TEXT ownership test: live TEXT must suspend active Preset/Carousel playback, while stored TEXT rendered by those players must not self-suspend. This specifically protects the app flow Preset -> Text where the previous Preset dwell timer could overwrite the newly selected text after about three seconds.

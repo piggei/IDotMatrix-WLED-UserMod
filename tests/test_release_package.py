@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-candidate and critical-section regression checks for 0.9.0."""
+"""Final-release and critical-section regression checks for 0.9.0."""
 
 from __future__ import annotations
 
@@ -49,10 +49,11 @@ def check_release_surface() -> None:
         "run_host_sanitizers.sh",
     ]
     for name in required:
-        assert (ROOT / name).is_file(), f"missing development file: {name}"
+        assert (ROOT / name).is_file(), f"missing release file: {name}"
     assert not list(ROOT.glob("platformio_override.ini.c3-dev*"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.8.2-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-dev.*.md"))
+    assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
 
 
 def check_markdown_links() -> None:
@@ -74,6 +75,7 @@ def check_documentation_contract() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     profiles = (ROOT / "BUILD_PROFILES.md").read_text(encoding="utf-8")
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
 
     assert "4112 bytes of permanent" in architecture
     assert "8192" in architecture
@@ -91,7 +93,17 @@ def check_documentation_contract() -> None:
     assert "LZW10/default" not in protocol
 
     assert "0.9.0" in readme.lower()
-    assert "release candidate" in readme.lower()
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.0\n")
+    assert "current stable release" in readme.lower()
+    assert "release candidate" not in readme.lower()
+    assert "release candidate" not in architecture.lower()
+    assert "release candidate" not in protocol.lower()
+    assert "release candidate" not in testing.lower()
+    for current_doc in (readme, architecture, protocol, profiles, testing):
+        assert not re.search(r"\bRC[0-9]+\b", current_doc)
+        assert "0.9.0-rc." not in current_doc
+        assert "0.9.0-dev." not in current_doc
+    assert "stable Release 0.9.0" in protocol
     assert "release 0.8.2 remains the last stable pre-0.9 release" in readme.lower()
     assert "phone / ble" in readme.lower()
     assert "wled audioreactive" in readme.lower()
@@ -103,12 +115,15 @@ def check_documentation_contract() -> None:
     assert "terminates the active wled playlist" in readme.lower()
     assert "queued" in readme.lower() and "preset" in readme.lower()
     release_notes = (ROOT / "RELEASE_NOTES_0.8.2.md").read_text(encoding="utf-8")
-    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
     assert "carousel" in release_notes.lower()
     assert "reset" in release_notes.lower()
     assert "alarm" in release_notes.lower()
     assert "schedule" in release_notes.lower()
     assert "host" in testing.lower()
+    history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
+    assert "## 0.9.0\n" in history
+    assert "## 0.9.0-rc.5" in history and "live TEXT" in history
+    assert "## 0.9.0-rc.4" in history and "16654" in history
     assert "audioreactive" in architecture.lower()
     assert "device assets" in protocol.lower()
     assert "compatibility/security note" in protocol.lower()
@@ -118,7 +133,6 @@ def check_documentation_contract() -> None:
     assert "platformio_override.ini.c3-audio" in profiles
     assert "NimBLE-Arduino" not in library.get("dependencies", {})
     assert "h2zero/NimBLE-Arduino" not in library.get("dependencies", {})
-
 
 def check_idot_display_fallback() -> None:
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")

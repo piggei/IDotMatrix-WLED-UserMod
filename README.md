@@ -1,4 +1,4 @@
-# WLED iDotMatrix Usermod — 0.9.0 Release Candidate
+# WLED iDotMatrix Usermod — 0.9.0
 
 **Current release line: 0.9.0 / build 0.9.0.**
 
@@ -24,8 +24,7 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-**0.9.0** is the current release candidate. It is feature-complete for the
-planned 0.9 scope and is entering final hardware qualification. On the primary
+**0.9.0** is the current stable release. It completes the planned 0.9 scope for the qualified hardware targets. On the primary
 MatrixPortal S3 + 64x64 HUB75 target, the 16/32/64 logical profiles, native
 64x64 TEXT/font path, including the complete 64-glyph / 16654-byte 32x64 TEXT payload, GIF playback, persistent Carousel, Alarm, Program/Schedule,
 Preset / Default, audio visualizers, clocks, Countdown, Stopwatch and Scoreboard
@@ -39,8 +38,7 @@ visible lifetime.
 
 The former ESP32-C3 long-run OFF investigation was closed after the transition
 was traced to an external Home Assistant light-group command, not to the
-iDotMatrix firmware. Physical 32x32 validation and iOS work are explicitly
-deferred and are not release blockers for 0.9.
+iDotMatrix firmware. Physical 32x32 validation and additional iOS-specific work are explicitly deferred beyond 0.9.0.
 
 Release 0.8.2 remains the last stable pre-0.9 release for the qualified
 ESP32/ESP32-C3 16x16 hardware line.
@@ -49,7 +47,7 @@ ESP32/ESP32-C3 16x16 hardware line.
 
 The official app's **Preset / Default** page is implemented separately from Device Assets / Carousel. It uses protocol media slots `14..19` (maximum six entries), uploads objects through the existing Bulk transport, and activates the ordered list with command `06/02`. Uploading Preset media never changes the display by itself; the new playlist becomes active only when the activation command arrives.
 
-Preset media are deliberately volatile. They are stored in temporary LittleFS files, are not written to NVS, and are not restored at boot. A new Preset may be uploaded while an older Preset continues to play; the pending bank is promoted only on the next activation. RC2 makes this promotion transactional within the current session: a filesystem failure rolls the active bank back to its previous complete state. Transaction backup files are temporary and are deliberately removed at boot rather than recovered across reboot. Image/GIF entries use an approximately 3000 ms visible dwell, while TEXT uses the existing renderer timing so scrolling content can complete before the next entry.
+Preset media are deliberately volatile. They are stored in temporary LittleFS files, are not written to NVS, and are not restored at boot. A new Preset may be uploaded while an older Preset continues to play; the pending bank is promoted only on the next activation. Preset activation is transactional within the current session: a filesystem failure rolls the active bank back to its previous complete state. Transaction backup files are temporary and are deliberately removed at boot rather than recovered across reboot. Image/GIF entries use an approximately 3000 ms visible dwell, while TEXT uses the existing renderer timing so scrolling content can complete before the next entry.
 
 The new audio-source setting has three modes:
 
@@ -73,7 +71,7 @@ C3 build; it only adds `audioreactive` to `custom_usermods`.
 
 ### Large 64-pixel TEXT payloads
 
-The original 64x64 device can send up to 64 glyphs at the 32x64 font size. That is a 16654-byte TEXT object: a 14-byte global header plus 64 records of 260 bytes each. RC4 accepts that complete size end-to-end for live Bulk TEXT, Carousel and Preset playback. The large payload is not stored in a permanent 16 KiB array: temporary buffers are allocated only while receiving or replaying TEXT and prefer PSRAM on ESP32-S3 when available.
+The original 64x64 device can send up to 64 glyphs at the 32x64 font size. That is a 16654-byte TEXT object: a 14-byte global header plus 64 records of 260 bytes each. The 0.9.0 implementation accepts that complete size end-to-end for live Bulk TEXT, Carousel and Preset playback. The large payload is not stored in a permanent 16 KiB array: temporary buffers are allocated only while receiving or replaying TEXT and prefer PSRAM on ESP32-S3 when available.
 
 ### Persistent Device Assets / Carousel
 
@@ -316,7 +314,7 @@ These are retained compatibility/qualification baselines; they are not the prima
 
 ## Configuration options
 
-- `enabled`: enables the BLE emulator. Changing this setting after boot requires a reboot; RC2 deliberately does not implement a partial hot start/stop lifecycle;
+- `enabled`: enables the BLE emulator. Changing this setting after boot requires a reboot; the final 0.9.0 implementation deliberately does not implement a partial hot start/stop lifecycle;
 - `screenType`: logical profile (`16x16`, `32x32`, `64x64`);
 - `deviceName`: editable BLE-name suffix shown after the fixed `IDM-` prefix;
   when no name is saved, a stable six-digit default (`IDM-xxxxxx`) is derived
@@ -460,7 +458,7 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9 work;
-- [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — current release-candidate notes;
+- [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — current 0.9.0 release notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 
 Older release/development history is consolidated in `HISTORY.md`; this source

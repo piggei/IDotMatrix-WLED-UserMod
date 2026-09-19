@@ -1,6 +1,6 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by stable Release 0.8.2. The
+This document describes the protocol subset implemented by stable Release 0.9.0. The
 BLE wire protocol is carried forward unchanged from the stable 0.8.1
 WLED iDotMatrix Usermod. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
@@ -29,10 +29,10 @@ Manufacturer data: `54 52 00 70 SCREEN_TYPE`.
 ### Compatibility/security note
 
 The observed original-device profile uses writable GATT characteristics without
-pairing or application authentication, and 0.8.2 compatibility mode preserves
+pairing or application authentication, and the compatibility mode preserves
 that behaviour. Nearby BLE peers may therefore issue supported commands. CRC32
 checks media integrity only; it is not an authentication mechanism. Mandatory
-pairing/encryption is intentionally not added in 0.8.2 because that would change
+pairing/encryption is intentionally not added because that would change
 the captured wire/client contract.
 
 | Screen type | Logical resolution |
@@ -43,7 +43,7 @@ the captured wire/client contract.
 
 ## Framing and ACK
 
-FA02 normal commands start with a 16-bit little-endian total length. 0.8.2 queues
+FA02 normal commands start with a 16-bit little-endian total length. The implementation queues
 each complete ATT write unchanged from the NimBLE callback, then performs all
 FA02 reassembly and protocol dispatch in the normal WLED loop. Logical packets
 may span multiple ATT writes; one ATT write may also finish one packet and begin
@@ -67,7 +67,7 @@ Request: `04 00 01 80`
 16x16 response: `09 00 01 80 00 09 01 01 00`
 
 Offsets 4 and 5 expose the public Usermod release major/minor to the official app.
-For release `0.8.2` they are `00 08`; the internal build identifier is never encoded
+For the legacy 0.8.x device identity they are `00 08`; the internal build identifier is never encoded
 in this response. Offset 7 becomes `03` or `04` for the other profiles. The final
 byte remains the confirmed fixed `00`. Encoding WLED power there did not change the app switch and
 was reverted.
@@ -360,8 +360,7 @@ reference also uses it after CRC or storage failure.
 
 **Channel correction from hardware testing:** BUILD 80 calls
 `processBulkPacket()` after reassembling FA02 writes. Its AE01 callback only
-logs received bytes. Version 0.6.3-dev.1 incorrectly assigned bulk to AE01 and
-therefore observed no chunks; 0.6.3-dev.2 follows the source implementation.
+logs received bytes. An early reverse-engineering build incorrectly assigned Bulk to AE01 and therefore observed no chunks; the current implementation follows the verified source behavior.
 
 One dedicated FA02 assembler provides **4112 bytes of permanent inline storage**
 for the observed 4096-byte payload chunk plus 16-byte header. The maximum logical
@@ -411,7 +410,7 @@ logical FA02 packet size**; 4112 bytes is only the permanent inline capacity.
 WLED integration writes chunks to an RX file and starts playback only after a
 valid completion and deferred RX-to-PLAY promotion.
 
-Release 0.8.2 accepts GIF dimensions up to both the active logical screen profile
+The current implementation accepts GIF dimensions up to both the active logical screen profile
 and the compiled decoder capability. The supported 16x16 classic/C3 profiles
 compile `IDOT_GIF_LZW12` but set `IDOT_SCREEN_MAX_DIM=16`, so only 16x16 is
 advertised/accepted there while the complete legal 4096-code LZW12 space remains
@@ -533,7 +532,7 @@ Device-level display policy is intentionally not duplicated by the emulator.
 
 ### Timer rendering note
 
-The countdown (`08 80`) and stopwatch (`09 80`) wire formats are unchanged. The renderer uses millisecond state only for the original-device animation phase; dev.27 replaces the legacy BUILD80 shared timer icon with separate reconstructed countdown/hourglass and stopwatch artwork. This is a rendering change only, not a protocol change.
+The countdown (`08 80`) and stopwatch (`09 80`) wire formats are unchanged. The renderer uses millisecond state only for the original-device animation phase; the current renderer uses separate reconstructed countdown/hourglass and stopwatch artwork instead of the legacy shared timer icon. This is a rendering change only, not a protocol change.
 
 
 ## Alarm / Program multipart media
@@ -596,7 +595,7 @@ The Usermod supports persistent GIF (`type=0x01`) and TEXT (`type=0x03`) slots, 
 
 ### Carousel activation
 
-The first dev.4 hardware test showed that the official app can complete a
+Hardware testing showed that the official app can complete a
 Device Assets page upload without sending a separate reliable "enter Carousel"
 command. Therefore the Usermod treats successful persistent slot transfers as
 the authoritative signal: after a short quiet period following the last slot,

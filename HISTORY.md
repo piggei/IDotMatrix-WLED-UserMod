@@ -5,6 +5,13 @@
 
 ## 0.9.0-rc.5 - 2026-09-18
 
+- Fix display ownership when live TEXT takes over from an active Preset or Carousel.
+- Live TEXT now suspends autonomous Preset/Carousel playback so an old dwell timer cannot overwrite the newly selected text.
+- Stored TEXT rendered internally by Preset/Carousel does not self-suspend its owning player.
+- Add ownership regressions for both live TEXT takeover and stored TEXT playback.
+
+## 0.9.0-rc.4 - 2026-09-18
+
 - Raise the TEXT transport limit from 4096 to 16654 bytes, matching the original-device maximum of 14-byte header + 64 x 260-byte 32x64 glyph records.
 - Replace the permanent Bulk TEXT array with temporary dynamic allocation that prefers PSRAM on ESP32-S3 and falls back to internal heap.
 - Allow Carousel and Preset to replay stored TEXT objects up to the same 16654-byte limit using temporary playback scratch buffers.
