@@ -1,15 +1,15 @@
-# WLED iDotMatrix Usermod — 0.9.0
+# WLED iDotMatrix Usermod — 0.9.1 development
 
-**Current release line: 0.9.0 / build 0.9.0.**
+**Release: 0.9.1 / build: 0.9.1-rc.1.**  
+**Previous stable release: 0.9.0.**
 
 The 0.9 line brings the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
 native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
-path from 0.8.2. The primary 0.9 target is an Adafruit MatrixPortal ESP32-S3
-driving a 64x64 HUB75 panel on the qualified WLED 0.17.0-devV5 baseline
+path. The primary 64x64 target is an Adafruit MatrixPortal ESP32-S3 driving a
+64x64 HUB75 panel on the qualified WLED 0.17.0-devV5 baseline
 `06ae26db67107cb3f6a3d107a92340035991a063`.
 
-For the 64x64 reference build use
-`platformio_override.ini.matrixportal-s3-hub75`.
+For the 64x64 reference build use `overrides/matrixportal-s3-hub75.ini`.
 
 WLED remains the owner of LED output, effects, 2D mapping, presets, playlists,
 brightness, HTTP/JSON APIs, Home Assistant and network realtime protocols. The
@@ -24,24 +24,31 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-**0.9.0** is the current stable release. It completes the planned 0.9 scope for the qualified hardware targets. On the primary
-MatrixPortal S3 + 64x64 HUB75 target, the 16/32/64 logical profiles, native
-64x64 TEXT/font path, including the complete 64-glyph / 16654-byte 32x64 TEXT payload, GIF playback, persistent Carousel, Alarm, Program/Schedule,
-Preset / Default, audio visualizers, clocks, Countdown, Stopwatch and Scoreboard
-have all been exercised on hardware.
+`0.9.1-rc.1` keeps the validated Graffiti multipart and C3 OTA work from
+dev.1/dev.2 and adds one narrowly scoped 64x64 clock-layout correction: in clock
+styles 0 and 3, the blinking separator and complete minute field move two physical
+LEDs to the right while the hour field and DD/MM row remain unchanged.
 
-Alarm and Program/Schedule support repeated-header multi-packet media with
-complete-object CRC validation and the observed Schedule `0x01`/`0x03` flow
-control. Carousel remains a persistent 12-slot bank; Preset / Default is a
-separate volatile six-slot bank. Upload indicators are indeterminate for their
-visible lifetime.
+The current 0.9.1 development line therefore includes:
 
-The former ESP32-C3 long-run OFF investigation was closed after the transition
-was traced to an external Home Assistant light-group command, not to the
-iDotMatrix firmware. Physical 32x32 validation and additional iOS-specific work are explicitly deferred beyond 0.9.0.
+- support for the original-app **Graffiti full-raster multipart transport**,
+  including the captured 64x64 `4096 + 4096 + 4096 = 12288` byte RGB upload;
+- a hardware-validated **ESP32-C3 4 MB AudioReactive + OTA** profile with dual
+  `0x1A0000` application slots and 640 KiB LittleFS;
+- repository housekeeping: PlatformIO templates are under `overrides/` and custom
+  partition tables are under `partitions/`.
 
-Release 0.8.2 remains the last stable pre-0.9 release for the qualified
-ESP32/ESP32-C3 16x16 hardware line.
+The previous stable 0.9.0 MatrixPortal qualification remains unchanged: logical
+16/32/64 profiles, native 64x64 TEXT/font path up to the 16654-byte 32x64 TEXT
+payload, GIF playback, persistent Carousel, Alarm, Program/Schedule, Preset /
+Default, audio visualizers, clocks, Countdown, Stopwatch and Scoreboard were all
+exercised on hardware.
+
+The Graffiti multipart implementation follows the original Bluetooth capture and
+the validated standalone emulator B171. WLED host regressions cover the exact
+three-packet 64x64 sequence, and the same path is now hardware-validated with the
+official app on the physical 64x64 target using several complex photographic
+images.
 
 ## Preset / Default
 
@@ -62,8 +69,8 @@ It consumes the data already exported by WLED AudioReactive. Its 16 GEQ bins are
 reduced to the eight legacy iDotMatrix bands by averaging adjacent bin pairs,
 then mapping the 0..255 values to the renderer's 0..12 range.
 
-A dedicated C3 AudioReactive profile is supplied as `platformio_override.ini.c3-audio`.
-The normal `platformio_override.ini.c3` remains iDotMatrix-only so users who do
+A dedicated C3 AudioReactive profile is supplied as `overrides/esp32c3-16x16-audio.ini`.
+The normal `overrides/esp32c3-16x16.ini` remains iDotMatrix-only so users who do
 not need local audio keep the lower RAM footprint. The C3 audio profile uses the
 same pinned WLED IDF5/shared-RMT base and NimBLE 2.5.1 as the validated 0.8.1
 C3 build; it only adds `audioreactive` to `custom_usermods`.
@@ -71,7 +78,7 @@ C3 build; it only adds `audioreactive` to `custom_usermods`.
 
 ### Large 64-pixel TEXT payloads
 
-The original 64x64 device can send up to 64 glyphs at the 32x64 font size. That is a 16654-byte TEXT object: a 14-byte global header plus 64 records of 260 bytes each. The 0.9.0 implementation accepts that complete size end-to-end for live Bulk TEXT, Carousel and Preset playback. The large payload is not stored in a permanent 16 KiB array: temporary buffers are allocated only while receiving or replaying TEXT and prefer PSRAM on ESP32-S3 when available.
+The original 64x64 device can send up to 64 glyphs at the 32x64 font size. That is a 16654-byte TEXT object: a 14-byte global header plus 64 records of 260 bytes each. The 0.9 implementation accepts that complete size end-to-end for live Bulk TEXT, Carousel and Preset playback. The large payload is not stored in a permanent 16 KiB array: temporary buffers are allocated only while receiving or replaying TEXT and prefer PSRAM on ESP32-S3 when available.
 
 ### Persistent Device Assets / Carousel
 
@@ -121,12 +128,13 @@ firmware. The settings page never offers a profile larger than that capacity:
 
 | Override / decoder | Available `ScreenType` values | `Rescale` |
 |---|---|---|
-| `platformio_override.ini.example` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
-| `platformio_override.ini.c3` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
-| `platformio_override.ini.c3-audio` / same media profile + AudioReactive | 16x16 | hidden and forced off |
-| `platformio_override.ini.32x32` / LZW11 | 16x16, 32x32 | available for tests |
+| `overrides/16x16.ini` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
+| `overrides/esp32c3-16x16.ini` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
+| `overrides/esp32c3-16x16-audio.ini` / same media profile + AudioReactive | 16x16 | hidden and forced off |
+| `overrides/esp32c3-16x16-audio-ota.ini` / AudioReactive + dual-slot OTA | 16x16 | hidden and forced off |
+| `overrides/32x32.ini` / LZW11 | 16x16, 32x32 | available for tests |
 | `.64x64` or `.64x64-lite` / LZW12 | 16x16, 32x32, 64x64 | available for tests |
-| `platformio_override.ini.matrixportal-s3-hub75` / LZW12 + PSRAM | 16x16, 32x32, 64x64 | automatic physical-output scaling; primary 0.9 target |
+| `overrides/matrixportal-s3-hub75.ini` / LZW12 + PSRAM | 16x16, 32x32, 64x64 | automatic physical-output scaling; primary 0.9 target |
 
 On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile and may differ from the physical WLED matrix. Output scaling is automatic in both directions for 16x16, 32x32 and 64x64 logical/physical combinations. `Rescale` is retained for backward compatibility with the older low-memory 0.8.x storage path, not as a requirement for 0.9 output scaling.
 
@@ -145,7 +153,7 @@ On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile an
 | Scoreboard | FA02 `0A 80` | two original-device 3-digit score rows under `iDotMatrix` | Hardware-validated |
 | Alarms | FA02 `00 80` | persistent time/day/media trigger under `iDotMatrix` | Implemented and hardware-tested with the official app |
 | Programs / schedules | FA02 `07 80` + `05 80` | persistent weekday/time-window GIF/PNG/TEXT activities | Implemented and hardware-tested; finite activation sound |
-| DIY/Graffiti | FA02 | `iDotMatrix` | Verified on 16x16; larger logical coordinates supported |
+| DIY/Graffiti | FA02 pixel updates + type-0 multipart raster | `iDotMatrix` | Pixel mode verified; 64x64 multipart full-raster path hardware-validated with the official app and complex photographic images |
 | Clock | FA02 | `iDotMatrix`, WLED local time | Verified on 16x16, 32x32 and 64->16 rescale |
 | Text | bulk type `0x03` | app bitmaps rendered by `iDotMatrix` | Verified at matching logical/physical resolution; non-scrolling effects use multi-row pages (64x64: 1x64 / 2x32 / 4x16, 32x32: 1x32 / 2x16, 16x16: 1x16) |
 | RAW/cloud image | bulk type `0x02` | atomic/downscaled RGB framebuffer | Verified on 16x16 and 64->16 rescale |
@@ -176,9 +184,9 @@ rather than duplicated in the BLE emulator.
 - the exact WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a`;
 - 16x16 WLED 2D matrix; the release hardware test used GPIO4;
 - WLED IDF5 `WLED_USE_SHARED_RMT` backend;
-- NimBLE-Arduino 2.5.1 and AnimatedGIF 1.4.7 as pinned by `platformio_override.ini.c3`.
+- NimBLE-Arduino 2.5.1 and AnimatedGIF 1.4.7 as pinned by `overrides/esp32c3-16x16.ini`.
 
-The direct active-buzzer output was not part of the successful C3 hardware qualification. The tested 5 V active buzzer was too weak when driven directly from C3 GPIO; use an external transistor/MOSFET driver if that buzzer hardware is required. This does not affect matrix/BLE support.
+The optional active-buzzer path is independent of the matrix/BLE/OTA qualification. Use an appropriate external driver when the selected buzzer cannot be driven safely or loudly enough from a 3.3 V GPIO.
 
 PSRAM is not required for either supported 16x16 target.
 
@@ -190,10 +198,11 @@ RMT safety block. On C3, legacy IDF4 RMT was experimentally shown to produce
 pixel spikes; the supported C3 profile is therefore compile-time guarded so it
 only builds on ESP-IDF 5 with `WLED_USE_SHARED_RMT` and NimBLE 2.x.
 
-All supplied release profiles use a single-application no-OTA partition layout
-and define `WLED_DISABLE_OTA`. Flash them by USB/serial. An official WLED OTA
-image does not contain this out-of-tree Usermod and would replace the customized
-firmware.
+Legacy classic/C3 profiles retain the single-application no-OTA layout. The
+MatrixPortal profile inherits upstream WLED OTA support. `overrides/esp32c3-16x16-audio-ota.ini`
+adds a separately validated 4 MB C3 OTA layout with two `0x1A0000` application
+slots, 640 KiB LittleFS and a 64 KiB coredump partition. OTA images must be built
+from this customized source tree so the out-of-tree iDotMatrix Usermod is retained.
 
 The Usermod forces Wi-Fi modem sleep on (`noWifiSleep = false`) while BLE is
 active because Wi-Fi/Bluetooth coexistence requires it on the supported ESP32
@@ -280,7 +289,7 @@ Prepare the exact qualified WLED base and copy the MatrixPortal override:
 git clone https://github.com/wled/WLED.git WLED
 cd WLED
 git checkout 06ae26db67107cb3f6a3d107a92340035991a063
-cp ../wled-usermod-idotmatrix/platformio_override.ini.matrixportal-s3-hub75 platformio_override.ini
+cp ../wled-usermod-idotmatrix/overrides/matrixportal-s3-hub75.ini platformio_override.ini
 ```
 
 Clean and build:
@@ -300,21 +309,38 @@ The MatrixPortal profile intentionally inherits the upstream WLED partition and 
 
 For first boot, configure the physical WLED matrix as 64x64 with the MatrixPortal/native HUB75 setup, configure Wi-Fi/timezone/NTP as desired, then leave the iDotMatrix logical profile at 64x64 for native operation. Logical 16x16 and 32x32 profiles are automatically upscaled to the physical 64x64 panel.
 
-Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.0`, `build=0.9.0`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
+Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.1`, `build=0.9.1-rc.1`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
 
 ### Legacy qualified profiles
 
 The source also retains the previously qualified pre-0.9 profiles:
 
-- classic ESP32 16x16: `platformio_override.ini.example` with WLED 16.0.1;
-- ESP32-C3 16x16: `platformio_override.ini.c3` with pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a`;
-- ESP32-C3 16x16 + AudioReactive: `platformio_override.ini.c3-audio` on the same pinned C3 base.
+- classic ESP32 16x16: `overrides/16x16.ini` with WLED 16.0.1;
+- ESP32-C3 16x16: `overrides/esp32c3-16x16.ini` with pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a`;
+- ESP32-C3 16x16 + AudioReactive: `overrides/esp32c3-16x16-audio.ini` on the same pinned C3 base.
+- ESP32-C3 16x16 + AudioReactive + OTA: `overrides/esp32c3-16x16-audio-ota.ini`; hardware-validated with three consecutive OTA cycles on a 4 MB C3.
 
 These are retained compatibility/qualification baselines; they are not the primary 0.9 release target. See [`BUILD_PROFILES.md`](BUILD_PROFILES.md) for their exact build commands and partition policy.
 
+
+### Validated ESP32-C3 4 MB OTA profile
+
+Use the pinned C3 WLED base `d55037f7510541eddc390c8f3d01afc5787aa44a` and copy the OTA override:
+
+```bash
+cp ../wled-usermod-idotmatrix/overrides/esp32c3-16x16-audio-ota.ini platformio_override.ini
+pio run -e esp32c3dev_idotmatrix_audio_16x16_ota -t clean
+pio run -e esp32c3dev_idotmatrix_audio_16x16_ota
+```
+
+The first installation of the dual-slot partition layout must be performed over
+USB/serial. Subsequent WLED updates can use the generated `firmware.bin` through
+the WLED OTA page. Hardware qualification completed three consecutive OTA cycles
+with Carousel, Preset and Schedule content already populated.
+
 ## Configuration options
 
-- `enabled`: enables the BLE emulator. Changing this setting after boot requires a reboot; the final 0.9.0 implementation deliberately does not implement a partial hot start/stop lifecycle;
+- `enabled`: enables the BLE emulator. Changing this setting after boot requires a reboot; the 0.9 implementation deliberately does not implement a partial hot start/stop lifecycle;
 - `screenType`: logical profile (`16x16`, `32x32`, `64x64`);
 - `deviceName`: editable BLE-name suffix shown after the fixed `IDM-` prefix;
   when no name is saved, a stable six-digit default (`IDM-xxxxxx`) is derived
@@ -336,8 +362,8 @@ BLE connected
 profile=64x64
 canvas=16x16
 name=IDM-123456
-release=0.9.0
-build=0.9.0
+release=0.9.1
+build=0.9.1-rc.1
 audioSource=phone active=phone
 audioReactive=absent
 gifDecoder=compact12/cache
@@ -360,8 +386,8 @@ RMT+BLE=ESP32-C3 shared-RMT
 framework=WLED IDF5/shared-RMT
 wledBase=d55037f
 nimble=2.x API
-release=0.9.0
-build=0.9.0
+release=0.9.1
+build=0.9.1-rc.1
 audioSource=phone active=phone
 audioReactive=absent
 ```
@@ -378,6 +404,20 @@ effect id, speed, and palette size. Other media errors include `gif-invalid`, `g
 `gif-decoder-open`, `gif-canvas-oom`, `gif-cache-io`, and `gif-cache-full`.
 
 ## Behavior and limitations
+
+
+### Graffiti full-raster multipart uploads
+
+The original 64x64 app does not send a large Graffiti canvas as one oversized
+PNG. It sends a dedicated type-0 raw-RGB object in multiple complete FA02 logical
+packets. Each packet repeats a 9-byte header; marker `0x00` starts the object and
+`0x02` continues it. The declared size is the complete raster size, not the current
+chunk size. For 64x64 the captured sequence is three 4096-byte RGB chunks. WLED
+ACKs `05 00 00 00 02` while incomplete and `05 00 00 00 01` on completion.
+See `PROTOCOL.md` for the exact format and its distinction from compact PNG and
+generic Bulk RAW. The multipart path is hardware-validated on the physical
+64x64 MatrixPortal/HUB75 target with several complex photographs sent from
+the official app.
 
 ### Brightness direction
 
@@ -446,8 +486,8 @@ The PSRAM/direct backend, native physical 64x64 output and WLED native HUB75 DMA
 - `IDotMatrixAudioSource.*` — Phone/BLE vs WLED AudioReactive source selection and band mapping;
 - `IDotMatrixBuzzer.*` — non-blocking active-buzzer pattern engine;
 - `patch_animatedgif_profiles.py` — selects 10/11/12-bit AnimatedGIF build profile;
-- `WLED_ESP32_*MB_IDOT_NO_OTA.csv` — 4/8/16/32 MB single-app partition tables;
-- `platformio_override.ini.*` — media profiles and WLED hardware-target wrappers;
+- `partitions/` — custom no-OTA tables plus the validated 4 MB dual-slot OTA table;
+- `overrides/` — PlatformIO media/hardware target templates;
 - `tests/` — host regression tests and compact-GIF fixtures.
 
 Further documentation:
@@ -458,7 +498,8 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9 work;
-- [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — current 0.9.0 release notes;
+- [`RELEASE_NOTES_0.9.1-rc.1.md`](RELEASE_NOTES_0.9.1-rc.1.md) — current release-candidate notes;
+- [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 
 Older release/development history is consolidated in `HISTORY.md`; this source

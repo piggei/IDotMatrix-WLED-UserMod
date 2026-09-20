@@ -12,11 +12,16 @@
 IDotMatrixProtocol::~IDotMatrixProtocol() {
   resetMultipart(alarmTransfer_);
   resetMultipart(programTransfer_);
+  cancelGraffitiRaster();
 }
 
 void IDotMatrixProtocol::loop(uint32_t now) {
   nowMs_ = now;
   expireMultipartTransfers(now);
+  if (graffitiRaster_.active && graffitiRaster_.lastRxMs != 0 &&
+      uint32_t(now - graffitiRaster_.lastRxMs) > GRAFFITI_RASTER_TIMEOUT_MS) {
+    cancelGraffitiRaster();
+  }
 }
 
 void* IDotMatrixProtocol::allocateMultipart(size_t size) {
@@ -108,6 +113,11 @@ void IDotMatrixProtocol::setScreenType(uint8_t screenType) {
     : 0x01;
 }
 
+size_t IDotMatrixProtocol::expectedGraffitiRasterBytes() const {
+  const size_t side = screenType_ == 0x04 ? 64u : (screenType_ == 0x03 ? 32u : 16u);
+  return side * side * 3u;
+}
+
 void IDotMatrixProtocol::setDeviceReleaseVersion(uint8_t major, uint8_t minor) {
   releaseMajor_ = major;
   releaseMinor_ = minor;
@@ -169,6 +179,7 @@ bool IDotMatrixProtocol::processFA02(
   if (length == 4 && command == 0x03 && subcommand == 0x80) {
     resetMultipart(alarmTransfer_);
     resetMultipart(programTransfer_);
+    cancelGraffitiRaster();
     if (carouselEvents_ != nullptr) carouselEvents_->onCarouselReset();
     if (presetEvents_ != nullptr) presetEvents_->onPresetReset();
     if (automationEvents_ != nullptr) automationEvents_->onAutomationReset();
@@ -687,6 +698,77 @@ bool IDotMatrixProtocol::completeRawImage(bool crcValid) {
   return events_.onRawImageComplete(crcValid);
 }
 
+void IDotMatrixProtocol::cancelGraffitiRaster() {
+  if (graffitiRaster_.sinkReady) events_.onGraffitiRasterComplete(false);
+  graffitiRaster_ = GraffitiRasterTransfer{};
+}
+
+bool IDotMatrixProtocol::processGraffitiRaster(
+  const uint8_t* data,
+  size_t length,
+  IDotMatrixReply& reply
+) {
+  reply.length = 0;
+  if (!hasValidLength(data, length) || length < 9 || data[2] != 0x00 ||
+      data[3] != 0x00 || (data[4] != 0x00 && data[4] != 0x02)) {
+    return false;
+  }
+
+  const uint8_t marker = data[4];
+  const size_t total = readLE32(data + 5);
+  const size_t expected = expectedGraffitiRasterBytes();
+  if (total != expected) return false;
+
+  const uint8_t* payload = data + 9;
+  const size_t payloadLength = length - 9;
+
+  if (marker == 0x00) {
+    cancelGraffitiRaster();
+    if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
+    if (presetEvents_ != nullptr) presetEvents_->onPresetSuspend();
+
+    graffitiRaster_.active = true;
+    graffitiRaster_.expected = total;
+    graffitiRaster_.received = 0;
+    graffitiRaster_.lastRxMs = nowMs_;
+    graffitiRaster_.sinkReady = events_.onGraffitiRasterBegin(total);
+    if (!graffitiRaster_.sinkReady) {
+      graffitiRaster_ = GraffitiRasterTransfer{};
+      return true;
+    }
+  } else if (!graffitiRaster_.active || !graffitiRaster_.sinkReady ||
+             graffitiRaster_.expected != total) {
+    return true;
+  }
+
+  if (payloadLength > graffitiRaster_.expected - graffitiRaster_.received) {
+    cancelGraffitiRaster();
+    return true;
+  }
+
+  if (payloadLength > 0 && !events_.onGraffitiRasterData(
+        graffitiRaster_.received, payload, payloadLength)) {
+    cancelGraffitiRaster();
+    return true;
+  }
+
+  graffitiRaster_.received += payloadLength;
+  graffitiRaster_.lastRxMs = nowMs_;
+
+  uint8_t status = 0x02;
+  if (graffitiRaster_.received == graffitiRaster_.expected) {
+    const bool accepted = events_.onGraffitiRasterComplete(true);
+    graffitiRaster_ = GraffitiRasterTransfer{};
+    if (!accepted) return true;
+    status = 0x01;
+  }
+
+  const uint8_t response[] = {0x05, 0x00, 0x00, 0x00, status};
+  memcpy(reply.data, response, sizeof(response));
+  reply.length = sizeof(response);
+  return true;
+}
+
 bool IDotMatrixProtocol::processInlinePng(
   const uint8_t* data,
   size_t length,
@@ -702,8 +784,9 @@ bool IDotMatrixProtocol::processInlinePng(
   if (payloadLength != length - 9 || memcmp(data + 9, signature, sizeof(signature)) != 0) {
     return false;
   }
+  cancelGraffitiRaster();
   if (carouselEvents_ != nullptr) carouselEvents_->onCarouselSuspend();
-    if (presetEvents_ != nullptr) presetEvents_->onPresetSuspend();
+  if (presetEvents_ != nullptr) presetEvents_->onPresetSuspend();
   events_.onPngImage(data + 9, payloadLength);
   const uint8_t response[] = {0x05, 0x00, 0x00, 0x00, 0x03};
   memcpy(reply.data, response, sizeof(response));

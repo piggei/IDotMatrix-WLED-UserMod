@@ -33,6 +33,13 @@ public:
     const uint8_t* coordinates,
     size_t coordinateBytes
   ) override;
+  bool onGraffitiRasterBegin(size_t byteLength) override;
+  bool onGraffitiRasterData(
+    size_t offset,
+    const uint8_t* data,
+    size_t length
+  ) override;
+  bool onGraffitiRasterComplete(bool valid) override;
   void onClock(const IDotMatrixClockSettings& settings) override;
   void onCountdown(const IDotMatrixCountdownSettings& settings) override;
   void onStopwatch(uint8_t mode) override;

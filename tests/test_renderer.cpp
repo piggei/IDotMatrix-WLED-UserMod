@@ -333,6 +333,14 @@ int main() {
   renderer.renderClock(12, 34, 17, 9, 0, true, true, 255, 255, 255, 100);
   expectPixel(renderer.pixel(10, 14), 255, 255, 255); // top-row hour digit, shifted +4 px in dev.30
   expectPixel(renderer.pixel(14, 39), 255, 255, 255); // lower-row day digit
+  // dev.4: HH:MM is restored to the pre-dev.3 layout. On the date row,
+  // only the slash and complete month field move two physical LEDs right.
+  expectPixel(renderer.pixel(30, 17), 255, 255, 255); // original time separator
+  expectPixel(renderer.pixel(36, 14), 255, 255, 255); // original minute tens
+  expectPixel(renderer.pixel(32, 39), 255, 255, 255); // shifted slash top
+  expectBlack(renderer.pixel(30, 39));                // old slash top
+  expectPixel(renderer.pixel(36, 39), 255, 255, 255); // shifted month tens
+  expectBlack(renderer.pixel(34, 39));                // old month start
   expectBlack(renderer.pixel(5, 20));                 // clear left margin
   expectBlack(renderer.pixel(58, 45));                // clear right margin
 
@@ -342,6 +350,12 @@ int main() {
   expectPixel(renderer.pixel(0, 0), 10, 20, 30);
   expectBlack(renderer.pixel(10, 14)); // top-row hour glyph on blue/selected background
   expectBlack(renderer.pixel(14, 39)); // lower-row day glyph
+  expectBlack(renderer.pixel(30, 17)); // original time separator on selected background
+  expectBlack(renderer.pixel(36, 14)); // original minute tens
+  expectBlack(renderer.pixel(32, 39)); // shifted slash top
+  expectPixel(renderer.pixel(30, 39), 10, 20, 30); // old slash top restored to background
+  expectBlack(renderer.pixel(36, 39)); // shifted month tens
+  expectPixel(renderer.pixel(34, 39), 10, 20, 30); // old month start restored to background
 
   // Style 2 gets the same half-legacy-pixel correction on 64x64: two LEDs
   // left, while the digits and racing-band artwork remain fixed.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static regression checks for the 0.8.2 stable build profiles."""
+"""Static regression checks for the current iDotMatrix build profiles."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ NIMBLE = "h2zero/NimBLE-Arduino@1.4.3"
 NIMBLE_V2 = "h2zero/NimBLE-Arduino@2.5.1"
 GIF = "bitbank2/AnimatedGIF@1.4.7"
 AUDIOREACTIVE = "audioreactive"
+ANIMARTRIX = "animartrix"
 
 NORMAL_TARGETS = {
     "esp32dev_idotmatrix": ("env:esp32dev", "esp32dev", "4MB"),
@@ -29,9 +30,9 @@ NORMAL_TARGETS = {
 STANDARD_16_TARGETS = dict(NORMAL_TARGETS)
 
 PROFILE_SUFFIX = {
-    "platformio_override.ini.example": "16x16",
-    "platformio_override.ini.32x32": "32x32",
-    "platformio_override.ini.64x64": "64x64",
+    "16x16.ini": "16x16",
+    "32x32.ini": "32x32",
+    "64x64.ini": "64x64",
 }
 
 HUB_TARGETS = {
@@ -58,7 +59,7 @@ def read_ini(name: str) -> configparser.RawConfigParser:
         inline_comment_prefixes=(";", "#"),
         empty_lines_in_values=True,
     )
-    path = ROOT / name
+    path = ROOT / "overrides" / name
     with path.open("r", encoding="utf-8") as handle:
         parser.read_file(handle)
     return parser
@@ -71,13 +72,13 @@ def value(parser: configparser.RawConfigParser, section: str, key: str) -> str:
 
 
 def partition_path(flash: str) -> str:
-    return f"../wled-usermod-idotmatrix/{PARTITIONS[flash][0]}"
+    return f"../wled-usermod-idotmatrix/partitions/{PARTITIONS[flash][0]}"
 
 
 def check_normal_profile(name: str, profile_define: str | None) -> None:
     parser = read_ini(name)
     suffix = PROFILE_SUFFIX[name]
-    targets = STANDARD_16_TARGETS if name == "platformio_override.ini.example" else NORMAL_TARGETS
+    targets = STANDARD_16_TARGETS if name == "16x16.ini" else NORMAL_TARGETS
     sections = {section for section in parser.sections() if section.startswith("env:")}
     expected = {f"env:{stem}_{suffix}" for stem in targets}
     assert sections == expected, f"{name}: unexpected environment set: {sections ^ expected}"
@@ -104,7 +105,7 @@ def check_normal_profile(name: str, profile_define: str | None) -> None:
         assert "-D WLED_DISABLE_OTA" in flags
         assert "IDOT_EXPERIMENTAL_C3_RMT_BLE" not in flags
         assert "IDOT_C3_WLED_IDF5" not in flags
-        if name == "platformio_override.ini.example":
+        if name == "16x16.ini":
             assert "-D IDOT_GIF_LZW12" in flags
             assert "-D IDOT_SCREEN_MAX_DIM=16" in flags
             assert "IDOT_GIF_LZW11" not in flags
@@ -126,7 +127,7 @@ def check_normal_profile(name: str, profile_define: str | None) -> None:
 
 
 def check_c3_profile() -> None:
-    parser = read_ini("platformio_override.ini.c3")
+    parser = read_ini("esp32c3-16x16.ini")
     section = "env:esp32c3dev_idotmatrix_16x16"
     sections = {name for name in parser.sections() if name.startswith("env:")}
     assert sections == {section}
@@ -158,7 +159,7 @@ def check_c3_profile() -> None:
 
 
 def check_c3_audio_profile() -> None:
-    parser = read_ini("platformio_override.ini.c3-audio")
+    parser = read_ini("esp32c3-16x16-audio.ini")
     section = "env:esp32c3dev_idotmatrix_audio_16x16"
     sections = {name for name in parser.sections() if name.startswith("env:")}
     assert sections == {section}
@@ -182,6 +183,35 @@ def check_c3_audio_profile() -> None:
     assert usermods == [AUDIOREACTIVE, USERMOD]
 
 
+def check_c3_audio_ota_profile() -> None:
+    parser = read_ini("esp32c3-16x16-audio-ota.ini")
+    section = "env:esp32c3dev_idotmatrix_audio_16x16_ota"
+    sections = {name for name in parser.sections() if name.startswith("env:")}
+    assert sections == {section}
+    assert value(parser, section, "extends") == "env:esp32c3dev"
+    assert not parser.has_option(section, "platform")
+    assert not parser.has_option(section, "platform_packages")
+    assert value(parser, section, "board_build.partitions") == (
+        "../wled-usermod-idotmatrix/partitions/WLED_ESP32_4MB_IDOT_OTA.csv"
+    )
+    assert value(parser, section, "board_build.filesystem") == "littlefs"
+
+    flags = value(parser, section, "build_flags")
+    assert "${env:esp32c3dev.build_flags}" in flags
+    assert "-D WLED_DISABLE_OTA" not in flags
+    assert "-D IDOT_C3_WLED_IDF5" in flags
+    assert "-D IDOT_GIF_LZW12" in flags
+    assert "-D IDOT_SCREEN_MAX_DIM=16" in flags
+    assert "WLED_DISABLE_ESPNOW" not in flags
+
+    deps = value(parser, section, "lib_deps")
+    assert "${env:esp32c3dev.lib_deps}" in deps
+    assert NIMBLE_V2 in deps and GIF in deps
+
+    usermods = [line.strip() for line in value(parser, section, "custom_usermods").splitlines() if line.strip()]
+    assert usermods == [AUDIOREACTIVE, ANIMARTRIX, "wled-usermod-idotmatrix = " + USERMOD]
+
+
 def check_nimble_api_bridge() -> None:
     header = (ROOT / "IDotMatrixBLEServer.h").read_text(encoding="utf-8")
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
@@ -198,18 +228,18 @@ def check_nimble_api_bridge() -> None:
     assert "advertising_ = advertising->start();" in source
     assert "ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
     assert "ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
-    assert 'IDOTMATRIX_RELEASE = "0.9.0"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.0"' in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.9.1"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.1-rc.1"' in usermod
     assert "RMT+BLE=ESP32-C3 shared-RMT" in usermod
     assert "UsermodManager::getUMData(&data, USERMOD_ID_AUDIOREACTIVE)" in usermod
 
     library = (ROOT / "library.json").read_text(encoding="utf-8")
-    assert '"version": "0.9.0"' in library
+    assert '"version": "0.9.1"' in library
     assert '"h2zero/NimBLE-Arduino"' not in library
     # NimBLE is target-dependent and pinned by each official PlatformIO profile.
 
 def check_lite_profile() -> None:
-    parser = read_ini("platformio_override.ini.64x64-lite")
+    parser = read_ini("64x64-lite.ini")
     lite_names = {"esp32dev_idotmatrix", "esp32dev_8M_idotmatrix", "esp32dev_16M_idotmatrix"}
     lite_targets = {key: target for key, target in NORMAL_TARGETS.items() if key in lite_names}
     sections = {section for section in parser.sections() if section.startswith("env:")}
@@ -243,7 +273,7 @@ def check_lite_profile() -> None:
 
 
 def check_hub75_profile() -> None:
-    parser = read_ini("platformio_override.ini.hub75")
+    parser = read_ini("hub75-legacy.ini")
     sections = {section for section in parser.sections() if section.startswith("env:")}
     expected = {f"env:{name}" for name in HUB_TARGETS}
     assert sections == expected, f"HUB75: unexpected environment set: {sections ^ expected}"
@@ -273,7 +303,7 @@ def check_hub75_profile() -> None:
 
 
 def check_matrixportal_s3_hub75_profile() -> None:
-    parser = read_ini("platformio_override.ini.matrixportal-s3-hub75")
+    parser = read_ini("matrixportal-s3-hub75.ini")
     section = "env:adafruit_matrixportal_esp32s3_idotmatrix_64x64"
     sections = {name for name in parser.sections() if name.startswith("env:")}
     assert sections == {section}
@@ -293,21 +323,22 @@ def check_matrixportal_s3_hub75_profile() -> None:
     assert GIF in deps
     usermods = value(parser, section, "custom_usermods")
     assert "${common.default_usermods}" in usermods
-    profile_text = (ROOT / "platformio_override.ini.matrixportal-s3-hub75").read_text(encoding="utf-8")
+    profile_text = (ROOT / "overrides" / "matrixportal-s3-hub75.ini").read_text(encoding="utf-8")
     assert "06ae26db67107cb3f6a3d107a92340035991a063" in profile_text
     assert USERMOD in usermods
 
 def check_profile_environment_isolation() -> None:
     """Every media profile gets its own PIOENV/build/libdeps namespace."""
     files = [
-        "platformio_override.ini.example",
-        "platformio_override.ini.32x32",
-        "platformio_override.ini.64x64",
-        "platformio_override.ini.64x64-lite",
-        "platformio_override.ini.hub75",
-        "platformio_override.ini.c3",
-        "platformio_override.ini.c3-audio",
-        "platformio_override.ini.matrixportal-s3-hub75",
+        "16x16.ini",
+        "32x32.ini",
+        "64x64.ini",
+        "64x64-lite.ini",
+        "hub75-legacy.ini",
+        "esp32c3-16x16.ini",
+        "esp32c3-16x16-audio.ini",
+        "esp32c3-16x16-audio-ota.ini",
+        "matrixportal-s3-hub75.ini",
     ]
     owners: dict[str, str] = {}
     for filename in files:
@@ -330,7 +361,7 @@ def parse_int(text: str) -> int:
 def check_partitions() -> None:
     for flash, (filename, flash_bytes, app_size, fs_offset, fs_size) in PARTITIONS.items():
         rows = []
-        with (ROOT / filename).open("r", encoding="utf-8", newline="") as handle:
+        with (ROOT / "partitions" / filename).open("r", encoding="utf-8", newline="") as handle:
             for row in csv.reader(line for line in handle if not line.lstrip().startswith("#")):
                 if not row or not any(cell.strip() for cell in row):
                     continue
@@ -353,15 +384,34 @@ def check_partitions() -> None:
         assert core_len == 0x10000, filename
         assert core_off + core_len == flash_bytes, filename
 
+    ota_file = ROOT / "partitions" / "WLED_ESP32_4MB_IDOT_OTA.csv"
+    rows = []
+    with ota_file.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.reader(line for line in handle if not line.lstrip().startswith("#")):
+            if row and any(cell.strip() for cell in row):
+                rows.append([cell.strip() for cell in row])
+    assert [row[0] for row in rows] == ["nvs", "otadata", "app0", "app1", "spiffs", "coredump"]
+    nvs, otadata, app0, app1, fs, core = rows
+    assert parse_int(nvs[3]) == 0x9000 and parse_int(nvs[4]) == 0x5000
+    assert parse_int(otadata[3]) == 0xE000 and parse_int(otadata[4]) == 0x2000
+    assert app0[1:3] == ["app", "ota_0"]
+    assert parse_int(app0[3]) == 0x10000 and parse_int(app0[4]) == 0x1A0000
+    assert app1[1:3] == ["app", "ota_1"]
+    assert parse_int(app1[3]) == 0x1B0000 and parse_int(app1[4]) == 0x1A0000
+    assert parse_int(fs[3]) == 0x350000 and parse_int(fs[4]) == 0x0A0000
+    assert parse_int(core[3]) == 0x3F0000 and parse_int(core[4]) == 0x010000
+    assert parse_int(core[3]) + parse_int(core[4]) == 4 * 1024 * 1024
+
 
 def main() -> None:
-    check_normal_profile("platformio_override.ini.example", "IDOT_GIF_LZW12")
-    check_normal_profile("platformio_override.ini.32x32", "IDOT_GIF_LZW11")
-    check_normal_profile("platformio_override.ini.64x64", "IDOT_GIF_LZW12")
+    check_normal_profile("16x16.ini", "IDOT_GIF_LZW12")
+    check_normal_profile("32x32.ini", "IDOT_GIF_LZW11")
+    check_normal_profile("64x64.ini", "IDOT_GIF_LZW12")
     check_lite_profile()
     check_hub75_profile()
     check_c3_profile()
     check_c3_audio_profile()
+    check_c3_audio_ota_profile()
     check_matrixportal_s3_hub75_profile()
     check_nimble_api_bridge()
     check_profile_environment_isolation()

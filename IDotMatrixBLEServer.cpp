@@ -353,12 +353,13 @@ void IDotMatrixBLEServer::processFA02Write(const uint8_t* data, size_t length) {
 void IDotMatrixBLEServer::abortTransfers() {
   bulkTransfer_.reset();
   bulkLastProgressAt_ = 0;
+  protocol_.cancelGraffitiRaster();
   if (carouselTransferReady_) protocol_.cancelCarouselAsset();
   if (presetTransferReady_) protocol_.cancelPresetAsset();
+  if (rawTransferReady_) protocol_.completeRawImage(false);
+  if (gifTransferReady_) protocol_.completeGif(false);
   carouselTransferReady_ = false;
   presetTransferReady_ = false;
-  protocol_.completeRawImage(false);
-  protocol_.completeGif(false);
   rawTransferReady_ = false;
   gifTransferReady_ = false;
 }
@@ -374,8 +375,18 @@ void IDotMatrixBLEServer::processFA02Complete(
   if (protocol_.processInlinePng(data, length, reply)) {
     return;
   }
+
+  // The official 64x64 app uses a second type-0 format for Graffiti full-raster
+  // uploads: a 9-byte header followed by up to 4096 RAW RGB bytes. It has its
+  // own 0x00/0x02 chunk marker and 0x02/0x01 ACK flow, so keep it isolated from
+  // both compact PNG and the normal 16-byte CRC Bulk state machine.
+  if (protocol_.processGraffitiRaster(data, length, reply)) {
+    return;
+  }
+
   IDotMatrixBulkResult bulkResult;
   if (bulkTransfer_.processPacket(data, length, bulkResult)) {
+    if (bulkResult.began) protocol_.cancelGraffitiRaster();
     if (bulkResult.began || bulkResult.chunkLength > 0) bulkLastProgressAt_ = millis();
     if (bulkResult.completed || bulkResult.aborted) bulkLastProgressAt_ = 0;
     const bool carouselAsset =
@@ -387,8 +398,8 @@ void IDotMatrixBLEServer::processFA02Complete(
     if (bulkResult.aborted) {
       if (carouselTransferReady_) protocol_.cancelCarouselAsset();
       if (presetTransferReady_) protocol_.cancelPresetAsset();
-      protocol_.completeRawImage(false);
-      protocol_.completeGif(false);
+      if (rawTransferReady_) protocol_.completeRawImage(false);
+      if (gifTransferReady_) protocol_.completeGif(false);
       rawTransferReady_ = false;
       gifTransferReady_ = false;
       carouselTransferReady_ = false;

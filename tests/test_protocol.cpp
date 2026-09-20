@@ -56,6 +56,31 @@ public:
     memcpy(graffitiCoordinates, coordinates, coordinateBytes);
   }
 
+  bool onGraffitiRasterBegin(size_t byteLength) override {
+    graffitiRasterBeginReceived = true;
+    graffitiRasterExpected = byteLength;
+    graffitiRasterBytes.assign(byteLength, 0);
+    graffitiRasterWritten = 0;
+    return graffitiRasterAccept;
+  }
+
+  bool onGraffitiRasterData(size_t offset, const uint8_t* data, size_t length) override {
+    graffitiRasterDataReceived = true;
+    if (!graffitiRasterAccept || data == nullptr ||
+        offset > graffitiRasterBytes.size() || length > graffitiRasterBytes.size() - offset) {
+      return false;
+    }
+    memcpy(graffitiRasterBytes.data() + offset, data, length);
+    graffitiRasterWritten += length;
+    return true;
+  }
+
+  bool onGraffitiRasterComplete(bool valid) override {
+    graffitiRasterCompleteReceived = true;
+    graffitiRasterValid = valid;
+    return graffitiRasterAccept && valid;
+  }
+
   void onClock(const IDotMatrixClockSettings& settings) override {
     clockEventReceived = true;
     clockSettings = settings;
@@ -171,6 +196,14 @@ public:
   uint8_t graffitiBlue = 0;
   uint8_t graffitiCoordinates[16]{};
   size_t graffitiCoordinateBytes = 0;
+  bool graffitiRasterAccept = true;
+  bool graffitiRasterBeginReceived = false;
+  bool graffitiRasterDataReceived = false;
+  bool graffitiRasterCompleteReceived = false;
+  bool graffitiRasterValid = false;
+  size_t graffitiRasterExpected = 0;
+  size_t graffitiRasterWritten = 0;
+  std::vector<uint8_t> graffitiRasterBytes{};
   bool clockEventReceived = false;
   IDotMatrixClockSettings clockSettings{};
   bool countdownEventReceived = false;
@@ -835,6 +868,73 @@ int main() {
   assert(events.rawExpectedBytes == sizeof(rawBytes));
   assert(events.rawOffset == 0 && events.rawLength == sizeof(rawBytes));
   assert(events.rawFirstByte == 1);
+
+  // 0.9.1-dev.1: original 64x64 Graffiti full-raster upload is a dedicated
+  // 9-byte type-0 multipart protocol, not compact PNG and not generic Bulk.
+  // The captured transfer is exactly three 4105-byte logical packets:
+  // 4096 + 4096 + 4096 RGB payload bytes for 64x64x3.
+  std::vector<uint8_t> graffitiRaster(64u * 64u * 3u);
+  for (size_t i = 0; i < graffitiRaster.size(); ++i) {
+    graffitiRaster[i] = uint8_t((i * 13u + 7u) & 0xFFu);
+  }
+  auto makeGraffitiChunk = [&](size_t offset, size_t chunkSize, uint8_t marker) {
+    std::vector<uint8_t> packet(9u + chunkSize, 0);
+    const uint16_t packetSize = uint16_t(packet.size());
+    packet[0] = uint8_t(packetSize);
+    packet[1] = uint8_t(packetSize >> 8);
+    packet[2] = 0x00;
+    packet[3] = 0x00;
+    packet[4] = marker;
+    const uint32_t total = uint32_t(graffitiRaster.size());
+    packet[5] = uint8_t(total);
+    packet[6] = uint8_t(total >> 8);
+    packet[7] = uint8_t(total >> 16);
+    packet[8] = uint8_t(total >> 24);
+    memcpy(packet.data() + 9, graffitiRaster.data() + offset, chunkSize);
+    return packet;
+  };
+
+  events.graffitiRasterBeginReceived = false;
+  events.graffitiRasterDataReceived = false;
+  events.graffitiRasterCompleteReceived = false;
+  events.graffitiRasterValid = false;
+  protocol.loop(10000);
+  const uint8_t graffitiContinueAck[] = {0x05, 0x00, 0x00, 0x00, 0x02};
+  const uint8_t graffitiCompleteAck[] = {0x05, 0x00, 0x00, 0x00, 0x01};
+  auto graffitiChunk1 = makeGraffitiChunk(0, 4096, 0x00);
+  auto graffitiChunk2 = makeGraffitiChunk(4096, 4096, 0x02);
+  auto graffitiChunk3 = makeGraffitiChunk(8192, 4096, 0x02);
+  assert(protocol.processGraffitiRaster(graffitiChunk1.data(), graffitiChunk1.size(), reply));
+  expectReply(reply, graffitiContinueAck, sizeof(graffitiContinueAck));
+  assert(events.graffitiRasterBeginReceived);
+  assert(events.graffitiRasterExpected == graffitiRaster.size());
+  assert(events.graffitiRasterWritten == 4096u);
+  assert(!events.graffitiRasterCompleteReceived);
+  assert(protocol.processGraffitiRaster(graffitiChunk2.data(), graffitiChunk2.size(), reply));
+  expectReply(reply, graffitiContinueAck, sizeof(graffitiContinueAck));
+  assert(events.graffitiRasterWritten == 8192u);
+  assert(protocol.processGraffitiRaster(graffitiChunk3.data(), graffitiChunk3.size(), reply));
+  expectReply(reply, graffitiCompleteAck, sizeof(graffitiCompleteAck));
+  assert(events.graffitiRasterCompleteReceived && events.graffitiRasterValid);
+  assert(events.graffitiRasterWritten == graffitiRaster.size());
+  assert(events.graffitiRasterBytes == graffitiRaster);
+
+  // Continuation without an active matching transaction is consumed but must
+  // not be acknowledged as successful or create a new sink.
+  events.graffitiRasterBeginReceived = false;
+  assert(protocol.processGraffitiRaster(graffitiChunk2.data(), graffitiChunk2.size(), reply));
+  assert(!reply.available());
+  assert(!events.graffitiRasterBeginReceived);
+
+  // A stalled transfer is cancelled after the same 5 s safety window used by
+  // other multipart paths. Cancellation reaches the sink with valid=false.
+  events.graffitiRasterCompleteReceived = false;
+  events.graffitiRasterValid = true;
+  protocol.loop(20000);
+  assert(protocol.processGraffitiRaster(graffitiChunk1.data(), graffitiChunk1.size(), reply));
+  expectReply(reply, graffitiContinueAck, sizeof(graffitiContinueAck));
+  protocol.loop(25001);
+  assert(events.graffitiRasterCompleteReceived && !events.graffitiRasterValid);
 
   uint8_t pngPacket[17] = {
     17, 0, 0, 0, 0, 8, 0, 0, 0,

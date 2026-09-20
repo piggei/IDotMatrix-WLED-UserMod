@@ -123,6 +123,13 @@ public:
     const uint8_t* coordinates,
     size_t coordinateBytes
   ) = 0;
+  virtual bool onGraffitiRasterBegin(size_t byteLength) = 0;
+  virtual bool onGraffitiRasterData(
+    size_t offset,
+    const uint8_t* data,
+    size_t length
+  ) = 0;
+  virtual bool onGraffitiRasterComplete(bool valid) = 0;
   virtual void onClock(const IDotMatrixClockSettings& settings) = 0;
   virtual void onCountdown(const IDotMatrixCountdownSettings& settings) = 0;
   virtual void onStopwatch(uint8_t mode) = 0;
@@ -227,6 +234,8 @@ public:
   bool writeRawImage(size_t offset, const uint8_t* data, size_t length);
   bool completeRawImage(bool crcValid);
   bool processInlinePng(const uint8_t* data, size_t length, IDotMatrixReply& reply);
+  bool processGraffitiRaster(const uint8_t* data, size_t length, IDotMatrixReply& reply);
+  void cancelGraffitiRaster();
   bool beginGif(size_t byteLength);
   bool writeGif(size_t offset, const uint8_t* data, size_t length);
   bool completeGif(bool crcValid);
@@ -251,6 +260,7 @@ private:
 
   static constexpr uint32_t AUTOMATION_TRANSFER_TIMEOUT_MS = 5000u;
   static constexpr size_t AUTOMATION_TRANSFER_MAX_BYTES = 512u * 1024u;
+  static constexpr uint32_t GRAFFITI_RASTER_TIMEOUT_MS = 5000u;
 
   struct MultipartTransfer {
     uint8_t* buffer = nullptr;
@@ -261,11 +271,20 @@ private:
     bool active = false;
   };
 
+  struct GraffitiRasterTransfer {
+    size_t expected = 0;
+    size_t received = 0;
+    uint32_t lastRxMs = 0;
+    bool active = false;
+    bool sinkReady = false;
+  };
+
   static void* allocateMultipart(size_t size);
   static void freeMultipart(void* memory);
   static void resetMultipart(MultipartTransfer& transfer);
   bool appendMultipart(MultipartTransfer& transfer, const uint8_t* data, size_t length, size_t expected, uint32_t crc);
   void expireMultipartTransfers(uint32_t now);
+  size_t expectedGraffitiRasterBytes() const;
   static bool sameAlarmTransfer(const IDotMatrixAlarmSettings& a, const IDotMatrixAlarmSettings& b);
   static bool sameProgramTransfer(const IDotMatrixScheduleActivitySettings& a, const IDotMatrixScheduleActivitySettings& b);
 
@@ -282,6 +301,7 @@ private:
 
   MultipartTransfer alarmTransfer_{};
   MultipartTransfer programTransfer_{};
+  GraffitiRasterTransfer graffitiRaster_{};
   IDotMatrixAlarmSettings alarmTransferSettings_{};
   IDotMatrixScheduleActivitySettings programTransferSettings_{};
   uint32_t nowMs_ = 0;

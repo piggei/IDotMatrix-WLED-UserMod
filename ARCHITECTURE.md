@@ -1,9 +1,6 @@
 # Architecture
 
-This document describes the architecture of the stable **0.9.0** release. It retains the qualified 0.8.2 ESP32/ESP32-C3 foundations and
-extends them with the ESP32-S3 / PSRAM / native WLED HUB75 path, universal
-16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and the
-volatile Preset / Default bank.
+This document describes iDotMatrix WLED Usermod **release 0.9.1 / build 0.9.1-rc.1**. It retains stable 0.9.0 as the previous release baseline and adds the original-app Graffiti full-raster multipart path, build-profile/partition housekeeping, and the native 64x64 clock styles 0/3 date-spacing correction that keeps HH:MM unchanged and moves the date slash and month two physical LEDs right. The qualified 0.8.2 ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain unchanged.
 
 ## Design goals
 
@@ -51,6 +48,17 @@ and exposes decoded chunk spans. TEXT supports the original-device maximum of 16
 Owns WLED-independent command validation, typed command decoding, TEXT record
 parsing, ACK generation, device-information replies, and the media-sink
 boundary. It is host-testable.
+
+### Graffiti full-raster transaction
+
+The original 64x64 app uses a dedicated type-`0x00` Graffiti raster transport that is deliberately **not** handled by `IDotMatrixBulkTransfer`. Each complete FA02 logical packet has a 9-byte header, marker `0x00` on the first packet or `0x02` on continuations, the complete raster byte count, and a raw RGB chunk. The captured 64x64 transfer carries `4096 + 4096 + 4096 = 12288` bytes.
+
+`IDotMatrixProtocol` owns the small transaction state (`expected`, `received`, timeout and sink state), while `IDotMatrixBLEServer` keeps this route between compact inline PNG detection and the generic 16-byte Bulk parser. The protocol does not allocate a second full raster buffer: chunks are streamed through `onGraffitiRasterBegin/Data/Complete()` into the renderer RAW staging sink. Incomplete accepted chunks return `05 00 00 00 02`; the completed raster returns `05 00 00 00 01`. Timeout, disconnect, reset, a replacement first marker, compact PNG, or a new incompatible Bulk transfer cancels the partial sink.
+
+This architecture preserves two independent fragmentation layers: ATT writes may first be reassembled into one FA02 packet by `IDotMatrixFA02Assembler`, then multiple complete Graffiti FA02 packets are accumulated into one raster object. The 8192-byte logical-packet ceiling therefore remains unchanged.
+
+The complete path is hardware-validated with the official app on the qualified
+64x64 MatrixPortal/HUB75 target using several complex photographic images.
 
 ### `IDotMatrixRenderer`
 
@@ -243,9 +251,9 @@ cache, or per-pixel persistent state.
 ### PlatformIO hardware targets and Usermod inheritance
 
 The PlatformIO layer is deliberately orthogonal to the media/protocol profile.
-`platformio_override.ini.example`, `.32x32`, and `.64x64` each expose the same
+`overrides/16x16.ini`, `.32x32`, and `.64x64` each expose the same
 classic-ESP32 and ESP32-S3 hardware target matrix while changing only the maximum
-iDotMatrix decoder profile. `platformio_override.ini.hub75` instead wraps WLED's
+iDotMatrix decoder profile. `overrides/hub75-legacy.ini` instead wraps WLED's
 board/pinout-specific HUB75 environments. See `BUILD_PROFILES.md` for the full
 matrix and validation status.
 
@@ -258,7 +266,7 @@ custom_usermods =
 ```
 
 They do not inherit `${env:<base>.custom_usermods}`. The explicit exception in
-0.8.2 is `platformio_override.ini.c3-audio`, which deliberately contains:
+0.8.2 is `overrides/esp32c3-16x16-audio.ini`, which deliberately contains:
 
 ```ini
 custom_usermods =
@@ -552,7 +560,7 @@ WLED 0.16.x requires a compile-time `PinOwner` enum value for true PinManager ow
 
 ## Countdown, stopwatch and scoreboard artwork
 
-The current implementation ports the reconstructed original-device B154 visuals without changing protocol state. Countdown uses a 7x10 hourglass with ten 200 ms frames, white minutes, gray seconds and red seconds during the final ten seconds; at `00:00` the last hourglass frame remains visible. Stopwatch uses an independent 7x9 face with orange button, gray/lilac case, white dial, red hand and orange seconds. Its eight hand positions advance every 100 ms from elapsed time, which naturally freezes the hand while paused. Scoreboard uses two 4x7 three-digit rows (`000..999`) with player A at the top in `#7858F8` and player B at the bottom in `#F82078`. All three are composed on the legacy 16x16 canvas and then use the normal logical/physical scaling path.
+The current implementation ports the reconstructed original-device B154 visuals without changing protocol state. Countdown uses a 7x10 hourglass with ten 200 ms frames, white minutes, orange seconds and red seconds during the final ten seconds; at `00:00` the last hourglass frame remains visible. Stopwatch uses an independent 7x9 face with orange button, gray/lilac case, white dial, red hand and orange seconds. Its eight hand positions advance every 100 ms from elapsed time, which naturally freezes the hand while paused. Scoreboard uses two 4x7 three-digit rows (`000..999`) with player A at the top in `#7858F8` and player B at the bottom in `#F82078`. All three are composed on the legacy 16x16 canvas and then use the normal logical/physical scaling path.
 
 
 ## Alarm and program buzzer semantics

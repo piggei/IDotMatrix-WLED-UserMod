@@ -1,8 +1,7 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by stable Release 0.9.0. The
-BLE wire protocol is carried forward unchanged from the stable 0.8.1
-WLED iDotMatrix Usermod. It includes the validated media/profile baseline, seven
+This document describes the protocol subset implemented by Release 0.9.1 / build 0.9.1-rc.1. Stable 0.9.0 remains the previous release baseline. The
+BLE wire protocol is carried forward from the stable 0.9.0 WLED iDotMatrix Usermod and extended only where new original-app traffic has been confirmed. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
 stopwatch, scoreboard, persistent alarms and programs/schedules, active-buzzer
 mapping, and five LEVEL plus five FFT Audio/Rhythm visualizers. The standalone
@@ -217,6 +216,73 @@ Complete short packets use the 64-byte queue. Larger logical FA02 packets are
 reassembled with 4112 bytes of permanent inline storage and temporary dynamic
 storage up to the 8192-byte logical-packet maximum before protocol dispatch.
 
+## Graffiti full-raster multipart transport
+
+**Confirmed original-app protocol:** Bluetooth capture from the 64x64 app and the
+standalone emulator B171 establish a second Graffiti path for publishing a full
+canvas. This format is distinct from both compact inline PNG and generic Bulk RAW.
+The WLED implementation of this path is also hardware-validated on the physical
+64x64 MatrixPortal/HUB75 target using the official app and several complex
+photographic images.
+
+Each Graffiti raster chunk is one complete FA02 logical packet with a 9-byte header:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 2 | logical packet length, little-endian |
+| 2 | 1 | content type `0x00` |
+| 3 | 1 | fixed `0x00` in the confirmed capture |
+| 4 | 1 | chunk marker: `0x00` first, `0x02` continuation |
+| 5 | 4 | complete raster size, little-endian |
+| 9 | remaining | raw row-major RGB bytes for this chunk |
+
+The declared size is the size of the **complete raster object**, repeated in every
+chunk. It is not the current chunk length. Expected complete sizes are:
+
+| Screen type | Resolution | Complete raster bytes |
+|---:|---:|---:|
+| `0x01` | 16x16 | 768 |
+| `0x03` | 32x32 | 3072 |
+| `0x04` | 64x64 | 12288 |
+
+The captured 64x64 transfer is exactly:
+
+```text
+packet 1: 9-byte header + 4096 RGB bytes, marker 00
+          -> FA03 05 00 00 00 02
+packet 2: 9-byte header + 4096 RGB bytes, marker 02
+          -> FA03 05 00 00 00 02
+packet 3: 9-byte header + 4096 RGB bytes, marker 02
+          -> FA03 05 00 00 00 01
+
+4096 + 4096 + 4096 = 12288 = 64 * 64 * 3
+```
+
+For this command family, status `0x02` means **accepted but incomplete** and
+status `0x01` is the final completion ACK. These values are command-specific and
+must not be confused with generic Bulk's `0x01` continue / `0x03` terminate rule.
+No CRC field is present in the confirmed 9-byte Graffiti raster header; completion
+is determined by the accumulated byte count reaching the declared full-raster size.
+
+There are two independent fragmentation layers:
+
+1. BLE ATT writes are reassembled into one complete FA02 logical packet by the
+   normal FA02 assembler (hard maximum 8192 bytes);
+2. multiple complete Graffiti FA02 packets are then accumulated into one logical
+   raster object.
+
+Therefore the existing 8192-byte FA02 maximum does **not** need to increase: the
+confirmed logical packets are 4105 bytes each. The WLED implementation streams
+each RGB chunk directly into the renderer's raw-image staging sink instead of
+allocating another 12288-byte protocol buffer. The transfer is cancelled after a
+5-second inactivity timeout and on BLE disconnect, protocol reset, or replacement
+by an incompatible media transfer. A successful completion publishes the result
+as Graffiti/DIY display ownership.
+
+A continuation marker without an active matching transfer is consumed without a
+completion ACK. A new first marker starts a fresh transaction and discards any
+incomplete previous Graffiti raster.
+
 ## Clock
 
 **Confirmed protocol:**
@@ -255,7 +321,7 @@ ACK: `05 00 08 80 01`
 - `2`: pause, preserving the current remaining time;
 - `3`: resume the preserved remaining time when it is non-zero.
 
-The display uses the reconstructed original-device 16x16 artwork: a 7x10 animated hourglass on the left and stacked `MM` / `SS` digits on the right. Minutes are white, seconds are gray and turn red during the final ten seconds. The hourglass uses ten 200 ms frames and freezes on its final frame at `00:00`. Values above 99 minutes wrap visually modulo 100.
+The display uses the reconstructed original-device 16x16 artwork: a 7x10 animated hourglass on the left and stacked `MM` / `SS` digits on the right. Minutes are white, seconds are orange and turn red during the final ten seconds. The hourglass uses ten 200 ms frames and freezes on its final frame at `00:00`. Values above 99 minutes wrap visually modulo 100.
 
 When the countdown reaches zero the original device reports completion
 asynchronously on FA03:
@@ -376,7 +442,7 @@ The routed common types are `0x01` GIF, `0x02` RAW RGB, and `0x03` TEXT. Their
 ACK retains the type and uses `0x01` while incomplete and `0x03` when the
 transaction terminates.
 
-## Compact PNG envelope (experimental)
+## Compact PNG envelope (separate type-0 format)
 
 A physical app trace produced this 140-byte packet prefix:
 
@@ -397,11 +463,17 @@ Packet length 140, size 131, and the PNG signature at offset 9 imply:
 The current implementation replies `05 00 00 00 03`. No outer CRC was observed.
 The decoder validates the PNG structure required by its supported subset and
 validates/decompresses the embedded zlib payload; it is not a general-purpose PNG
-validator and does not claim full chunk-CRC validation. This layout is a new
-inference from the WLED trace, not yet a confirmed BUILD 80 or original-device
-fact. The decoder accepts non-interlaced 8-bit RGB/RGBA and exact logical-profile
-dimensions. The complete compact PNG envelope must fit the **8192-byte maximum
-logical FA02 packet size**; 4112 bytes is only the permanent inline capacity.
+validator and does not claim full chunk-CRC validation. The decoder accepts
+non-interlaced 8-bit RGB/RGBA and exact logical-profile dimensions. The complete
+compact PNG envelope must fit the **8192-byte maximum logical FA02 packet size**;
+4112 bytes is only the permanent inline capacity.
+
+This compact PNG envelope must not be confused with the confirmed Graffiti
+full-raster transport above. Both use type `0x00`, but compact PNG is a complete
+single logical packet whose declared size equals the bytes at offset 9 and whose
+payload begins with the PNG signature `89 50 4E 47`. Graffiti full-raster instead
+uses marker `0x00`/`0x02`, repeats the complete raw-RGB raster size, and may span
+multiple FA02 logical packets.
 
 ## GIF payload
 

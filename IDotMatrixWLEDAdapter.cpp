@@ -841,6 +841,45 @@ void IDotMatrixWLEDAdapter::onGraffitiPixels(
   activateDisplayEffect();
 }
 
+bool IDotMatrixWLEDAdapter::onGraffitiRasterBegin(size_t byteLength) {
+  return renderer_.beginRawImage(byteLength);
+}
+
+bool IDotMatrixWLEDAdapter::onGraffitiRasterData(
+  size_t offset,
+  const uint8_t* data,
+  size_t length
+) {
+  return renderer_.writeRawImage(offset, data, length);
+}
+
+bool IDotMatrixWLEDAdapter::onGraffitiRasterComplete(bool valid) {
+  if (!valid) {
+    renderer_.completeRawImage(false);
+    return false;
+  }
+  if (!renderer_.completeRawImage(true)) return false;
+
+  solidActive_ = false;
+  lightEffectActive_ = false;
+  audioActive_ = false;
+  diySessionActive_ = true;
+  clockActive_ = false;
+  countdownActive_ = false;
+  stopwatchActive_ = false;
+  scoreboardActive_ = false;
+  textActive_ = false;
+  rawImageActive_ = false;
+  gifActive_ = false;
+  gifPending_ = false;
+  gifPrecache_ = false;
+  gifStaging_ = false;
+  stopMediaPlayback();
+  renderer_.setVisible(true);
+  activateDisplayEffect();
+  return true;
+}
+
 void IDotMatrixWLEDAdapter::onClock(const IDotMatrixClockSettings& settings) {
   IDotMatrixClockSettings effectiveSettings = settings;
   const uint32_t now = millis();

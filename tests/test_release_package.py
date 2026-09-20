@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Final-release and critical-section regression checks for 0.9.0."""
+"""Release-candidate and critical-section regression checks for 0.9.1-rc.1."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.0"
+    assert library["version"] == "0.9.1"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
-    assert 'IDOTMATRIX_RELEASE = "0.9.0"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.0"' in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.9.1"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.1-rc.1"' in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
     assert '"iDotMatrix@;;;2"' in adapter
@@ -31,9 +31,14 @@ def check_versioning() -> None:
 
 def check_release_surface() -> None:
     required = [
-        "platformio_override.ini.c3",
-        "platformio_override.ini.c3-audio",
-        "platformio_override.ini.matrixportal-s3-hub75",
+        "overrides/esp32c3-16x16.ini",
+        "overrides/esp32c3-16x16-audio.ini",
+        "overrides/esp32c3-16x16-audio-ota.ini",
+        "overrides/matrixportal-s3-hub75.ini",
+        "partitions/WLED_ESP32_4MB_IDOT_NO_OTA.csv",
+        "partitions/WLED_ESP32_4MB_IDOT_OTA.csv",
+        "RELEASE_NOTES_0.9.1-rc.1.md",
+        "RELEASE_NOTES_0.9.1-dev.1.md",
         "RELEASE_NOTES_0.9.0.md",
         "RELEASE_NOTES_0.8.2.md",
         "IDotMatrixAudioSource.h",
@@ -50,11 +55,12 @@ def check_release_surface() -> None:
     ]
     for name in required:
         assert (ROOT / name).is_file(), f"missing release file: {name}"
-    assert not list(ROOT.glob("platformio_override.ini.c3-dev*"))
+    # Override/partition support files belong in dedicated directories from 0.9.1 onward.
+    assert not list(ROOT.glob("platformio_override.ini*"))
+    assert not list(ROOT.glob("WLED_ESP32_*_IDOT_*.csv"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.8.2-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-dev.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
-
 
 def check_markdown_links() -> None:
     for path in ROOT.glob("*.md"):
@@ -80,7 +86,6 @@ def check_documentation_contract() -> None:
     assert "4112 bytes of permanent" in architecture
     assert "8192" in architecture
     assert "supported 16x16 profiles compile `IDOT_GIF_LZW12`" in architecture
-    assert "default: 10-bit/16x16" not in architecture
     assert "do not inherit `${env:<base>.custom_usermods}`" in architecture
     assert "four 517-byte queue slots" in architecture
     assert "/idot_cache.new" in architecture
@@ -90,47 +95,50 @@ def check_documentation_contract() -> None:
     assert "16654 payload bytes" in protocol
     assert "application time synchronization is also retained and used as an offline fallback" in protocol
     assert "not a general-purpose PNG" in protocol
-    assert "LZW10/default" not in protocol
+    assert "Graffiti full-raster multipart transport" in protocol
+    assert "marker: `0x00` first, `0x02` continuation" in protocol
+    assert "05 00 00 00 02" in protocol and "05 00 00 00 01" in protocol
+    assert "4096 + 4096 + 4096 = 12288 = 64 * 64 * 3" in protocol
+    assert "No CRC field is present" in protocol
+    assert "two independent fragmentation layers" in protocol
+    assert "compact inline PNG" in protocol
 
-    assert "0.9.0" in readme.lower()
-    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.0\n")
-    assert "current stable release" in readme.lower()
-    assert "release candidate" not in readme.lower()
-    assert "release candidate" not in architecture.lower()
-    assert "release candidate" not in protocol.lower()
-    assert "release candidate" not in testing.lower()
-    for current_doc in (readme, architecture, protocol, profiles, testing):
-        assert not re.search(r"\bRC[0-9]+\b", current_doc)
-        assert "0.9.0-rc." not in current_doc
-        assert "0.9.0-dev." not in current_doc
-    assert "stable Release 0.9.0" in protocol
-    assert "release 0.8.2 remains the last stable pre-0.9 release" in readme.lower()
-    assert "phone / ble" in readme.lower()
-    assert "wled audioreactive" in readme.lower()
-    assert "platformio_override.ini.c3-audio" in readme
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.1 development\n")
+    assert "Release: 0.9.1 / build: 0.9.1-rc.1" in readme
+    assert "stable 0.9.0" in readme.lower()
+    assert "Graffiti full-raster multipart" in readme
+    assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
+    assert "partitions/" in readme
     assert "BLE compatibility/security" in readme
     assert "unauthenticated" in readme
     assert "per-slot frame cache" in readme
     assert "`idotmatrix` wled effect" in readme.lower()
-    assert "terminates the active wled playlist" in readme.lower()
-    assert "queued" in readme.lower() and "preset" in readme.lower()
-    release_notes = (ROOT / "RELEASE_NOTES_0.8.2.md").read_text(encoding="utf-8")
-    assert "carousel" in release_notes.lower()
-    assert "reset" in release_notes.lower()
-    assert "alarm" in release_notes.lower()
-    assert "schedule" in release_notes.lower()
+
+    release_notes = (ROOT / "RELEASE_NOTES_0.9.1-rc.1.md").read_text(encoding="utf-8")
+    assert "Graffiti" in release_notes
+    assert "0x00" in release_notes and "0x02" in release_notes
+    assert "OTA" in release_notes
+    assert "overrides/" in release_notes and "partitions/" in release_notes
+
     assert "host" in testing.lower()
+    assert "Graffiti full-raster validation" in testing
+    assert "three consecutive WLED OTA updates: PASS" in testing
+    assert "hardware-validated" in testing
+    assert "complex photographic images" in testing
     history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
+    assert history.startswith("## 0.9.1-rc.1")
+    assert "4096-byte RGB chunks" in history
     assert "## 0.9.0\n" in history
     assert "## 0.9.0-rc.5" in history and "live TEXT" in history
-    assert "## 0.9.0-rc.4" in history and "16654" in history
     assert "audioreactive" in architecture.lower()
     assert "device assets" in protocol.lower()
     assert "compatibility/security note" in protocol.lower()
     assert "complete ATT write" in protocol
     assert "timesign" in protocol.lower()
     assert "imageindex" in protocol.lower()
-    assert "platformio_override.ini.c3-audio" in profiles
+    assert "overrides/esp32c3-16x16-audio.ini" in profiles
+    assert "overrides/esp32c3-16x16-audio-ota.ini" in profiles
+    assert "partitions/WLED_ESP32_4MB_IDOT_OTA.csv" in profiles
     assert "NimBLE-Arduino" not in library.get("dependencies", {})
     assert "h2zero/NimBLE-Arduino" not in library.get("dependencies", {})
 
@@ -173,7 +181,7 @@ def check_device_reset_contract() -> None:
     assert 'schedulePrefs_->remove("flags")' in automation_cpp
     assert "Device reset (`03 80`)" in protocol_doc
     assert "not an ESP32/WLED reboot" in protocol_doc
-    assert (ROOT / "RELEASE_NOTES_0.9.0.md").is_file()
+    assert (ROOT / "RELEASE_NOTES_0.9.1-rc.1.md").is_file()
 
 def check_no_heap_free_inside_queue_spinlock() -> None:
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
@@ -251,12 +259,12 @@ def check_rc2_consolidation_contract() -> None:
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     preset = (ROOT / "IDotMatrixPreset.cpp").read_text(encoding="utf-8")
     carousel = (ROOT / "IDotMatrixCarousel.cpp").read_text(encoding="utf-8")
-    override = (ROOT / "platformio_override.ini.matrixportal-s3-hub75").read_text(encoding="utf-8")
+    override = (ROOT / "overrides/matrixportal-s3-hub75.ini").read_text(encoding="utf-8")
     sha = "06ae26db67107cb3f6a3d107a92340035991a063"
 
     assert sha in readme and sha in profiles and sha in override
     assert "adafruit_matrixportal_esp32s3_idotmatrix_64x64" in readme
-    assert "RELEASE_NOTES_0.9.0.md" in readme
+    assert "RELEASE_NOTES_0.9.1-rc.1.md" in readme
     assert "release=0.8.2\nbuild=0.8.2" not in readme
     assert "0.9.0-dev.3" not in override
     assert "iDotMatrix Display" not in protocol
@@ -299,6 +307,26 @@ def check_rc5_text_ownership_contract() -> None:
     assert "processTextPayload(textBuffer, bytes, false)" in carousel
     assert "processTextPayload(textBuffer, bytes, false)" in preset
 
+def check_graffiti_multipart_contract() -> None:
+    protocol_h = (ROOT / "IDotMatrixProtocol.h").read_text(encoding="utf-8")
+    protocol_cpp = (ROOT / "IDotMatrixProtocol.cpp").read_text(encoding="utf-8")
+    ble = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
+    adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
+    test = (ROOT / "tests/test_protocol.cpp").read_text(encoding="utf-8")
+    assert "processGraffitiRaster" in protocol_h and "GraffitiRasterTransfer" in protocol_h
+    assert "GRAFFITI_RASTER_TIMEOUT_MS = 5000u" in protocol_h
+    assert "data[4] != 0x00 && data[4] != 0x02" in protocol_cpp
+    assert "const uint8_t response[] = {0x05, 0x00, 0x00, 0x00, status};" in protocol_cpp
+    assert "processInlinePng(data, length, reply)" in ble
+    assert "processGraffitiRaster(data, length, reply)" in ble
+    assert ble.index("processInlinePng(data, length, reply)") < ble.index("processGraffitiRaster(data, length, reply)") < ble.index("bulkTransfer_.processPacket")
+    assert "renderer_.beginRawImage(byteLength)" in adapter
+    assert "renderer_.writeRawImage(offset, data, length)" in adapter
+    assert "diySessionActive_ = true" in adapter
+    assert "4096 + 4096 + 4096 RGB payload bytes" in test
+    assert "graffitiContinueAck" in test and "graffitiCompleteAck" in test
+
+
 def check_repository_cleanliness() -> None:
     forbidden_dirs = {".pio", "__pycache__", ".pytest_cache"}
     forbidden_suffixes = {".o", ".obj", ".elf", ".pyc", ".swp", ".tmp", ".log", ".orig", ".bak"}
@@ -325,6 +353,7 @@ def main() -> None:
     check_rc2_consolidation_contract()
     check_rc4_large_text_contract()
     check_rc5_text_ownership_contract()
+    check_graffiti_multipart_contract()
     check_repository_cleanliness()
     print("Release package checks passed.")
 

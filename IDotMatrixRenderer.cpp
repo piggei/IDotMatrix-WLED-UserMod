@@ -1176,7 +1176,7 @@ void IDotMatrixRenderer::renderClock(
       else if (hourValue > 12u) hourValue = uint8_t(hourValue - 12u);
     }
 
-    // HH:MM: 3x5 font at 3x scale.  Width = 49 px, centered at x=7.
+    // HH:MM: 3x5 font at 3x scale. Width = 49 px, centered at x=7.
     constexpr uint8_t timeScale = 3u;
     constexpr int16_t timeY = 14;
     constexpr int16_t timeX = 7;
@@ -1189,20 +1189,22 @@ void IDotMatrixRenderer::renderClock(
     drawNativeDigit(clockMinute / 10u, timeX + 29, timeY, timeScale, foreground);
     drawNativeDigit(clockMinute % 10u, timeX + 40, timeY, timeScale, foreground);
 
-    // DD/MM: 3x5 font at 2x scale. Width = 40 px, centered at x=12.
+    // DD/MM: keep the day fixed and move the slash + complete month field
+    // two physical LEDs right on the native 64x64 styles 0/3.
     constexpr uint8_t dateScale = 2u;
     constexpr int16_t dateY = 39;
     constexpr int16_t dateX = 12;
+    constexpr int16_t monthShiftX = 2;
     drawNativeDigit(clockDay / 10u, dateX, dateY, dateScale, foreground);
     drawNativeDigit(clockDay % 10u, dateX + 8, dateY, dateScale, foreground);
     // Slash, scaled from a 3x5 diagonal glyph.
-    fillBlock(dateX + 18, dateY, 2u, foreground);
-    fillBlock(dateX + 18, dateY + 2, 2u, foreground);
-    fillBlock(dateX + 16, dateY + 4, 2u, foreground);
-    fillBlock(dateX + 14, dateY + 6, 2u, foreground);
-    fillBlock(dateX + 14, dateY + 8, 2u, foreground);
-    drawNativeDigit(clockMonth / 10u, dateX + 22, dateY, dateScale, foreground);
-    drawNativeDigit(clockMonth % 10u, dateX + 30, dateY, dateScale, foreground);
+    fillBlock(dateX + 18 + monthShiftX, dateY, 2u, foreground);
+    fillBlock(dateX + 18 + monthShiftX, dateY + 2, 2u, foreground);
+    fillBlock(dateX + 16 + monthShiftX, dateY + 4, 2u, foreground);
+    fillBlock(dateX + 14 + monthShiftX, dateY + 6, 2u, foreground);
+    fillBlock(dateX + 14 + monthShiftX, dateY + 8, 2u, foreground);
+    drawNativeDigit(clockMonth / 10u, dateX + 22 + monthShiftX, dateY, dateScale, foreground);
+    drawNativeDigit(clockMonth % 10u, dateX + 30 + monthShiftX, dateY, dateScale, foreground);
 
     visible_ = true;
     return;

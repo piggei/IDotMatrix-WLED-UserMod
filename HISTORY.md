@@ -1,3 +1,36 @@
+## 0.9.1-rc.1 - 2026-09-20
+
+- Promoted the hardware-validated 0.9.1 development line to the first release candidate.
+- Includes hardware-validated 64x64 Graffiti full-raster multipart transport and the validated ESP32-C3 4 MB dual-slot OTA profile.
+- Includes the corrected native 64x64 Clock styles 0/3 date spacing: HH:MM unchanged, day fixed, `/` separator and month shifted two physical LEDs right.
+- Consolidated `overrides/` and `partitions/` repository organization and aligned documentation/tests with the release-candidate build.
+- No new runtime feature was introduced during the RC1 promotion.
+
+## 0.9.1-dev.4 - 2026-09-20
+
+- Reverted the 64x64 Clock styles 0/3 HH:MM spacing change introduced in dev.3.
+- Restored the time separator and minute digits to their previous positions.
+- Moved only the date `/` separator and complete month field two physical LEDs to the right; the day field remains fixed.
+- 16x16, 32x32, and all other Clock styles remain unchanged.
+- No protocol, Graffiti multipart, C3 OTA, storage or ownership behavior changed from dev.2.
+
+## 0.9.1-dev.2 - 2026-09-20
+
+- Promoted the new Graffiti full-raster multipart path to hardware-validated after successful official-app tests with several complex photographic images on the physical 64x64 MatrixPortal/HUB75 target.
+- Recorded the completed C3 dual-slot OTA qualification and retained the OTA AudioReactive profile as the recommended 4 MB C3 build option; the no-OTA profile remains available as a conservative fallback.
+- Re-ran host regression, profile/partition checks and release-package consistency checks after the `overrides/` / `partitions/` repository cleanup.
+- No runtime protocol or renderer behavior changed from 0.9.1-dev.1; this build consolidates qualification evidence and documentation.
+
+## 0.9.1-dev.1 - 2026-09-20
+
+- Added the original-hardware Graffiti full-raster multipart transport observed on the 64x64 app path: 9-byte type-0 header, marker `0x00` first / `0x02` continuation, 4096-byte RGB chunks, ACK `0x02` while incomplete and final ACK `0x01`.
+- Kept Graffiti raster handling separate from compact inline PNG and the normal 16-byte CRC Bulk transport; the raster streams directly into the renderer without allocating an extra full-frame protocol buffer.
+- Added timeout/disconnect/reset cancellation and regressions for the captured 64x64 `4096 + 4096 + 4096 = 12288` byte transfer.
+- Added a validated ESP32-C3 4 MB AudioReactive + OTA profile using dual `0x1A0000` application slots and a 640 KiB LittleFS partition; qualification included three consecutive OTA updates under populated Carousel/Preset/Schedule load.
+- Moved PlatformIO override files under `overrides/` and custom partition tables under `partitions/`; updated profile tests and documentation to the new layout.
+- Corrected legacy C3 profile comments so 0.8.2 is identified as a qualification baseline rather than the current Usermod build.
+- Corrected Countdown documentation to match the released renderer: orange seconds during normal operation, red during the final ten seconds.
+
 ## 0.9.0
 
 - Final release promoted from the qualified 0.9.0-rc.5 codebase with no functional changes during final promotion.

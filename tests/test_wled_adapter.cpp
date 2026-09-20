@@ -430,6 +430,19 @@ int main() {
   assert(strip.segmentRef().colorAt(0, 0) == RGBW32(41, 42, 43, 0));
   assert(strip.segmentRef().colorAt(15, 15) == RGBW32(91, 92, 93, 0));
 
+  // Graffiti full-raster uses the same streaming renderer internally but must
+  // retain DIY/Graffiti ownership rather than being exposed as generic RAW.
+  rawImage[0] = 71; rawImage[1] = 72; rawImage[2] = 73;
+  assert(adapter.onGraffitiRasterBegin(sizeof(rawImage)));
+  assert(adapter.onGraffitiRasterData(0, rawImage, sizeof(rawImage)));
+  assert(adapter.onGraffitiRasterComplete(true));
+  assert(adapter.isDiySessionActive());
+  assert(!adapter.isRawImageActive());
+  assert(!adapter.isTextActive());
+  assert(adapter.isDisplayEffectActive());
+  strip.renderEffect();
+  assert(strip.segmentRef().colorAt(0, 0) == RGBW32(71, 72, 73, 0));
+
   // 0.9 native-matrix behavior: logical and physical dimensions are
   // independent. Every 16/32/64 combination scales automatically.
   adapter.setRescaleEnabled(false);

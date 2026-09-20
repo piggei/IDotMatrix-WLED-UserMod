@@ -18,6 +18,9 @@ public:
   void onAudio(const IDotMatrixAudioSettings&) override {}
   void onGraffitiMode(bool) override {}
   void onGraffitiPixels(uint8_t, uint8_t, uint8_t, const uint8_t*, size_t) override {}
+  bool onGraffitiRasterBegin(size_t) override { return true; }
+  bool onGraffitiRasterData(size_t, const uint8_t*, size_t) override { return true; }
+  bool onGraffitiRasterComplete(bool valid) override { return valid; }
   void onClock(const IDotMatrixClockSettings&) override {}
   void onCountdown(const IDotMatrixCountdownSettings&) override {}
   void onStopwatch(uint8_t) override {}

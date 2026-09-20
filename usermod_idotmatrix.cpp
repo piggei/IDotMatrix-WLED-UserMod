@@ -46,8 +46,8 @@
 #error "ESP32-S3 iDotMatrix HUB75 profile requires NimBLE-Arduino 2.x"
 #endif
 
-static constexpr const char* IDOTMATRIX_RELEASE = "0.9.0";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.0";
+static constexpr const char* IDOTMATRIX_RELEASE = "0.9.1";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.1-rc.1";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
