@@ -21,7 +21,7 @@ Release 0.9.0 is the stable culmination of the ESP32-S3 / native HUB75 developme
 
 - **Board:** Adafruit MatrixPortal S3
 - **Display:** 64x64 HUB75 RGB panel
-- **WLED baseline:** 0.17.0-devV5
+- **WLED baseline:** 17.0.0-devV5
 - **Qualified WLED commit:** `06ae26db67107cb3f6a3d107a92340035991a063`
 - **PlatformIO environment:** `adafruit_matrixportal_esp32s3_idotmatrix_64x64`
 

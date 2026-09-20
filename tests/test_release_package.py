@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-candidate and critical-section regression checks for 0.9.1-rc.1."""
+"""Stable-release and critical-section regression checks for 0.9.1."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def check_versioning() -> None:
     assert library["version"] == "0.9.1"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     assert 'IDOTMATRIX_RELEASE = "0.9.1"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.1-rc.1"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.1"' in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
     assert '"iDotMatrix@;;;2"' in adapter
@@ -37,8 +37,7 @@ def check_release_surface() -> None:
         "overrides/matrixportal-s3-hub75.ini",
         "partitions/WLED_ESP32_4MB_IDOT_NO_OTA.csv",
         "partitions/WLED_ESP32_4MB_IDOT_OTA.csv",
-        "RELEASE_NOTES_0.9.1-rc.1.md",
-        "RELEASE_NOTES_0.9.1-dev.1.md",
+        "RELEASE_NOTES_0.9.1.md",
         "RELEASE_NOTES_0.9.0.md",
         "RELEASE_NOTES_0.8.2.md",
         "IDotMatrixAudioSource.h",
@@ -61,6 +60,8 @@ def check_release_surface() -> None:
     assert not list(ROOT.glob("RELEASE_NOTES_0.8.2-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-dev.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
+    assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-dev.*.md"))
+    assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-rc.*.md"))
 
 def check_markdown_links() -> None:
     for path in ROOT.glob("*.md"):
@@ -86,7 +87,10 @@ def check_documentation_contract() -> None:
     assert "4112 bytes of permanent" in architecture
     assert "8192" in architecture
     assert "supported 16x16 profiles compile `IDOT_GIF_LZW12`" in architecture
-    assert "do not inherit `${env:<base>.custom_usermods}`" in architecture
+    assert "Most supplied overrides intentionally **replace** the base environment's" in architecture
+    assert "esp32c3-16x16-audio-ota.ini" in architecture
+    assert "matrixportal-s3-hub75.ini" in architecture
+    assert "`${common.default_usermods}`" in architecture
     assert "four 517-byte queue slots" in architecture
     assert "/idot_cache.new" in architecture
 
@@ -102,9 +106,17 @@ def check_documentation_contract() -> None:
     assert "No CRC field is present" in protocol
     assert "two independent fragmentation layers" in protocol
     assert "compact inline PNG" in protocol
+    assert "Preset / Default active, pending, cache and backup files" in protocol
+    assert "17.0.0-devV5" in readme
+    assert "0.17.0-devV5" not in readme
+    assert "current development build" not in testing
+    assert "30-second `HH:MM` / 5-second `DD/MM` alternation" in protocol
+    assert protocol.count("30-second `HH:MM` / 5-second `DD/MM` alternation") == 1
+    assert "styles **0** and **3** use the extra" in protocol
+    assert "the date day field stays fixed while the `/` separator and both month digits are" in protocol
 
-    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.1 development\n")
-    assert "Release: 0.9.1 / build: 0.9.1-rc.1" in readme
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.1\n")
+    assert "Release: 0.9.1 / build: 0.9.1" in readme
     assert "stable 0.9.0" in readme.lower()
     assert "Graffiti full-raster multipart" in readme
     assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
@@ -114,7 +126,7 @@ def check_documentation_contract() -> None:
     assert "per-slot frame cache" in readme
     assert "`idotmatrix` wled effect" in readme.lower()
 
-    release_notes = (ROOT / "RELEASE_NOTES_0.9.1-rc.1.md").read_text(encoding="utf-8")
+    release_notes = (ROOT / "RELEASE_NOTES_0.9.1.md").read_text(encoding="utf-8")
     assert "Graffiti" in release_notes
     assert "0x00" in release_notes and "0x02" in release_notes
     assert "OTA" in release_notes
@@ -126,7 +138,7 @@ def check_documentation_contract() -> None:
     assert "hardware-validated" in testing
     assert "complex photographic images" in testing
     history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
-    assert history.startswith("## 0.9.1-rc.1")
+    assert history.startswith("## 0.9.1 -")
     assert "4096-byte RGB chunks" in history
     assert "## 0.9.0\n" in history
     assert "## 0.9.0-rc.5" in history and "live TEXT" in history
@@ -141,6 +153,22 @@ def check_documentation_contract() -> None:
     assert "partitions/WLED_ESP32_4MB_IDOT_OTA.csv" in profiles
     assert "NimBLE-Arduino" not in library.get("dependencies", {})
     assert "h2zero/NimBLE-Arduino" not in library.get("dependencies", {})
+
+def check_final_documentation_hygiene() -> None:
+    current = [
+        "README.md", "PROTOCOL.md", "ARCHITECTURE.md", "BUILD_PROFILES.md",
+        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.1.md",
+    ]
+    for name in current:
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert "0.9.1-rc." not in text, f"{name}: stale RC marker"
+        assert "0.9.1-dev." not in text, f"{name}: stale development marker"
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "current release-candidate" not in readme.lower()
+    protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
+    assert "`iDotMatrix\nDisplay`" not in protocol
+    assert "device-level rotation, energy-saving, and reset commands" not in protocol
+
 
 def check_idot_display_fallback() -> None:
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
@@ -181,7 +209,7 @@ def check_device_reset_contract() -> None:
     assert 'schedulePrefs_->remove("flags")' in automation_cpp
     assert "Device reset (`03 80`)" in protocol_doc
     assert "not an ESP32/WLED reboot" in protocol_doc
-    assert (ROOT / "RELEASE_NOTES_0.9.1-rc.1.md").is_file()
+    assert (ROOT / "RELEASE_NOTES_0.9.1.md").is_file()
 
 def check_no_heap_free_inside_queue_spinlock() -> None:
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
@@ -264,7 +292,7 @@ def check_rc2_consolidation_contract() -> None:
 
     assert sha in readme and sha in profiles and sha in override
     assert "adafruit_matrixportal_esp32s3_idotmatrix_64x64" in readme
-    assert "RELEASE_NOTES_0.9.1-rc.1.md" in readme
+    assert "RELEASE_NOTES_0.9.1.md" in readme
     assert "release=0.8.2\nbuild=0.8.2" not in readme
     assert "0.9.0-dev.3" not in override
     assert "iDotMatrix Display" not in protocol
@@ -355,6 +383,7 @@ def main() -> None:
     check_rc5_text_ownership_contract()
     check_graffiti_multipart_contract()
     check_repository_cleanliness()
+    check_final_documentation_hygiene()
     print("Release package checks passed.")
 
 

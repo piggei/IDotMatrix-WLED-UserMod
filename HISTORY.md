@@ -1,3 +1,11 @@
+## 0.9.1 - 2026-09-20 - Stable release
+
+- Promoted the hardware-validated 0.9.1 release-candidate runtime to stable `release=0.9.1`, `build=0.9.1` with no new runtime feature during final promotion.
+- Finalized original-app Graffiti full-raster multipart support from Bluetooth capture + emulator B171 evidence and physical 64x64 photographic-image validation.
+- Finalized the ESP32-C3 4 MB AudioReactive + dual-slot OTA profile after three consecutive OTA cycles and populated Carousel/Preset/Schedule stress testing.
+- Finalized the `overrides/` and `partitions/` repository organization and aligned all current documentation, protocol references and qualification records.
+- Kept native 64x64 Clock styles 0/3 HH:MM positions unchanged while moving the date `/` separator and month two physical LEDs right.
+
 ## 0.9.1-rc.1 - 2026-09-20
 
 - Promoted the hardware-validated 0.9.1 development line to the first release candidate.

@@ -1,6 +1,6 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by Release 0.9.1 / build 0.9.1-rc.1. Stable 0.9.0 remains the previous release baseline. The
+This document describes the protocol subset implemented by Release 0.9.1 / build 0.9.1. Stable 0.9.0 remains the previous release baseline. The
 BLE wire protocol is carried forward from the stable 0.9.0 WLED iDotMatrix Usermod and extended only where new original-app traffic has been confirmed. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
 stopwatch, scoreboard, persistent alarms and programs/schedules, active-buzzer
@@ -299,10 +299,37 @@ incomplete previous Graffiti raster.
 ACK: `05 00 06 01 01`
 
 **WLED mapping:** the command stores the display options and selects the custom
-`iDotMatrix` effect. The shared effect reads WLED local time and draws into the
-same logical RGB canvas used by other iDotMatrix content. The eight currently
-known styles use the hand-tuned 16x16 artwork from the standalone reference and
-are scaled to a 32x32 or 64x64 logical profile.
+`iDotMatrix` effect. The shared effect reads WLED/app-synchronized time and draws
+into the same logical RGB canvas used by other iDotMatrix content.
+
+For logical 16x16 and 32x32 profiles, the reconstructed behavior retains the
+30-second `HH:MM` / 5-second `DD/MM` alternation when date display is enabled.
+
+For the native logical/physical 64x64 layout, styles **0** and **3** use the extra
+space to keep both rows visible simultaneously when date display is enabled:
+
+- `HH:MM` remains on the upper row;
+- `DD/MM` remains on the lower row;
+- style 0 retains its animated rainbow frame;
+- style 3 retains the selected solid background with black foreground;
+- the time separator blinks at 1 Hz (500 ms on / 500 ms off);
+- the HH:MM positions are unchanged by the 0.9.1 correction;
+- the date day field stays fixed while the `/` separator and both month digits are
+  shifted two physical LEDs to the right.
+
+The official app can emit transient Clock commands with the date bit cleared
+while entering the Clock page or moving between styles. For native 64x64 styles
+0 and 3, the adapter protects the last enabled date preference across a 1-second
+entry/style-change grace window. A later stable `showDate=0` command is treated
+as an intentional request to disable the date.
+
+Style 2 has a separate optical separator correction when showing time:
+
+- 16x16: unchanged;
+- 32x32: separator shifted one native LED left;
+- 64x64: separator shifted two native LEDs left.
+
+These are renderer/integration decisions; the Clock wire format is unchanged.
 
 ## Countdown
 
@@ -365,11 +392,6 @@ The visible output uses the reconstructed original-device 16x16 stopwatch artwor
 ACK: `05 00 0A 80 01`
 
 Both scores are little-endian 16-bit values on the wire. The reconstructed original-device artwork renders each side as a three-digit row with leading zeroes (`score % 1000`): player A on rows 0..6 in `#7858F8`, player B on rows 9..15 in `#F82078`, with two blank scanlines between them. The framebuffer remains owned by `iDotMatrix`; no native WLED colour/effect state is modified.
-
-When date display is enabled, the integration preserves the experimentally
-verified emulator presentation: 30 seconds of `HH:MM`, followed by 5 seconds of
-`DD/MM`. This timing is emulator behavior and is not claimed as a universal
-original-device protocol requirement.
 
 ## Logical-to-physical mapping
 
@@ -595,8 +617,9 @@ or packet format and does not sample the microphone independently.
   the logical profile;
 - GIF dimensions larger than the active logical profile or larger than the
   active logical screen profile or maximum compiled GIF decoder capability;
-- device-level rotation, energy-saving, and reset commands, intentionally left
-  to WLED's own configuration and control paths.
+- unconfirmed device-level rotation and energy-saving commands. The confirmed
+  iDotMatrix logical reset command `03 80` is implemented separately below; it is
+  not an ESP32/WLED reboot.
 
 The unconfirmed TEXT aliases remain documented for protocol archaeology, but
 are not planned for implementation unless a real app capture requires them.
@@ -633,6 +656,7 @@ The recognized reset frame is:
 It is a **live iDotMatrix protocol reset**, not an ESP32/WLED reboot. The Usermod:
 
 - erases all persistent Device Assets / Carousel slots and their manifest;
+- erases all volatile Preset / Default active, pending, cache and backup files;
 - erases all persisted alarms and alarm media;
 - erases all persisted schedules/programs, staging data and schedule media;
 - stops active alarm/program/buzzer ownership and clears transient iDotMatrix display content;
@@ -683,8 +707,7 @@ stable, but are not required to repeat those Device Assets metadata bytes.
 
 Playback continues without a BLE connection. A later transient display command
 suspends runtime Carousel playback but does not delete the stored bank. WLED
-controls boot behavior: a stored Carousel starts at boot when `iDotMatrix
-Display` is the selected WLED boot effect.
+controls boot behavior: a stored Carousel starts at boot when `iDotMatrix` is the selected WLED boot effect.
 
 On the no-PSRAM frame-cache backend, persistent GIF slots use a per-slot cache
 (`/idot_cN.bin`). A cache survives normal Carousel rotation and is invalidated

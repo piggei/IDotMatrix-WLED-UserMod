@@ -1,12 +1,12 @@
-# WLED iDotMatrix Usermod — 0.9.1 development
+# WLED iDotMatrix Usermod — 0.9.1
 
-**Release: 0.9.1 / build: 0.9.1-rc.1.**  
+**Release: 0.9.1 / build: 0.9.1.**  
 **Previous stable release: 0.9.0.**
 
 The 0.9 line brings the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
 native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
 path. The primary 64x64 target is an Adafruit MatrixPortal ESP32-S3 driving a
-64x64 HUB75 panel on the qualified WLED 0.17.0-devV5 baseline
+64x64 HUB75 panel on the qualified WLED 17.0.0-devV5 baseline
 `06ae26db67107cb3f6a3d107a92340035991a063`.
 
 For the 64x64 reference build use `overrides/matrixportal-s3-hub75.ini`.
@@ -24,31 +24,34 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-`0.9.1-rc.1` keeps the validated Graffiti multipart and C3 OTA work from
-dev.1/dev.2 and adds one narrowly scoped 64x64 clock-layout correction: in clock
-styles 0 and 3, the blinking separator and complete minute field move two physical
-LEDs to the right while the hour field and DD/MM row remain unchanged.
+`0.9.1` is the stable maintenance release following 0.9.0. It keeps the qualified
+0.9.0 feature set and adds the hardware-validated original-app Graffiti
+full-raster multipart path, the validated ESP32-C3 4 MB AudioReactive + dual-slot
+OTA profile, repository build-support housekeeping, and the final native 64x64
+Clock styles 0/3 date-spacing correction.
 
-The current 0.9.1 development line therefore includes:
+The 0.9.1 release includes:
 
 - support for the original-app **Graffiti full-raster multipart transport**,
-  including the captured 64x64 `4096 + 4096 + 4096 = 12288` byte RGB upload;
+  including the captured and hardware-validated 64x64
+  `4096 + 4096 + 4096 = 12288` byte RAW RGB upload;
 - a hardware-validated **ESP32-C3 4 MB AudioReactive + OTA** profile with dual
-  `0x1A0000` application slots and 640 KiB LittleFS;
+  `0x1A0000` application slots and 640 KiB nominal LittleFS;
 - repository housekeeping: PlatformIO templates are under `overrides/` and custom
-  partition tables are under `partitions/`.
+  partition tables are under `partitions/`;
+- on native 64x64 Clock styles 0 and 3, the HH:MM row stays at its qualified
+  positions while only the date `/` separator and complete month field move two
+  physical LEDs to the right; the day field stays fixed.
 
-The previous stable 0.9.0 MatrixPortal qualification remains unchanged: logical
-16/32/64 profiles, native 64x64 TEXT/font path up to the 16654-byte 32x64 TEXT
-payload, GIF playback, persistent Carousel, Alarm, Program/Schedule, Preset /
-Default, audio visualizers, clocks, Countdown, Stopwatch and Scoreboard were all
-exercised on hardware.
+The qualified 0.9.0 MatrixPortal functionality remains intact: logical 16/32/64
+profiles, native 64x64 TEXT/font support up to the 16654-byte 32x64 TEXT payload,
+GIF playback, persistent Carousel, Alarm, Program/Schedule, Preset / Default,
+audio visualizers, clocks, Countdown, Stopwatch and Scoreboard.
 
-The Graffiti multipart implementation follows the original Bluetooth capture and
-the validated standalone emulator B171. WLED host regressions cover the exact
-three-packet 64x64 sequence, and the same path is now hardware-validated with the
-official app on the physical 64x64 target using several complex photographic
-images.
+The Graffiti multipart implementation is grounded in the original Bluetooth
+capture and standalone emulator B171, is covered by byte-for-byte host regression,
+and was validated with the official app on the physical 64x64 MatrixPortal/HUB75
+target using several complex photographic images.
 
 ## Preset / Default
 
@@ -98,16 +101,16 @@ on every visit. Invalid slots are quarantined for the current bank generation
 and later valid slots continue to play. Feature-owned temp/backup files are
 reconciled at boot.
 
-### Stable hardware baseline
+### Historical qualified hardware baseline
 
-Release 0.8.2 retains the two hardware families qualified in 0.8.1 and extends the ESP32-C3 validation with Carousel/cache, reset, boot, automation and local-microphone AudioReactive testing:
+The 0.9.x line inherits its classic ESP32 and initial ESP32-C3 foundation from the qualified 0.8.2 baseline, which extended the 0.8.1 hardware work with Carousel/cache, reset, boot, automation and local-microphone AudioReactive testing:
 
 | Target | WLED base | Arduino / ESP-IDF | LED/BLE path | NimBLE |
 |---|---|---|---|---|
 | classic ESP32 (`esp32dev`) | WLED 16.0.1 | Arduino 2.0.17 / IDF 4.4.7 in supplied overrides | I2S LED output + BLE | 1.4.3 |
 | ESP32-C3 4 MB | pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a` | Arduino 3.3.8 / IDF 5.5.4 | WLED shared-RMT + BLE | 2.5.1 |
 
-The 0.8.2 C3 qualification additionally covered persistent mixed Carousel playback and boot restore, Carousel-to-Carousel replacement, verified reset cleanup, alarms/programs, clock artwork, and WLED AudioReactive input from an external microphone. The pinned C3 WLED/IDF5/shared-RMT base remains unchanged from the qualified 0.8.1 platform baseline.
+That 0.8.2 C3 qualification covered persistent mixed Carousel playback and boot restore, Carousel-to-Carousel replacement, verified reset cleanup, alarms/programs, clock artwork, and WLED AudioReactive input from an external microphone. The current 0.9.1 C3 profiles build on that qualified IDF5/shared-RMT foundation and add the separately documented 0.9.x features and OTA profile.
 
 ### Hardware validation scope
 
@@ -117,7 +120,7 @@ The 0.8.2 C3 qualification additionally covered persistent mixed Carousel playba
 | 16x16 logical / 16x16 physical, ESP32-C3 4 MB | `compact12/cache` | **supported and hardware-validated on IDF5/shared-RMT** |
 | 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | hardware-validated |
 | 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` | `compact12/cache` | hardware-validated |
-| 64x64 logical / 64x64 physical, MatrixPortal ESP32-S3 + PSRAM | `animatedgif12/psram` | **hardware-validated on WLED 0.17.0-devV5 / `06ae26db67107cb3f6a3d107a92340035991a063` / native HUB75** |
+| 64x64 logical / 64x64 physical, MatrixPortal ESP32-S3 + PSRAM | `animatedgif12/psram` | **hardware-validated on WLED 17.0.0-devV5 / `06ae26db67107cb3f6a3d107a92340035991a063` / native HUB75** |
 | 32x32 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 2x nearest-neighbour upscale** |
 | 16x16 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 4x nearest-neighbour upscale** |
 
@@ -163,8 +166,8 @@ On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile an
 | 64x64 profile | profile `0x04` | logical profile + optional low-memory rescale | Hardware-validated with physical 16x16/no PSRAM |
 
 Alarms and programs/schedules include persistent metadata/media and active-buzzer
-integration. Display rotation and energy-saving remain owned by WLED; the verified `03 80` protocol reset clears Usermod-owned Carousel/alarm/program state without rebooting WLED
-rather than duplicated in the BLE emulator.
+integration. Display rotation and energy-saving remain owned by WLED; the verified `03 80` protocol reset clears Usermod-owned Carousel/Device Assets, Preset/Default, alarm, program/schedule and transient iDotMatrix state without rebooting WLED. WLED configuration, connectivity, system time and unrelated filesystem content are preserved.
+These responsibilities remain in WLED rather than being duplicated in the BLE emulator.
 
 ## Hardware requirements
 
@@ -271,7 +274,7 @@ The reference 0.9 build is qualified against:
 ```text
 Hardware : Adafruit MatrixPortal ESP32-S3 (8 MB flash / 2 MB PSRAM)
 Display  : one 64x64 HUB75 RGB panel
-WLED     : 0.17.0-devV5
+WLED     : 17.0.0-devV5
 Commit   : 06ae26db67107cb3f6a3d107a92340035991a063
 Profile  : adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
@@ -309,7 +312,7 @@ The MatrixPortal profile intentionally inherits the upstream WLED partition and 
 
 For first boot, configure the physical WLED matrix as 64x64 with the MatrixPortal/native HUB75 setup, configure Wi-Fi/timezone/NTP as desired, then leave the iDotMatrix logical profile at 64x64 for native operation. Logical 16x16 and 32x32 profiles are automatically upscaled to the physical 64x64 panel.
 
-Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.1`, `build=0.9.1-rc.1`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
+Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.1`, `build=0.9.1`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
 
 ### Legacy qualified profiles
 
@@ -363,7 +366,7 @@ profile=64x64
 canvas=16x16
 name=IDM-123456
 release=0.9.1
-build=0.9.1-rc.1
+build=0.9.1
 audioSource=phone active=phone
 audioReactive=absent
 gifDecoder=compact12/cache
@@ -387,7 +390,7 @@ framework=WLED IDF5/shared-RMT
 wledBase=d55037f
 nimble=2.x API
 release=0.9.1
-build=0.9.1-rc.1
+build=0.9.1
 audioSource=phone active=phone
 audioReactive=absent
 ```
@@ -497,8 +500,8 @@ Further documentation:
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — component boundaries, current memory model, and RAM-engineering history;
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
-- [`TODO.md`](TODO.md) — deferred/post-0.9 work;
-- [`RELEASE_NOTES_0.9.1-rc.1.md`](RELEASE_NOTES_0.9.1-rc.1.md) — current release-candidate notes;
+- [`TODO.md`](TODO.md) — deferred/post-0.9.1 work;
+- [`RELEASE_NOTES_0.9.1.md`](RELEASE_NOTES_0.9.1.md) — current stable release notes;
 - [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 

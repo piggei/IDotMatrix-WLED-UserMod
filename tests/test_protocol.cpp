@@ -869,7 +869,7 @@ int main() {
   assert(events.rawOffset == 0 && events.rawLength == sizeof(rawBytes));
   assert(events.rawFirstByte == 1);
 
-  // 0.9.1-dev.1: original 64x64 Graffiti full-raster upload is a dedicated
+  // 0.9.1: original 64x64 Graffiti full-raster upload is a dedicated
   // 9-byte type-0 multipart protocol, not compact PNG and not generic Bulk.
   // The captured transfer is exactly three 4105-byte logical packets:
   // 4096 + 4096 + 4096 RGB payload bytes for 64x64x3.

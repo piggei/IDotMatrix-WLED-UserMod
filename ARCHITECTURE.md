@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes iDotMatrix WLED Usermod **release 0.9.1 / build 0.9.1-rc.1**. It retains stable 0.9.0 as the previous release baseline and adds the original-app Graffiti full-raster multipart path, build-profile/partition housekeeping, and the native 64x64 clock styles 0/3 date-spacing correction that keeps HH:MM unchanged and moves the date slash and month two physical LEDs right. The qualified 0.8.2 ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain unchanged.
+This document describes iDotMatrix WLED Usermod **release 0.9.1 / build 0.9.1**. It retains the stable 0.9.0 feature baseline and adds the original-app Graffiti full-raster multipart path, build-profile/partition housekeeping, and the native 64x64 clock styles 0/3 date-spacing correction that keeps HH:MM unchanged and moves the date slash and month two physical LEDs right. The qualified 0.8.2 ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain unchanged.
 
 ## Design goals
 
@@ -96,7 +96,7 @@ policy is separate from the historical low-memory `rescale=true` storage mode.
 Owns compact PNG decoding, GIF RX/PLAY files, decoder lifetime, and the optional
 LittleFS frame cache.
 
-The GIF build profile is selected at compile time. In Release 0.8.2 the
+The GIF build profile is selected at compile time. Inherited from the qualified 0.8.2 baseline, the
 **supported 16x16 profiles compile `IDOT_GIF_LZW12`** and independently cap the
 visible protocol/UI profile with `IDOT_SCREEN_MAX_DIM=16`:
 
@@ -147,8 +147,8 @@ compact runtime status under `/json/info`.
 
 ### ESP32-C3 supported backend split
 
-Release 0.8.2 retains the WLED 16.0.1/NimBLE 1.x path for classic ESP32 and
-retains the separately qualified C3 path on pinned WLED commit `d55037f...`. Legacy
+The current 0.9.1 architecture inherits the classic ESP32 WLED 16.0.1/NimBLE 1.x path and
+the separately qualified C3 path on pinned WLED commit `d55037f...` from the 0.8.2 baseline. Legacy
 IDF4 RMT builds produced physical LED spikes both with and without BLE, with BLE
 advertising making the fault much more visible. The IDF5 WLED backend uses
 `WLED_USE_SHARED_RMT`; on the tested C3 this eliminated the spikes through BLE
@@ -184,7 +184,7 @@ misleading UI. For example, the app could still show a red strobe after the user
 changed the WLED strobe to blue. Both programs would be internally consistent,
 but the combined user experience would look desynchronized.
 
-In stable 0.8.2, **all app-originated visual content stays under one
+Since the qualified 0.8.2 baseline, **all app-originated visual content stays under one
 WLED effect: `iDotMatrix`**. That includes Solid colour and the seven
 standalone light effects in addition to graffiti, clock, text, images and GIFs.
 The WLED effect is only a framebuffer publisher; it does not expose the app
@@ -257,26 +257,17 @@ iDotMatrix decoder profile. `overrides/hub75-legacy.ini` instead wraps WLED's
 board/pinout-specific HUB75 environments. See `BUILD_PROFILES.md` for the full
 matrix and validation status.
 
-The normal supplied overrides intentionally **replace** the base environment's
-`custom_usermods` list with only:
+Most supplied overrides intentionally **replace** the base environment's
+`custom_usermods` list with only iDotMatrix, so unrelated base Usermods are not
+silently inherited. The qualified 0.9.1 exceptions are explicit and documented:
 
-```ini
-custom_usermods =
-  symlink://../wled-usermod-idotmatrix
-```
+- `overrides/esp32c3-16x16-audio.ini` adds `audioreactive` plus iDotMatrix;
+- `overrides/esp32c3-16x16-audio-ota.ini` adds `audioreactive`, `animartrix` and iDotMatrix because that exact combination was used for OTA/memory qualification;
+- `overrides/matrixportal-s3-hub75.ini` deliberately preserves `${common.default_usermods}` from the exact pinned MatrixPortal WLED revision and then adds iDotMatrix.
 
-They do not inherit `${env:<base>.custom_usermods}`. The explicit exception in
-0.8.2 is `overrides/esp32c3-16x16-audio.ini`, which deliberately contains:
-
-```ini
-custom_usermods =
-  audioreactive
-  symlink://../wled-usermod-idotmatrix
-```
-
-This keeps the standard C3 memory budget unchanged while providing a separate
-test build for local microphone data. No profile silently inherits arbitrary
-base Usermods.
+These exceptions are part of the qualified build definitions; they do not imply
+that arbitrary Usermods or future upstream defaults are automatically supported.
+`BUILD_PROFILES.md` is the normative profile matrix.
 
 ## Current memory rules
 
@@ -321,8 +312,7 @@ not protocol semantics or LZW code validity.
 
 ### 16x16
 
-Release 0.8.2 does not use the old 10-bit decoder as the standard 16x16
-profile. The supported classic-ESP32 and ESP32-C3 16x16 overrides compile
+Since the qualified 0.8.2 baseline, the standard 16x16 profile does not use the old 10-bit decoder. The supported classic-ESP32 and ESP32-C3 16x16 overrides compile
 `IDOT_GIF_LZW12` and set `IDOT_SCREEN_MAX_DIM=16`. Decoder capability and
 advertised screen size are therefore separate: the logical/UI profile remains
 16x16 while no-PSRAM playback uses the validated `compact12/cache` backend.
@@ -429,7 +419,7 @@ A new GIF does not destroy a currently playing GIF while bytes are still being
 received. The replacement becomes a transaction boundary only after length and
 CRC validation succeed.
 
-For the frame-cache path, 0.8.2 keeps the previous committed GIF recoverable until
+For the frame-cache path, the transaction model inherited from the qualified 0.8.2 baseline keeps the previous committed GIF recoverable until
 the candidate is fully prepared:
 
 1. receive the candidate into an alternating RX slot and validate length + CRC;
@@ -578,8 +568,7 @@ Audio FA02 traffic bypasses the ordinary length-prefixed command assembler.
 LEVEL frames are six bytes; FFT uses a continuous sequence of 21-byte logical
 frames even when ATT writes split a logical frame. A 21-byte carry buffer in
 `IDotMatrixProtocol` performs resynchronisation and publishes only complete,
-valid frames from WLED's main loop. The wire protocol is unchanged in
-0.8.2.
+valid frames from WLED's main loop. The wire protocol remains unchanged from the qualified 0.8.2 baseline.
 
 `IDotMatrixAudioSource` adds source selection **after** BLE parsing. `Phone /
 BLE` preserves the 0.8.1 data path. `WLED AudioReactive` asks the registered
@@ -607,8 +596,8 @@ the selected segment; local AudioReactive data is sampled at a 40 ms cadence.
 
 ## 0.9 hardware transition
 
-The 0.9 line keeps the stable 0.8.2 protocol and ownership architecture
-but moves the primary hardware target to Adafruit MatrixPortal ESP32-S3, WLED's
+The 0.9 line builds on the protocol and ownership architecture inherited from the qualified 0.8.2 baseline
+while moving the primary hardware target to Adafruit MatrixPortal ESP32-S3, WLED's
 native HUB75 backend, a 64x64 logical/physical matrix and PSRAM-backed direct GIF
 playback. HUB75 remains a WLED output backend; the Usermod continues to render into
 WLED's pixel/segment model rather than driving HUB75 pins directly.

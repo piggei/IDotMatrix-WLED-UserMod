@@ -1,8 +1,7 @@
 # Build profiles
 
 This document describes the PlatformIO profiles shipped with iDotMatrix WLED
-Usermod **release 0.9.1 / build 0.9.1-rc.1**. Stable 0.9.0 remains the previous
-release baseline.
+Usermod **release 0.9.1 / build 0.9.1**. Stable 0.9.0 remains the previous release baseline.
 
 PlatformIO override templates are stored under `overrides/`. Custom partition
 tables are stored under `partitions/`. Copy one override to WLED's
@@ -154,7 +153,7 @@ The project intentionally supports different framework generations:
 ```text
 classic ESP32: WLED 16.0.1 + Arduino 2.0.17 / IDF 4.4.7 + NimBLE 1.4.3
 ESP32-C3:      WLED d55037f + Arduino 3.3.8 / IDF 5.5.4 + NimBLE 2.5.1
-MatrixPortal:  WLED 06ae26d (0.17.0-devV5) + upstream S3/IDF5 configuration
+MatrixPortal:  WLED 06ae26d (17.0.0-devV5) + upstream S3/IDF5 configuration
 ```
 
 The C3 profiles must inherit `env:esp32c3dev`. Compile-time guards require
@@ -247,11 +246,11 @@ pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64 -t clean
 pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
 
-Expected `/json/info` markers for this development tree include:
+Expected `/json/info` markers for the 0.9.1 release include:
 
 ```text
 release=0.9.1
-build=0.9.1-rc.1
+build=0.9.1
 ```
 
 plus target-specific markers such as `RMT+BLE=ESP32-C3 shared-RMT`,

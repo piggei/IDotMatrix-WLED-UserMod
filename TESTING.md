@@ -1,8 +1,7 @@
 # Testing
 
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.1 / build 0.9.1-rc.1**. Stable 0.9.0
-remains the previous release baseline.
+iDotMatrix WLED Usermod **release 0.9.1 / build 0.9.1**. Stable 0.9.0 remains the previous release baseline.
 
 ## Automated host regression
 
@@ -37,9 +36,9 @@ Where supported by the host compiler:
 This builds the main protocol, renderer, media and automation regressions with
 AddressSanitizer and UndefinedBehaviorSanitizer.
 
-## Stable 0.9.0 MatrixPortal qualification
+## MatrixPortal / HUB75 qualification
 
-Validated on Adafruit MatrixPortal S3 + 64x64 HUB75 with WLED 0.17.0-devV5
+Validated on Adafruit MatrixPortal S3 + 64x64 HUB75 with WLED 17.0.0-devV5
 native HUB75 backend, qualification commit
 `06ae26db67107cb3f6a3d107a92340035991a063`:
 
@@ -54,11 +53,11 @@ native HUB75 backend, qualification commit
 - AudioReactive/phone audio visualizers;
 - Countdown, Stopwatch and Scoreboard graphics;
 - combined 64x64 time/date layouts for clock styles 0 and 3;
-- dev.3 regression: on native 64x64 styles 0 and 3, HH:MM stays unchanged while the date slash and month field are shifted two physical LEDs right and the day stays fixed.
+- on native 64x64 styles 0 and 3, HH:MM stays unchanged while the date slash and month field are shifted two physical LEDs right and the day stays fixed.
 
 ## ESP32-C3 4 MB OTA qualification
 
-The 0.9.1 development tree adds a separately validated C3 profile:
+The 0.9.1 release includes a separately hardware-validated C3 OTA profile:
 
 ```text
 overrides/esp32c3-16x16-audio-ota.ini
@@ -118,7 +117,7 @@ The legacy no-OTA C3 profile remains available as a conservative option.
 
 ## Graffiti full-raster validation
 
-The 0.9.1-rc.1 protocol implementation is grounded in two independent project
+The 0.9.1 Graffiti implementation is grounded in two independent project
 sources:
 
 1. a Bluetooth capture from the official 64x64 app showing three complete FA02
@@ -160,7 +159,7 @@ players must not self-suspend.
 
 ## Deferred physical coverage
 
-A physical 32x32 panel is not required for the current development build. The
+A physical 32x32 panel is not required for the current stable release. The
 32x32 logical path has been exercised through the 64x64 hardware/scaler.
 Additional iOS-specific work remains isolated and deferred unless a new
 compatibility requirement makes it necessary.
