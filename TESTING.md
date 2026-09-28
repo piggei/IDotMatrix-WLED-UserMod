@@ -1,7 +1,7 @@
 # Testing
 
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.1 / build 0.9.1**. Stable 0.9.0 remains the previous release baseline.
+iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2-dev.6**. Stable 0.9.1 remains the current public release baseline.
 
 ## Automated host regression
 
@@ -163,3 +163,23 @@ A physical 32x32 panel is not required for the current stable release. The
 32x32 logical path has been exercised through the 64x64 hardware/scaler.
 Additional iOS-specific work remains isolated and deferred unless a new
 compatibility requirement makes it necessary.
+
+## 0.9.2 buzzer / Clock regression gates
+
+Before promotion, validate on hardware:
+
+- existing active buzzer mode remains unchanged;
+- passive direct/high-trigger mode emits the non-blocking trill and returns LOW while silent;
+- passive low-level-trigger transistor module emits the trill and remains HIGH while silent;
+- changing buzzer type/trigger from Usermod settings reinitializes hardware cleanly;
+- **Test buzzer**, Alarm and Program/Schedule use the same logical timing as before;
+- Clock style, 12/24-hour mode, date visibility and RGB colour survive reboot;
+- selecting the iDotMatrix WLED effect before connecting the app restores those Clock preferences;
+- app entry/style-change `showDate=0` transient protection still works;
+- device reset clears the stored Clock presentation preferences.
+
+### Passive low-trigger post-tone idle
+
+The passive low-level-trigger backend is already hardware-validated: **Test buzzer** produces exactly three short tones, followed by silence with the GPIO held at its inactive HIGH level, with no residual tone or idle heating.
+
+For 0.9.2-dev.6, additionally verify the settings UI: Active shows only **Active buzzer active-high**, Passive shows only **Passive buzzer trigger**, switching type updates the page immediately in both directions, the type-specific option follows the common Buzzer help text without an extra blank gap, and **Test buzzer** appears exactly once below it with a warning to save first.

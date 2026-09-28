@@ -1,9 +1,9 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by Release 0.9.1 / build 0.9.1. Stable 0.9.0 remains the previous release baseline. The
+This document describes the protocol subset implemented by Release 0.9.2 / build 0.9.2-dev.6. Stable 0.9.1 remains the current public release baseline. The
 BLE wire protocol is carried forward from the stable 0.9.0 WLED iDotMatrix Usermod and extended only where new original-app traffic has been confirmed. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
-stopwatch, scoreboard, persistent alarms and programs/schedules, active-buzzer
+stopwatch, scoreboard, persistent alarms and programs/schedules, active/passive-buzzer
 mapping, and five LEVEL plus five FFT Audio/Rhythm visualizers. The standalone
 `IDotMatrix-ESP32-Emulator` repository remains the primary, complete protocol
 reference.
@@ -642,7 +642,7 @@ This assembly is above FA02 transport reassembly: BLE fragmentation first produc
 
 ## Alarm / program sound mapping
 
-The wire protocol is unchanged. Alarm packets retain their per-alarm buzzer request. Program global flags retain bit 1 as the sound request. The WLED mapping intentionally differentiates them: alarms repeat the non-blocking trill for their configured duration, while a program activity emits three groups of three short trills once when the activity becomes active and does not sound continuously for the full time window.
+The wire protocol is unchanged. Active/passive buzzer selection and electrical trigger polarity are local Usermod hardware configuration and add no BLE fields. Active buzzers use a static GPIO level; passive buzzers use a 2 kHz hardware LEDC square wave and return to the configured inactive trigger level while silent. Alarm packets retain their per-alarm buzzer request. Program global flags retain bit 1 as the sound request. The WLED mapping intentionally differentiates them: alarms repeat the non-blocking trill for their configured duration, while a program activity emits three groups of three short trills once when the activity becomes active and does not sound continuously for the full time window.
 
 
 ## Device reset (`03 80`)

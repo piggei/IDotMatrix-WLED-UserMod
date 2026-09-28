@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes iDotMatrix WLED Usermod **release 0.9.1 / build 0.9.1**. It retains the stable 0.9.0 feature baseline and adds the original-app Graffiti full-raster multipart path, build-profile/partition housekeeping, and the native 64x64 clock styles 0/3 date-spacing correction that keeps HH:MM unchanged and moves the date slash and month two physical LEDs right. The qualified 0.8.2 ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain unchanged.
+This document describes iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2-dev.6**. It builds on the stable 0.9.1 baseline and adds active/passive buzzer hardware backends plus persistent Clock presentation preferences. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
 
 ## Design goals
 
@@ -540,11 +540,11 @@ unsafe dictionary truncation or permanent large DRAM allocations.
 
 ## Buzzer hardware boundary
 
-The optional buzzer is owned by the iDotMatrix usermod rather than the WLED effect engine. `IDotMatrixBuzzer` is a hardware-agnostic non-blocking pattern state machine; the usermod maps its logical ON/OFF output to the configured GPIO and active-high/active-low polarity. This keeps alarm/schedule semantics separate from the physical backend and leaves a clean path for a future passive/PWM implementation.
+The optional buzzer is owned by the iDotMatrix usermod rather than the WLED effect engine. `IDotMatrixBuzzer` remains a hardware-agnostic non-blocking pattern state machine. The Usermod maps logical ON/OFF transitions to either an active self-oscillating GPIO backend or a passive ESP32 LEDC backend. Passive modules have an independent high/low trigger setting so their inactive level can be held continuously while silent.
 
 The Usermod settings page can request a **one-shot test trill** through a small same-origin POST endpoint. The endpoint never changes persistent configuration and only operates on the GPIO/polarity already applied by WLED, so testing cannot silently drive an unsaved or conflicting pin. The one-shot path stops after three beeps; alarms use the repeating pattern, while programs use a finite multi-group activation notice.
 
-The active pattern matches the standalone emulator: three 90 ms pulses, 70 ms gaps, then a 550 ms pause. No `delay()` is used. Direct GPIO drive of a particular buzzer is an electrical hardware property rather than a target-support requirement; the C3 release validation does not claim a specific 5 V buzzer can be driven directly from a 3.3 V GPIO.
+The logical sound pattern matches the standalone emulator for both backends: three 90 ms pulses, 70 ms gaps, then a 550 ms pause. No `delay()` is used. Direct GPIO drive of a particular buzzer is an electrical hardware property rather than a target-support requirement; the C3 release validation does not claim a specific 5 V buzzer can be driven directly from a 3.3 V GPIO.
 
 WLED 0.16.x requires a compile-time `PinOwner` enum value for true PinManager ownership, which an out-of-tree library cannot add safely. The module therefore does not borrow another usermod's owner. The configuration key ends in `pin` so WLED's Usermods settings page includes it in its pin-use scan, and runtime setup rejects GPIOs already allocated by WLED. If WLED later adds external PinOwner registration, only the hardware setup/teardown boundary needs to change.
 

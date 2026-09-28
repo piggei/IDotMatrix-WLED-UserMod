@@ -924,4 +924,35 @@ int main() {
   assert(strip.segmentRef().colors[0] == RGBW32(0x41, 0x42, 0x43, 0));
   assert(cancelMedia.stopCount == 1);
 
+  // 0.9.2: persisted Clock presentation can seed the standalone fallback
+  // before the phone app has connected, and stable app changes are reported
+  // through the persistence callback.
+  IDotMatrixWLEDAdapter persistedClockAdapter(renderer, nullptr);
+  IDotMatrixClockSettings persistedClock;
+  persistedClock.style = 3;
+  persistedClock.use24Hour = true;
+  persistedClock.showDate = true;
+  persistedClock.red = 12;
+  persistedClock.green = 34;
+  persistedClock.blue = 56;
+  persistedClockAdapter.setClockPreferences(persistedClock);
+  assert(persistedClockAdapter.clockStyle() == 3);
+  assert(persistedClockAdapter.clockUses24Hour());
+  assert(persistedClockAdapter.clockShowsDate());
+
+  struct ClockPersistSink {
+    static void callback(void* context, const IDotMatrixClockSettings& settings) {
+      IDotMatrixClockSettings* out = static_cast<IDotMatrixClockSettings*>(context);
+      *out = settings;
+    }
+  };
+  IDotMatrixClockSettings savedClock;
+  persistedClockAdapter.setClockPreferencesCallback(&ClockPersistSink::callback, &savedClock);
+  IDotMatrixClockSettings changedClock = persistedClock;
+  changedClock.style = 0;
+  changedClock.red = 90;
+  persistedClockAdapter.onClock(changedClock);
+  assert(savedClock.style == 0);
+  assert(savedClock.red == 90);
+
 }

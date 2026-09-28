@@ -1,7 +1,7 @@
-# WLED iDotMatrix Usermod — 0.9.1
+# WLED iDotMatrix Usermod — 0.9.2 development
 
-**Release: 0.9.1 / build: 0.9.1.**  
-**Previous stable release: 0.9.0.**
+**Release: 0.9.2 / build: 0.9.2-dev.8.**  
+**Current stable release: 0.9.1.**
 
 The 0.9 line brings the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
 native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
@@ -165,7 +165,7 @@ On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile an
 | 32x32 profile | profile `0x03` | logical profile + optional rescale | Hardware-validated with physical 16x16 |
 | 64x64 profile | profile `0x04` | logical profile + optional low-memory rescale | Hardware-validated with physical 16x16/no PSRAM |
 
-Alarms and programs/schedules include persistent metadata/media and active-buzzer
+Alarms and programs/schedules include persistent metadata/media and active/passive-buzzer
 integration. Display rotation and energy-saving remain owned by WLED; the verified `03 80` protocol reset clears Usermod-owned Carousel/Device Assets, Preset/Default, alarm, program/schedule and transient iDotMatrix state without rebooting WLED. WLED configuration, connectivity, system time and unrelated filesystem content are preserved.
 These responsibilities remain in WLED rather than being duplicated in the BLE emulator.
 
@@ -189,7 +189,7 @@ These responsibilities remain in WLED rather than being duplicated in the BLE em
 - WLED IDF5 `WLED_USE_SHARED_RMT` backend;
 - NimBLE-Arduino 2.5.1 and AnimatedGIF 1.4.7 as pinned by `overrides/esp32c3-16x16.ini`.
 
-The optional active-buzzer path is independent of the matrix/BLE/OTA qualification. Use an appropriate external driver when the selected buzzer cannot be driven safely or loudly enough from a 3.3 V GPIO.
+The optional active/passive-buzzer path is independent of the matrix/BLE/OTA qualification. Use an appropriate external driver when the selected buzzer cannot be driven safely or loudly enough from a 3.3 V GPIO.
 
 PSRAM is not required for either supported 16x16 target.
 
@@ -349,8 +349,10 @@ with Carousel, Preset and Schedule content already populated.
   when no name is saved, a stable six-digit default (`IDM-xxxxxx`) is derived
   from the ESP32 eFuse MAC;
 - `rescale`: test-only nearest-neighbour mapping from a deliberately mismatched logical profile to the selected WLED 2D segment/storage canvas; hidden and forced off in the standard 16x16 build;
-- `buzzer-pin`: optional GPIO for an active buzzer; leave unassigned to disable it;
-- `buzzerActiveHigh`: selects active-high or active-low buzzer polarity;
+- `buzzer-pin`: optional buzzer GPIO; leave unassigned to disable buzzer hardware;
+- `buzzerType`: selects **Active** (self-oscillating/static GPIO) or **Passive** (2 kHz LEDC tone);
+- `buzzerActiveHigh`: selects the static active level for an active buzzer;
+- `buzzerPassiveTrigger`: selects **High** or **Low** trigger polarity for a passive buzzer/module. Low-level-trigger transistor modules are held HIGH while silent;
 - `audioSource`: `Phone / BLE` (default), `WLED AudioReactive`, or `Auto`. The
   AudioReactive choices consume WLED's existing processed audio data when the
   AudioReactive Usermod is compiled and enabled.
@@ -487,7 +489,7 @@ The PSRAM/direct backend, native physical 64x64 output and WLED native HUB75 DMA
 - `IDotMatrixAutomation.*` — persistent alarms and program/schedule execution;
 - `IDotMatrixPreset.*` — volatile six-slot Preset / Default staging and transactional activation;
 - `IDotMatrixAudioSource.*` — Phone/BLE vs WLED AudioReactive source selection and band mapping;
-- `IDotMatrixBuzzer.*` — non-blocking active-buzzer pattern engine;
+- `IDotMatrixBuzzer.*` — non-blocking active/passive-buzzer pattern engine;
 - `patch_animatedgif_profiles.py` — selects 10/11/12-bit AnimatedGIF build profile;
 - `partitions/` — custom no-OTA tables plus the validated 4 MB dual-slot OTA table;
 - `overrides/` — PlatformIO media/hardware target templates;
@@ -501,7 +503,7 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9.1 work;
-- [`RELEASE_NOTES_0.9.1.md`](RELEASE_NOTES_0.9.1.md) — current stable release notes;
+- [`RELEASE_NOTES_0.9.2-dev.8.md`](RELEASE_NOTES_0.9.2-dev.8.md) — current 0.9.2 development build notes;
 - [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 
@@ -522,27 +524,17 @@ Complementary iDotMatrix projects and protocol clients:
 Most are clients/controllers for real iDotMatrix hardware. This repository makes
 WLED behave as the BLE peripheral expected by the official app.
 
-## Optional active buzzer
+## Optional active/passive buzzer
 
-The current implementation retains the optional active-buzzer support introduced in the 0.8 line. Choose the buzzer GPIO in
-**Config → Usermods → iDotMatrix** and set `buzzerActiveHigh` to match the module
-polarity. Leaving the pin unassigned disables buzzer hardware. After saving,
-**Test buzzer** emits one finite three-short-beep trill so wiring and polarity
-can be checked immediately.
+The buzzer backend is configured in **Config → Usermods → iDotMatrix**. Leaving the pin unassigned disables buzzer hardware. `buzzerType` selects either an **Active** self-oscillating buzzer driven by a static GPIO level or a **Passive** buzzer driven by the ESP32 LEDC peripheral at 2 kHz.
 
-The driver is fully non-blocking. Alarms use the repeating trill for their
-configured duration when the app requests sound; program/schedule sound is a
-finite activation notice of three groups of three short trills. Passive/PWM
-buzzers are not enabled yet.
+For active buzzers, `buzzerActiveHigh` selects the active GPIO polarity. For passive buzzers, `buzzerPassiveTrigger` selects the module trigger level. A low-level-trigger transistor module is held HIGH while silent and receives the hardware square wave only while sound is requested, preventing DC bias/heating at rest.
 
-On WLED 0.16.x an out-of-tree Usermod cannot register its own unique `PinOwner`
-without modifying the WLED core. This Usermod therefore refuses GPIOs already
-owned by WLED and exposes the configured pin to the Usermods settings pin scanner,
-but deliberately does not reuse another Usermod's owner ID.
+The passive backend uses 10-bit LEDC, matching the resolution selected by Arduino-ESP32 3.x `ledcWriteTone()`, so a trigger-low module returns to a true constant-HIGH idle after each tone.
 
-### LittleFS media coexistence
+After saving, **Test buzzer** emits one finite three-short-beep trill. The buzzer settings are grouped under a dedicated **Buzzer** heading in the order Pin -> Type -> type-specific polarity -> Test. Only the polarity control relevant to the selected buzzer type is shown. Alarm and Program/Schedule continue to use the existing non-blocking sound policies; BLE and rendering remain active while the tone is generated.
 
-iDotMatrix stores media in the same LittleFS filesystem used by WLED. Tools such as PixelForge may therefore see and reuse iDotMatrix-created media. iDotMatrix manages only its own media namespaces: hardware validation confirmed that unrelated WLED/PixelForge images remain intact after Carousel uploads, Preset uploads, and an iDotMatrix reset. The official iDotMatrix app does not enumerate media already stored on the display; its media library comes from the phone.
+Clock presentation preferences received from the app (style, 12/24-hour mode, date visibility and RGB colour) are persisted in NVS with a deferred write. They are loaded during Usermod setup before a standalone iDotMatrix Clock fallback can be selected, so choosing the iDotMatrix effect before the phone reconnects preserves the previously selected Clock appearance. Device reset (`03 80`) clears these stored Clock presentation preferences together with the other iDotMatrix-owned device state.
 
 ## License
 

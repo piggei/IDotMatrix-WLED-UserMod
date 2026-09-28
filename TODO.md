@@ -1,3 +1,9 @@
+## 0.9.2 qualification
+
+- Hardware-validate the unchanged active-buzzer path and the final 0.9.2 settings UI.
+- Passive low-level-trigger buzzer idle is already hardware-validated (three tones, then silence, no heating).
+- Hardware-validate Clock presentation persistence before BLE/app reconnection.
+
 # Deferred / post-0.9.1 work
 
 The 0.9.1 release is complete. The items below are intentionally deferred to future releases.

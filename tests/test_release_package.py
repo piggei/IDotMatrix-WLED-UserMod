@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stable-release and critical-section regression checks for 0.9.1."""
+"""Development-build and critical-section regression checks for 0.9.2-dev.8."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.1"
+    assert library["version"] == "0.9.2-dev.8"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
-    assert 'IDOTMATRIX_RELEASE = "0.9.1"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.1"' in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.9.2"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.2-dev.8"' in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
     assert '"iDotMatrix@;;;2"' in adapter
@@ -37,6 +37,7 @@ def check_release_surface() -> None:
         "overrides/matrixportal-s3-hub75.ini",
         "partitions/WLED_ESP32_4MB_IDOT_NO_OTA.csv",
         "partitions/WLED_ESP32_4MB_IDOT_OTA.csv",
+        "RELEASE_NOTES_0.9.2-dev.8.md",
         "RELEASE_NOTES_0.9.1.md",
         "RELEASE_NOTES_0.9.0.md",
         "RELEASE_NOTES_0.8.2.md",
@@ -60,7 +61,6 @@ def check_release_surface() -> None:
     assert not list(ROOT.glob("RELEASE_NOTES_0.8.2-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-dev.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
-    assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-dev.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-rc.*.md"))
 
 def check_markdown_links() -> None:
@@ -83,6 +83,8 @@ def check_documentation_contract() -> None:
     profiles = (ROOT / "BUILD_PROFILES.md").read_text(encoding="utf-8")
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
+    adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
 
     assert "4112 bytes of permanent" in architecture
     assert "8192" in architecture
@@ -115,9 +117,9 @@ def check_documentation_contract() -> None:
     assert "styles **0** and **3** use the extra" in protocol
     assert "the date day field stays fixed while the `/` separator and both month digits are" in protocol
 
-    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.1\n")
-    assert "Release: 0.9.1 / build: 0.9.1" in readme
-    assert "stable 0.9.0" in readme.lower()
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.2 development\n")
+    assert "Release: 0.9.2 / build: 0.9.2-dev.8" in readme
+    assert "stable release: 0.9.1" in readme.lower()
     assert "Graffiti full-raster multipart" in readme
     assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
     assert "partitions/" in readme
@@ -126,11 +128,11 @@ def check_documentation_contract() -> None:
     assert "per-slot frame cache" in readme
     assert "`idotmatrix` wled effect" in readme.lower()
 
-    release_notes = (ROOT / "RELEASE_NOTES_0.9.1.md").read_text(encoding="utf-8")
-    assert "Graffiti" in release_notes
-    assert "0x00" in release_notes and "0x02" in release_notes
-    assert "OTA" in release_notes
-    assert "overrides/" in release_notes and "partitions/" in release_notes
+    release_notes = (ROOT / "RELEASE_NOTES_0.9.2-dev.8.md").read_text(encoding="utf-8")
+    assert "Passive buzzer" in release_notes
+    assert "buzzerType" in release_notes and "buzzerPassiveTrigger" in release_notes
+    assert "Clock presentation persistence" in release_notes
+    assert "NVS" in release_notes and "showDate=0" in release_notes
 
     assert "host" in testing.lower()
     assert "Graffiti full-raster validation" in testing
@@ -138,7 +140,7 @@ def check_documentation_contract() -> None:
     assert "hardware-validated" in testing
     assert "complex photographic images" in testing
     history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
-    assert history.startswith("## 0.9.1 -")
+    assert history.startswith("## 0.9.2-dev.8")
     assert "4096-byte RGB chunks" in history
     assert "## 0.9.0\n" in history
     assert "## 0.9.0-rc.5" in history and "live TEXT" in history
@@ -153,16 +155,20 @@ def check_documentation_contract() -> None:
     assert "partitions/WLED_ESP32_4MB_IDOT_OTA.csv" in profiles
     assert "NimBLE-Arduino" not in library.get("dependencies", {})
     assert "h2zero/NimBLE-Arduino" not in library.get("dependencies", {})
+    assert "buzzerType" in usermod and "buzzerPassiveTrigger" in usermod
+    assert "clockPreferencesCallback_" in adapter
+    assert "CLOCK_PREFS_NAMESPACE" in usermod
 
 def check_final_documentation_hygiene() -> None:
     current = [
         "README.md", "PROTOCOL.md", "ARCHITECTURE.md", "BUILD_PROFILES.md",
-        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.1.md",
+        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.2-dev.8.md",
+        "RELEASE_NOTES_0.9.1.md",
     ]
     for name in current:
         text = (ROOT / name).read_text(encoding="utf-8")
         assert "0.9.1-rc." not in text, f"{name}: stale RC marker"
-        assert "0.9.1-dev." not in text, f"{name}: stale development marker"
+        assert "0.9.1-dev." not in text, f"{name}: stale previous-development marker"
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "current release-candidate" not in readme.lower()
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
@@ -209,7 +215,7 @@ def check_device_reset_contract() -> None:
     assert 'schedulePrefs_->remove("flags")' in automation_cpp
     assert "Device reset (`03 80`)" in protocol_doc
     assert "not an ESP32/WLED reboot" in protocol_doc
-    assert (ROOT / "RELEASE_NOTES_0.9.1.md").is_file()
+    assert (ROOT / "RELEASE_NOTES_0.9.2-dev.8.md").is_file()
 
 def check_no_heap_free_inside_queue_spinlock() -> None:
     source = (ROOT / "IDotMatrixBLEServer.cpp").read_text(encoding="utf-8")
@@ -292,7 +298,7 @@ def check_rc2_consolidation_contract() -> None:
 
     assert sha in readme and sha in profiles and sha in override
     assert "adafruit_matrixportal_esp32s3_idotmatrix_64x64" in readme
-    assert "RELEASE_NOTES_0.9.1.md" in readme
+    assert "RELEASE_NOTES_0.9.2-dev.8.md" in readme
     assert "release=0.8.2\nbuild=0.8.2" not in readme
     assert "0.9.0-dev.3" not in override
     assert "iDotMatrix Display" not in protocol
@@ -367,6 +373,38 @@ def check_repository_cleanliness() -> None:
             assert path.suffix.lower() not in forbidden_suffixes, f"forbidden build/temp artifact: {rel}"
 
 
+
+def check_buzzer_settings_ui_layout() -> None:
+    usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
+    assert 'font-weight:bold\\">Buzzer</div>' in usermod
+    assert '.sec:has(#ib)>hr,#ib+br{display:none}' in usermod
+    assert 'id=\\"ib\\"' in usermod
+    assert usermod.index('config[FPSTR(CFG_BUZZER_PIN)]') < usermod.index('config[FPSTR(CFG_BUZZER_TYPE)]')
+    assert "d.getElementsByName('iDotMatrix:'+k)" in usermod
+    assert "d.createElement('span')" in usermod
+    assert "s.firstChild.textContent=''" in usermod
+    assert "p=w(q('buzzerPassiveTrigger')),a=w(q('buzzerActiveHigh'))" in usermod
+    assert 'margin-top:8px\\">Active: static GPIO. Passive: 2 kHz LEDC.' not in usermod
+    assert "if(a)a.hidden=x" in usermod
+    assert "if(p)p.hidden=!x" in usermod
+    assert '<b>Buzzer test</b>' not in usermod
+    assert usermod.count('>Test buzzer</button>') == 1
+    assert '>Test buzzer</button><br><i style=\\"color:#fa0\\">Save first: test uses saved settings.</i>' in usermod
+    assert "Save first: test uses saved settings." in usermod
+    assert "let idh=" not in usermod
+    assert "addInfo('iDotMatrix:buzzerActiveHigh',1,'','Active buzzer active-high:')" in usermod
+    assert "addInfo('iDotMatrix:buzzerPassiveTrigger',1,'','Passive buzzer trigger:')" in usermod
+
+
+def check_append_config_data_budget() -> None:
+    import re
+    usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
+    block = usermod.split("void appendConfigData() override", 1)[1].split("\n  }\n};", 1)[0]
+    literals = re.findall(r'oappend\(F\("((?:\\.|[^"\\])*)"\)\);', block)
+    total = sum(len(bytes(x, "utf-8").decode("unicode_escape").encode("utf-8")) for x in literals)
+    assert total < 2800, f"appendConfigData script budget exceeded: {total} bytes"
+
+
 def main() -> None:
     check_versioning()
     check_release_surface()
@@ -382,6 +420,8 @@ def main() -> None:
     check_rc4_large_text_contract()
     check_rc5_text_ownership_contract()
     check_graffiti_multipart_contract()
+    check_buzzer_settings_ui_layout()
+    check_append_config_data_budget()
     check_repository_cleanliness()
     check_final_documentation_hygiene()
     print("Release package checks passed.")

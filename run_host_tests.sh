@@ -72,6 +72,7 @@ $CXX $FLAGS -DIDOT_GIF_BITS=11 -DIDOT_GIF_MAX_DIM=32 -Itests/media_stub IDotMatr
 $CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media12_test"
 "$TMP/idotmatrix_media12_test"
 
+python3 tests/test_buzzer_backend.py
 python3 tests/test_patch_profiles.py
 python3 tests/test_platformio_profiles.py
 python3 tests/test_release_package.py

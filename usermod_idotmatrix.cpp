@@ -18,6 +18,9 @@
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp_system.h>
 #include <esp_heap_caps.h>
+#include <Preferences.h>
+#include <esp32-hal-ledc.h>
+#include <esp_arduino_version.h>
 #endif
 
 #if defined(IDOT_C3_WLED_IDF5) && !defined(CONFIG_IDF_TARGET_ESP32C3)
@@ -46,8 +49,8 @@
 #error "ESP32-S3 iDotMatrix HUB75 profile requires NimBLE-Arduino 2.x"
 #endif
 
-static constexpr const char* IDOTMATRIX_RELEASE = "0.9.1";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.1";
+static constexpr const char* IDOTMATRIX_RELEASE = "0.9.2";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.2-dev.8";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -58,8 +61,34 @@ const char CFG_SCREEN_TYPE[] PROGMEM = "screenType";
 const char CFG_DEVICE_NAME[] PROGMEM = "deviceName";
 const char CFG_RESCALE[] PROGMEM = "rescale";
 const char CFG_BUZZER_PIN[] PROGMEM = "buzzer-pin";
+const char CFG_BUZZER_TYPE[] PROGMEM = "buzzerType";
 const char CFG_BUZZER_ACTIVE_HIGH[] PROGMEM = "buzzerActiveHigh";
+const char CFG_BUZZER_PASSIVE_TRIGGER[] PROGMEM = "buzzerPassiveTrigger";
 const char CFG_AUDIO_SOURCE[] PROGMEM = "audioSource";
+
+enum : uint8_t {
+  BUZZER_TYPE_ACTIVE = 0,
+  BUZZER_TYPE_PASSIVE = 1,
+};
+enum : uint8_t {
+  BUZZER_TRIGGER_HIGH = 0,
+  BUZZER_TRIGGER_LOW = 1,
+};
+constexpr uint32_t BUZZER_PASSIVE_FREQUENCY_HZ = 2000u;
+constexpr uint8_t BUZZER_LEDC_RESOLUTION_BITS = 10u;
+constexpr uint32_t BUZZER_LEDC_MAX_DUTY = (1u << BUZZER_LEDC_RESOLUTION_BITS) - 1u;
+#if defined(ARDUINO_ARCH_ESP32) && ESP_ARDUINO_VERSION_MAJOR < 3
+constexpr uint8_t BUZZER_LEDC_CHANNEL = 7u;
+#endif
+
+constexpr const char* CLOCK_PREFS_NAMESPACE = "idotclock";
+constexpr const char* CLOCK_PREFS_VALID = "valid";
+constexpr const char* CLOCK_PREFS_STYLE = "style";
+constexpr const char* CLOCK_PREFS_FLAGS = "flags";
+constexpr const char* CLOCK_PREFS_R = "r";
+constexpr const char* CLOCK_PREFS_G = "g";
+constexpr const char* CLOCK_PREFS_B = "b";
+constexpr uint32_t CLOCK_PREFS_SAVE_DELAY_MS = 1000u;
 
 #if defined(ARDUINO_ARCH_ESP32)
 struct CrashSnapshot {
@@ -99,13 +128,20 @@ private:
   String deviceName_;
   bool rescale_ = false;
   int8_t buzzerPin_ = -1;
+  uint8_t buzzerType_ = BUZZER_TYPE_ACTIVE;
   bool buzzerActiveHigh_ = true;
+  uint8_t buzzerPassiveTrigger_ = BUZZER_TRIGGER_HIGH;
   bool buzzerHardwareReady_ = false;
+  bool buzzerLedcAttached_ = false;
   bool buzzerPinUnavailable_ = false;
   IDotMatrixAudioSourceMode audioSourceMode_ = IDotMatrixAudioSourceMode::Phone;
   bool audioReactivePresent_ = false;
   bool audioReactiveDataAvailable_ = false;
   uint32_t audioSourceNextPollAt_ = 0;
+  bool clockPrefsDirty_ = false;
+  uint32_t clockPrefsDirtySince_ = 0;
+  IDotMatrixClockSettings pendingClockPrefs_{};
+  uint32_t handledProtocolResetCount_ = 0;
   bool setupComplete_ = false;
   IDotMatrixBuzzer buzzer_;
   IDotMatrixRenderer renderer_;
@@ -285,8 +321,80 @@ private:
     static_cast<IDotMatrixUsermod*>(context)->writeBuzzerOutput(on);
   }
 
+  static void clockPreferencesThunk(
+    void* context,
+    const IDotMatrixClockSettings& settings
+  ) {
+    static_cast<IDotMatrixUsermod*>(context)->scheduleClockPreferencesSave(settings);
+  }
+
+  bool passiveTriggerLow() const {
+    return buzzerPassiveTrigger_ == BUZZER_TRIGGER_LOW;
+  }
+
+  uint32_t passiveIdleDuty() const {
+    return passiveTriggerLow() ? BUZZER_LEDC_MAX_DUTY : 0u;
+  }
+
+  int passiveIdleLevel() const {
+    // A low-level trigger module must idle HIGH while silent.
+    return passiveTriggerLow() ? HIGH : LOW;
+  }
+
+  bool attachPassiveBuzzer() {
+#if defined(ARDUINO_ARCH_ESP32)
+    pinMode(buzzerPin_, OUTPUT);
+    digitalWrite(buzzerPin_, passiveIdleLevel());
+  #if ESP_ARDUINO_VERSION_MAJOR >= 3
+    buzzerLedcAttached_ = ledcAttach(
+      buzzerPin_, BUZZER_PASSIVE_FREQUENCY_HZ, BUZZER_LEDC_RESOLUTION_BITS);
+    return buzzerLedcAttached_;
+  #else
+    if (ledcSetup(BUZZER_LEDC_CHANNEL, BUZZER_PASSIVE_FREQUENCY_HZ,
+                  BUZZER_LEDC_RESOLUTION_BITS) <= 0.0) {
+      return false;
+    }
+    ledcAttachPin(buzzerPin_, BUZZER_LEDC_CHANNEL);
+    buzzerLedcAttached_ = true;
+    return true;
+  #endif
+#else
+    return false;
+#endif
+  }
+
+  void detachPassiveBuzzer() {
+#if defined(ARDUINO_ARCH_ESP32)
+    if (!buzzerLedcAttached_) return;
+  #if ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcDetach(buzzerPin_);
+  #else
+    ledcDetachPin(buzzerPin_);
+  #endif
+    buzzerLedcAttached_ = false;
+#endif
+  }
+
   void writeBuzzerOutput(bool on) {
     if (!buzzerHardwareReady_ || buzzerPin_ < 0) return;
+
+    if (buzzerType_ == BUZZER_TYPE_PASSIVE) {
+#if defined(ARDUINO_ARCH_ESP32)
+      // Arduino-ESP32 3.x ledcWriteTone() switches the channel to 10-bit
+      // resolution. Keep our attached channel and idle-duty calculation at
+      // the same resolution, otherwise trigger-low idle would become ~25%
+      // PWM (255/1023) after the first tone and the buzzer would keep sounding.
+  #if ESP_ARDUINO_VERSION_MAJOR >= 3
+      if (on) ledcWriteTone(buzzerPin_, BUZZER_PASSIVE_FREQUENCY_HZ);
+      else ledcWrite(buzzerPin_, passiveIdleDuty());
+  #else
+      if (on) ledcWriteTone(BUZZER_LEDC_CHANNEL, BUZZER_PASSIVE_FREQUENCY_HZ);
+      else ledcWrite(BUZZER_LEDC_CHANNEL, passiveIdleDuty());
+  #endif
+#endif
+      return;
+    }
+
     digitalWrite(
       buzzerPin_,
       on ? (buzzerActiveHigh_ ? HIGH : LOW)
@@ -298,29 +406,43 @@ private:
     buzzer_.stop();
     if (buzzerHardwareReady_ && buzzerPin_ >= 0) {
       writeBuzzerOutput(false);
+      if (buzzerType_ == BUZZER_TYPE_PASSIVE) detachPassiveBuzzer();
       pinMode(buzzerPin_, INPUT);
     }
     buzzerHardwareReady_ = false;
+    buzzerLedcAttached_ = false;
     buzzerPinUnavailable_ = false;
   }
 
   void setupBuzzerHardware() {
     buzzer_.stop();
     buzzerHardwareReady_ = false;
+    buzzerLedcAttached_ = false;
     buzzerPinUnavailable_ = false;
     if (!enabled_ || buzzerPin_ < 0) return;
 
-    // WLED 0.16.x does not provide a collision-safe PinOwner for out-of-tree
-    // usermods.  The config key deliberately ends in "pin", so WLED's Usermod
-    // settings page advertises it as reserved.  At runtime we additionally
-    // refuse pins already owned by the core or another registered component.
-    // Do not borrow another usermod's PinOwner: that would make deallocation
-    // ambiguous.  If upstream gains external PinOwner registration this check
-    // can become a real allocatePin()/deallocatePin() pair without changing the
-    // user-facing configuration.
+    // WLED does not provide a collision-safe PinOwner for this out-of-tree
+    // usermod. Keep the existing defensive allocation check and refuse pins
+    // already owned by WLED or another registered component.
     if (!PinManager::isPinOk(buzzerPin_, true) || PinManager::isPinAllocated(buzzerPin_)) {
       buzzerPinUnavailable_ = true;
       DEBUG_PRINTF_P(PSTR("[iDotMatrix] buzzer GPIO %d unavailable\n"), buzzerPin_);
+      return;
+    }
+
+    if (buzzerType_ == BUZZER_TYPE_PASSIVE) {
+      if (!attachPassiveBuzzer()) {
+        DEBUG_PRINTF_P(PSTR("[iDotMatrix] passive buzzer LEDC attach failed on GPIO %d\n"), buzzerPin_);
+        pinMode(buzzerPin_, INPUT);
+        return;
+      }
+      buzzerHardwareReady_ = true;
+      writeBuzzerOutput(false);
+      DEBUG_PRINTF_P(
+        PSTR("[iDotMatrix] passive buzzer ready on GPIO %d (%lu Hz, trigger-%s)\n"),
+        buzzerPin_, static_cast<unsigned long>(BUZZER_PASSIVE_FREQUENCY_HZ),
+        passiveTriggerLow() ? "low" : "high"
+      );
       return;
     }
 
@@ -331,6 +453,69 @@ private:
       PSTR("[iDotMatrix] active buzzer ready on GPIO %d (%s)\n"),
       buzzerPin_, buzzerActiveHigh_ ? "active-high" : "active-low"
     );
+  }
+
+  void scheduleClockPreferencesSave(const IDotMatrixClockSettings& settings) {
+#if defined(ARDUINO_ARCH_ESP32)
+    pendingClockPrefs_ = settings;
+    clockPrefsDirty_ = true;
+    clockPrefsDirtySince_ = millis();
+#else
+    (void)settings;
+#endif
+  }
+
+  void flushClockPreferencesSaveIfNeeded() {
+#if defined(ARDUINO_ARCH_ESP32)
+    if (!clockPrefsDirty_) return;
+    if (uint32_t(millis() - clockPrefsDirtySince_) < CLOCK_PREFS_SAVE_DELAY_MS) return;
+
+    Preferences prefs;
+    if (!prefs.begin(CLOCK_PREFS_NAMESPACE, false)) return;
+    const uint8_t flags = (pendingClockPrefs_.use24Hour ? 0x01u : 0x00u) |
+      (pendingClockPrefs_.showDate ? 0x02u : 0x00u);
+    prefs.putBool(CLOCK_PREFS_VALID, true);
+    prefs.putUChar(CLOCK_PREFS_STYLE, pendingClockPrefs_.style & 0x3fu);
+    prefs.putUChar(CLOCK_PREFS_FLAGS, flags);
+    prefs.putUChar(CLOCK_PREFS_R, pendingClockPrefs_.red);
+    prefs.putUChar(CLOCK_PREFS_G, pendingClockPrefs_.green);
+    prefs.putUChar(CLOCK_PREFS_B, pendingClockPrefs_.blue);
+    prefs.end();
+    clockPrefsDirty_ = false;
+#endif
+  }
+
+  void loadClockPreferences() {
+#if defined(ARDUINO_ARCH_ESP32)
+    Preferences prefs;
+    if (!prefs.begin(CLOCK_PREFS_NAMESPACE, true)) return;
+    if (prefs.getBool(CLOCK_PREFS_VALID, false)) {
+      IDotMatrixClockSettings settings;
+      settings.style = prefs.getUChar(CLOCK_PREFS_STYLE, 0) & 0x3fu;
+      const uint8_t flags = prefs.getUChar(CLOCK_PREFS_FLAGS, 0);
+      settings.use24Hour = (flags & 0x01u) != 0;
+      settings.showDate = (flags & 0x02u) != 0;
+      settings.red = prefs.getUChar(CLOCK_PREFS_R, 255);
+      settings.green = prefs.getUChar(CLOCK_PREFS_G, 255);
+      settings.blue = prefs.getUChar(CLOCK_PREFS_B, 255);
+      adapter_.setClockPreferences(settings);
+      pendingClockPrefs_ = settings;
+    }
+    prefs.end();
+#endif
+  }
+
+  void clearClockPreferences() {
+#if defined(ARDUINO_ARCH_ESP32)
+    Preferences prefs;
+    if (prefs.begin(CLOCK_PREFS_NAMESPACE, false)) {
+      prefs.clear();
+      prefs.end();
+    }
+#endif
+    clockPrefsDirty_ = false;
+    pendingClockPrefs_ = IDotMatrixClockSettings{};
+    adapter_.setClockPreferences(pendingClockPrefs_);
   }
 
   void registerBuzzerTestEndpoint() {
@@ -379,6 +564,8 @@ public:
     rtcSnapshot.magic = SNAPSHOT_MAGIC;
 #endif
     buzzer_.attach(&IDotMatrixUsermod::buzzerOutputThunk, this);
+    adapter_.setClockPreferencesCallback(&IDotMatrixUsermod::clockPreferencesThunk, this);
+    loadClockPreferences();
     protocol_.setAutomationEvents(&automation_);
     protocol_.setCarouselEvents(&carousel_);
     protocol_.setPresetEvents(&preset_);
@@ -492,6 +679,12 @@ public:
 
     serviceAudioSource(millis());
     protocol_.loop(millis());
+    const uint32_t resetCount = adapter_.protocolResetCount();
+    if (resetCount != handledProtocolResetCount_) {
+      handledProtocolResetCount_ = resetCount;
+      clearClockPreferences();
+    }
+    flushClockPreferencesSaveIfNeeded();
     ble_.loop();
 
     // Selecting iDotMatrix means: stored Carousel first, otherwise
@@ -691,6 +884,11 @@ public:
       info.add(F("buzzer=disabled"));
     } else if (buzzerPinUnavailable_) {
       info.add(String(F("buzzer=gpio ")) + String(buzzerPin_) + F(" unavailable"));
+    } else if (buzzerHardwareReady_ && buzzerType_ == BUZZER_TYPE_PASSIVE) {
+      info.add(String(F("buzzer=passive gpio=")) + String(buzzerPin_) +
+        F(" frequency=") + String(BUZZER_PASSIVE_FREQUENCY_HZ) +
+        F("Hz trigger=") + (passiveTriggerLow() ? F("low ") : F("high ")) +
+        (buzzer_.isPlaying() ? F("playing") : F("idle")));
     } else if (buzzerHardwareReady_) {
       info.add(String(F("buzzer=active gpio=")) + String(buzzerPin_) +
         F(" polarity=") + (buzzerActiveHigh_ ? F("high ") : F("low ")) +
@@ -838,9 +1036,14 @@ public:
 #if IDOT_SCREEN_MAX_DIM > 16
     config[FPSTR(CFG_RESCALE)] = rescale_;
 #endif
-    config[FPSTR(CFG_BUZZER_PIN)] = buzzerPin_;
-    config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)] = buzzerActiveHigh_;
+    // Keep audio configuration separate from the buzzer controls. Buzzer
+    // settings are intentionally last so the shared Test buzzer action can
+    // appear at the bottom of the section instead of looking active-only.
     config[FPSTR(CFG_AUDIO_SOURCE)] = static_cast<uint8_t>(audioSourceMode_);
+    config[FPSTR(CFG_BUZZER_PIN)] = buzzerPin_;
+    config[FPSTR(CFG_BUZZER_TYPE)] = buzzerType_;
+    config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)] = buzzerActiveHigh_;
+    config[FPSTR(CFG_BUZZER_PASSIVE_TRIGGER)] = buzzerPassiveTrigger_;
   }
 
   bool readFromConfig(JsonObject& root) override {
@@ -848,7 +1051,9 @@ public:
     if (config.isNull()) return false;
 
     const int8_t previousBuzzerPin = buzzerPin_;
+    const uint8_t previousBuzzerType = buzzerType_;
     const bool previousBuzzerActiveHigh = buzzerActiveHigh_;
+    const uint8_t previousBuzzerPassiveTrigger = buzzerPassiveTrigger_;
     const bool previousEnabled = enabled_;
     const IDotMatrixAudioSourceMode previousAudioSource = audioSourceMode_;
     uint8_t audioSourceRaw = static_cast<uint8_t>(audioSourceMode_);
@@ -865,7 +1070,11 @@ public:
     rescale_ = false;
 #endif
     complete &= getJsonValue(config[FPSTR(CFG_BUZZER_PIN)], buzzerPin_, int8_t(-1));
+    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_TYPE)], buzzerType_, uint8_t(BUZZER_TYPE_ACTIVE));
     complete &= getJsonValue(config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)], buzzerActiveHigh_, true);
+    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_PASSIVE_TRIGGER)], buzzerPassiveTrigger_, uint8_t(BUZZER_TRIGGER_HIGH));
+    if (buzzerType_ > BUZZER_TYPE_PASSIVE) buzzerType_ = BUZZER_TYPE_ACTIVE;
+    if (buzzerPassiveTrigger_ > BUZZER_TRIGGER_LOW) buzzerPassiveTrigger_ = BUZZER_TRIGGER_HIGH;
     complete &= getJsonValue(config[FPSTR(CFG_AUDIO_SOURCE)], audioSourceRaw, uint8_t(0));
 
     audioSourceMode_ = IDotMatrixAudioSource::normalizeMode(audioSourceRaw);
@@ -880,15 +1089,23 @@ public:
     if (setupComplete_ && previousEnabled != enabled_) runtimeRestartRequired_ = true;
     if (setupComplete_ &&
         (previousBuzzerPin != buzzerPin_ ||
+         previousBuzzerType != buzzerType_ ||
          previousBuzzerActiveHigh != buzzerActiveHigh_ ||
+         previousBuzzerPassiveTrigger != buzzerPassiveTrigger_ ||
          previousEnabled != enabled_)) {
       const int8_t requestedPin = buzzerPin_;
+      const uint8_t requestedType = buzzerType_;
       const bool requestedActiveHigh = buzzerActiveHigh_;
+      const uint8_t requestedPassiveTrigger = buzzerPassiveTrigger_;
       buzzerPin_ = previousBuzzerPin;
+      buzzerType_ = previousBuzzerType;
       buzzerActiveHigh_ = previousBuzzerActiveHigh;
+      buzzerPassiveTrigger_ = previousBuzzerPassiveTrigger;
       teardownBuzzerHardware();
       buzzerPin_ = requestedPin;
+      buzzerType_ = requestedType;
       buzzerActiveHigh_ = requestedActiveHigh;
+      buzzerPassiveTrigger_ = requestedPassiveTrigger;
       setupBuzzerHardware();
     }
     // Derive this status from the configuration currently active in the BLE
@@ -900,27 +1117,42 @@ public:
   }
 
   void appendConfigData() override {
-    oappend(F("dd=addDropdown('iDotMatrix','screenType');"));
-    oappend(F("addOption(dd,'16 x 16',1);"));
+    oappend(F("dd=addDropdown('iDotMatrix','screenType');addOption(dd,'16 x 16',1);"));
 #if IDOT_SCREEN_MAX_DIM >= 32
     oappend(F("addOption(dd,'32 x 32',3);"));
 #endif
 #if IDOT_SCREEN_MAX_DIM >= 64
     oappend(F("addOption(dd,'64 x 64',4);"));
 #endif
-    oappend(F("dd=addDropdown('iDotMatrix','audioSource');"));
-    oappend(F("addOption(dd,'Phone / BLE',0);"));
-    oappend(F("addOption(dd,'WLED AudioReactive',1);"));
-    oappend(F("addOption(dd,'Auto (AudioReactive, then Phone)',2);"));
-    oappend(F("(()=>{const s=(k,o,n)=>{let e=document.querySelector('[name=\"iDotMatrix:'+k+'\"]');if(!e)return;if(e.id){let l=document.querySelector('label[for=\"'+e.id+'\"]');if(l){l.textContent=n;return;}}for(let p=e.parentElement,d=0;p&&d<5;p=p.parentElement,d++){for(let x of p.childNodes)if(x.nodeType===3&&x.nodeValue.trim()===o){x.nodeValue=x.nodeValue.replace(o,n);return;}for(let l of p.querySelectorAll('label,span,td'))if(l.children.length===0&&l.textContent.trim()===o){l.textContent=n;return;}}};s('enabled','Enabled','Enabled:');s('screenType','ScreenType','ScreenType:');s('deviceName','DeviceName','DeviceName:');s('rescale','Rescale','Scale the logical profile to the selected WLED 2D segment:');s('buzzer-pin','Buzzer Pin','Buzzer Pin:');s('buzzerActiveHigh','BuzzerActiveHigh','BuzzerActiveHigh:');s('audioSource','AudioSource','Audio Source:');})();"));
+    oappend(F("dd=addDropdown('iDotMatrix','buzzerType');addOption(dd,'Active',0);addOption(dd,'Passive',1);"));
+    oappend(F("dd=addDropdown('iDotMatrix','buzzerPassiveTrigger');addOption(dd,'High',0);addOption(dd,'Low',1);"));
+    oappend(F("dd=addDropdown('iDotMatrix','audioSource');addOption(dd,'Phone / BLE',0);addOption(dd,'WLED AudioReactive',1);addOption(dd,'Auto (AudioReactive, then Phone)',2);"));
+
+    // Use addInfo()'s label override instead of a large DOM-rewrite script. The
+    // append buffer is deliberately kept below WLED's ~3 KiB limit.
+    oappend(F("addInfo('iDotMatrix:enabled',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Changing Enabled requires reboot.</div>','Enabled:');"));
 #if IDOT_SCREEN_MAX_DIM > 16
-    oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
+    oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>','ScreenType:');"));
+#else
+    oappend(F("addInfo('iDotMatrix:screenType',1,'','ScreenType:');"));
 #endif
-    oappend(F("(()=>{let e=document.querySelector('[name=\"iDotMatrix:deviceName\"]');if(!e){let r=[...document.querySelectorAll('tr')].find(x=>x.cells&&x.cells[0]&&x.cells[0].textContent.trim()==='DeviceName');e=r&&r.querySelector('input');}if(e&&!document.getElementById('idotmatrix-prefix'))e.insertAdjacentHTML('beforebegin','<span id=\"idotmatrix-prefix\">IDM-</span>');})();"));
-    oappend(F("addInfo('iDotMatrix:enabled',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Changing Enabled requires reboot.</div>');"));
-    oappend(F("addInfo('iDotMatrix:deviceName',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
-    oappend(F("addInfo('iDotMatrix:audioSource',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">AudioReactive uses WLED Usermod data when that Usermod is compiled and enabled. Auto falls back to Phone / BLE; explicit AudioReactive becomes silent if local audio data is unavailable.</div>');"));
-    oappend(F("addInfo('iDotMatrix:buzzerActiveHigh',1,'<button type=\"button\" onclick=\"fetch(&quot;/idotmatrix/buzzer-test&quot;,{method:&quot;POST&quot;}).then(async r=>{if(!r.ok)alert(await r.text())}).catch(()=>alert(&quot;Buzzer test failed&quot;))\">Test buzzer</button><div style=\"color:#fa0;font-style:italic;margin-top:8px\">Save before testing.</div>');"));
+    oappend(F("addInfo('iDotMatrix:deviceName',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>','DeviceName:');"));
+#if IDOT_SCREEN_MAX_DIM > 16
+    oappend(F("addInfo('iDotMatrix:rescale',1,'','Scale the logical profile to the selected WLED 2D segment:');"));
+#endif
+    oappend(F("addInfo('iDotMatrix:audioSource',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">AudioReactive uses WLED Usermod data when available. Auto falls back to Phone / BLE.</div><style>.sec:has(#ib)>hr,#ib+br{display:none}</style><div id=\"ib\" style=\"margin-top:20px;font-size:1.15em;font-weight:bold\">Buzzer</div>','Audio Source:');"));
+    oappend(F("addInfo('iDotMatrix:buzzer-pin',1,'','Buzzer Pin:');"));
+    oappend(F("addInfo('iDotMatrix:buzzerType',1,'<br><i style=\"color:#fa0\">Active: static GPIO. Passive: 2 kHz LEDC.</i>','Buzzer Type:');"));
+
+    // WLED renders Usermod fields as a flat sequence separated by <br>, not as
+    // per-field rows. Wrap the later Passive line first, then the Active line: if
+    // Active is wrapped first, the Passive backward scan can absorb that wrapper
+    // and hiding Passive also hides Active. Only these two lines are toggled.
+    oappend(F("addInfo('iDotMatrix:buzzerActiveHigh',1,'','Active buzzer active-high:');"));
+    oappend(F("addInfo('iDotMatrix:buzzerPassiveTrigger',1,'','Passive buzzer trigger:');"));
+    oappend(F("setTimeout(()=>{let q=k=>{let v=d.getElementsByName('iDotMatrix:'+k);return v[v.length-1]},w=e=>{if(!e)return;let b=e;while(b.previousSibling&&b.previousSibling.nodeName!='BR')b=b.previousSibling;let s=d.createElement('span');b.before(s);while(s.nextSibling){let n=s.nextSibling;s.append(n);if(n.nodeName=='BR')break}s.firstChild.textContent='';return s},t=q('buzzerType'),p=w(q('buzzerPassiveTrigger')),a=w(q('buzzerActiveHigh'));if(p)p.insertAdjacentHTML('afterend',`<span><button type=\"button\" onclick=\"fetch('/idotmatrix/buzzer-test',{method:'POST'}).then(async r=>{if(!r.ok)alert(await r.text())}).catch(()=>alert('Buzzer test failed'))\">Test buzzer</button><br><i style=\"color:#fa0\">Save first: test uses saved settings.</i><br></span>`);let u=()=>{let x=t&&t.value=='1';if(a)a.hidden=x;if(p)p.hidden=!x};if(t){t.addEventListener('change',u);u()}},0);"));
+
+    oappend(F("setTimeout(()=>{let e=d.querySelector('[name=\"iDotMatrix:deviceName\"]');if(e&&!d.getElementById('idotmatrix-prefix'))e.insertAdjacentHTML('beforebegin','<span id=\"idotmatrix-prefix\">IDM-</span>')},0);"));
   }
 };
 

@@ -527,6 +527,12 @@ void IDotMatrixWLEDAdapter::restoreClockFallback() {
   onClock(clockSettings_);
 }
 
+void IDotMatrixWLEDAdapter::setClockPreferences(const IDotMatrixClockSettings& settings) {
+  clockSettings_ = settings;
+  clockDatePreference_ = settings.showDate;
+  clockEntryDateGraceUntil_ = 0u;
+}
+
 void IDotMatrixWLEDAdapter::beginGifBlankStaging() {
   if (gifBlankStaging_) return;
 
@@ -932,7 +938,17 @@ void IDotMatrixWLEDAdapter::onClock(const IDotMatrixClockSettings& settings) {
   gifPrecache_ = false;
   gifStaging_ = false;
   stopMediaPlayback();
+  const bool preferencesChanged =
+    clockSettings_.style != effectiveSettings.style ||
+    clockSettings_.use24Hour != effectiveSettings.use24Hour ||
+    clockSettings_.showDate != effectiveSettings.showDate ||
+    clockSettings_.red != effectiveSettings.red ||
+    clockSettings_.green != effectiveSettings.green ||
+    clockSettings_.blue != effectiveSettings.blue;
   clockSettings_ = effectiveSettings;
+  if (preferencesChanged && clockPreferencesCallback_ != nullptr) {
+    clockPreferencesCallback_(clockPreferencesContext_, clockSettings_);
+  }
   clockCycleStartedAt_ = millis();
   renderer_.setVisible(true);
   activateDisplayEffect();

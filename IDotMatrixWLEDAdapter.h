@@ -132,6 +132,12 @@ public:
   // displayed does not clear unrelated live content.
   void releaseCarouselMediaForStorageMutation();
   void restoreClockFallback();
+  using ClockPreferencesCallback = void (*)(void* context, const IDotMatrixClockSettings& settings);
+  void setClockPreferences(const IDotMatrixClockSettings& settings);
+  void setClockPreferencesCallback(ClockPreferencesCallback callback, void* context) {
+    clockPreferencesCallback_ = callback;
+    clockPreferencesContext_ = context;
+  }
   uint8_t displayEffectId() const { return displayEffectId_; }
   bool isClockActive() const { return clockActive_; }
   bool isCountdownActive() const { return countdownActive_; }
@@ -239,6 +245,8 @@ private:
   uint32_t clockCycleStartedAt_ = 0;
   uint32_t clockEntryDateGraceUntil_ = 0;
   bool clockDatePreference_ = false;
+  ClockPreferencesCallback clockPreferencesCallback_ = nullptr;
+  void* clockPreferencesContext_ = nullptr;
   bool countdownRunning_ = false;
   bool countdownPaused_ = false;
   bool countdownFinishPending_ = false;
