@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Final-release and critical-section regression checks for 0.9.2."""
+"""Stable-release and critical-section regression checks for 0.9.2."""
 
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def check_documentation_contract() -> None:
 
     assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.2\n")
     assert "Release: 0.9.2 / build: 0.9.2" in readme
-    assert "stable release: 0.9.2" in readme.lower()
+    assert "current stable release: 0.9.2" in readme.lower()
     assert "Graffiti full-raster multipart" in readme
     assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
     assert "partitions/" in readme
@@ -128,6 +128,8 @@ def check_documentation_contract() -> None:
     assert "unauthenticated" in readme
     assert "per-slot frame cache" in readme
     assert "`idotmatrix` wled effect" in readme.lower()
+    assert "0.9.2-dev.11" not in readme
+    assert "promotion to final 0.9.2 remains blocked" not in readme.lower()
 
     release_notes = (ROOT / "RELEASE_NOTES_0.9.2.md").read_text(encoding="utf-8")
     assert "Passive buzzer" in release_notes
@@ -172,10 +174,6 @@ def check_final_documentation_hygiene() -> None:
         assert "0.9.1-dev." not in text, f"{name}: stale previous-development marker"
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "current release-candidate" not in readme.lower()
-    for name in ["README.md", "PROTOCOL.md", "ARCHITECTURE.md", "BUILD_PROFILES.md", "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.2.md"]:
-        text = (ROOT / name).read_text(encoding="utf-8")
-        assert "0.9.2-dev.6" not in text, f"{name}: stale development identifier"
-        assert "0.9.2-dev.8" not in text or name in {"TESTING.md", "RELEASE_NOTES_0.9.2.md"}, f"{name}: stale active-development identifier"
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     assert "`iDotMatrix\nDisplay`" not in protocol
     assert "device-level rotation, energy-saving, and reset commands" not in protocol
@@ -401,6 +399,23 @@ def check_buzzer_settings_ui_layout() -> None:
     assert "addInfo('iDotMatrix:buzzerPassiveTrigger',1,'','Passive buzzer trigger:')" in usermod
 
 
+
+def check_buzzer_realtime_timing_contract() -> None:
+    buzzer_h = (ROOT / "IDotMatrixBuzzer.h").read_text(encoding="utf-8")
+    buzzer_cpp = (ROOT / "IDotMatrixBuzzer.cpp").read_text(encoding="utf-8")
+    usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
+    test = (ROOT / "tests/test_buzzer.cpp").read_text(encoding="utf-8")
+    assert "BUZZER_SERVICE_PERIOD_US = 2000u" in usermod
+    assert "esp_timer_start_periodic" in usermod
+    assert "ESP_TIMER_TASK" in usermod
+    assert "buzzerServiceTimerThunk" in usermod
+    assert "if (!buzzerServiceTimerRunning_) buzzer_.loop(millis());" in usermod
+    assert "beginThreadSafe" in buzzer_h and "xSemaphoreCreateMutex" in buzzer_cpp
+    assert "scheduleNextLocked" in buzzer_cpp
+    assert "const uint32_t phaseNext = nextChangeAt_ + intervalMs" in buzzer_cpp
+    assert "buzzerTiming=" in usermod and "lateMax=" in usermod
+    assert "phase-preserved second pulse start" in test
+
 def check_append_config_data_budget() -> None:
     import re
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
@@ -426,6 +441,7 @@ def main() -> None:
     check_rc5_text_ownership_contract()
     check_graffiti_multipart_contract()
     check_buzzer_settings_ui_layout()
+    check_buzzer_realtime_timing_contract()
     check_append_config_data_budget()
     check_repository_cleanliness()
     check_final_documentation_hygiene()

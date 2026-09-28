@@ -355,13 +355,128 @@ static void testAppTimeSyncOverridesValidWledClockForAlarm() {
   alarm.hour = 2;
   alarm.minute = 51;
   alarm.durationSeconds = 10;
+  alarm.buzzer = 1;
   alarm.packetLength = 12;
   assert(f.automation.onAlarm(alarm, nullptr, 0));
 
   f.automation.loop(1600);
   assert(f.automation.alarmActive_);
   assert(f.automation.activeAlarmSlot_ == 0);
+  assert(f.buzzer.isPlaying());
   assert((f.automation.alarms_[0].flags & 0x01u) == 0); // one-shot consumed
+}
+
+static void testSilentAlarmRemainsSilent() {
+  resetState();
+  Fixture f;
+  f.automation.begin();
+
+  testMillis = 1000;
+  testYear = 1970;
+  IDotMatrixTimeSyncSettings sync{};
+  sync.year = 2026; sync.month = 9; sync.day = 28;
+  sync.hour = 9; sync.minute = 15; sync.second = 0;
+  f.automation.onTimeSync(sync);
+
+  IDotMatrixAlarmSettings alarm{};
+  alarm.slot = 0;
+  alarm.flags = 0x01;
+  alarm.hour = 9;
+  alarm.minute = 15;
+  alarm.durationSeconds = 10;
+  alarm.buzzer = 0;
+  alarm.packetLength = 12;
+  assert(f.automation.onAlarm(alarm, nullptr, 0));
+
+  f.automation.loop(1600);
+  assert(f.automation.alarmActive_);
+  assert(!f.buzzer.isPlaying());
+}
+
+static void testScheduleSoundStartsOnActivation() {
+  resetState();
+  Fixture f;
+  f.automation.begin();
+
+  testMillis = 1000;
+  testYear = 1970;
+  IDotMatrixTimeSyncSettings sync{};
+  sync.year = 2026; sync.month = 9; sync.day = 28;
+  sync.hour = 9; sync.minute = 0; sync.second = 0;
+  f.automation.onTimeSync(sync);
+
+  const std::vector<uint8_t> media{1, 2, 3, 4};
+  f.automation.onScheduleGlobal(0x03); // enabled + sound
+  const auto settings = scheduleSettings(0, media, 88);
+  assert(f.automation.onScheduleActivity(settings, media.data(), media.size()));
+  f.automation.commitScheduleUpload();
+
+  f.automation.loop(1600);
+  assert(f.automation.scheduleActiveIndex_ == 0);
+  assert(f.buzzer.isPlaying());
+}
+
+
+static void testAlarmSoundUsesPostMediaTimestamp() {
+  resetState();
+  Fixture f;
+  f.automation.begin();
+
+  testMillis = 1000;
+  testYear = 1970;
+  IDotMatrixTimeSyncSettings sync{};
+  sync.year = 2026; sync.month = 9; sync.day = 28;
+  sync.hour = 10; sync.minute = 30; sync.second = 0;
+  f.automation.onTimeSync(sync);
+
+  const std::vector<uint8_t> media{1, 2, 3, 4, 5, 6};
+  IDotMatrixAlarmSettings alarm{};
+  alarm.slot = 0;
+  alarm.flags = 0x01;
+  alarm.hour = 10;
+  alarm.minute = 30;
+  alarm.durationSeconds = 10;
+  alarm.contentType = 0x02; // RAW
+  alarm.buzzer = 1;
+  alarm.mediaSize = static_cast<uint32_t>(media.size());
+  alarm.mediaCRC = crc32(media.data(), media.size());
+  alarm.packetLength = IDotMatrixAlarmSettings::FULL_HEADER_SIZE;
+  alarm.fullHeader = true;
+  assert(f.automation.onAlarm(alarm, media.data(), media.size()));
+
+  f.adapter.mediaLoadDelayMs = 250;
+  testMillis = 1600;
+  f.automation.loop(1600);
+
+  assert(f.automation.alarmActive_);
+  assert(f.buzzer.lastTrillStart_ == 1850);
+  assert(f.automation.alarmEndsAt_ == 11850);
+}
+
+static void testScheduleSoundUsesPostMediaTimestamp() {
+  resetState();
+  Fixture f;
+  f.automation.begin();
+
+  testMillis = 1000;
+  testYear = 1970;
+  IDotMatrixTimeSyncSettings sync{};
+  sync.year = 2026; sync.month = 9; sync.day = 28;
+  sync.hour = 9; sync.minute = 0; sync.second = 0;
+  f.automation.onTimeSync(sync);
+
+  const std::vector<uint8_t> media{1, 2, 3, 4};
+  f.automation.onScheduleGlobal(0x03); // enabled + sound
+  const auto settings = scheduleSettings(0, media, 89);
+  assert(f.automation.onScheduleActivity(settings, media.data(), media.size()));
+  f.automation.commitScheduleUpload();
+
+  f.adapter.mediaLoadDelayMs = 250;
+  testMillis = 1600;
+  f.automation.loop(1600);
+
+  assert(f.automation.scheduleActiveIndex_ == 0);
+  assert(f.buzzer.lastScheduleStart_ == 1850);
 }
 
 static void testDeviceResetClearsPersistentAutomationButKeepsTimeSync() {
@@ -431,6 +546,10 @@ int main() {
   testAlarmPersistence();
   testTimeBehaviour();
   testAppTimeSyncOverridesValidWledClockForAlarm();
+  testSilentAlarmRemainsSilent();
+  testScheduleSoundStartsOnActivation();
+  testAlarmSoundUsesPostMediaTimestamp();
+  testScheduleSoundUsesPostMediaTimestamp();
   testDeviceResetClearsPersistentAutomationButKeepsTimeSync();
   testExplicitScheduleClear();
   return 0;

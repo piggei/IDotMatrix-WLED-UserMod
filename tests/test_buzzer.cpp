@@ -52,6 +52,28 @@ int main() {
   assert(!buzzer.outputOn());
   assert(!sink.on && sink.transitions == 8);
 
+  // Small service jitter must not accumulate from edge to edge. A first edge
+  // serviced 5 ms late still keeps the following edge on the original 160 ms
+  // phase (1090 + 70 = 1160), instead of drifting to 1165.
+  {
+    Sink jitterSink;
+    IDotMatrixBuzzer jitterBuzzer;
+    jitterBuzzer.attach(&output, &jitterSink);
+    jitterBuzzer.startTest(1000);
+    jitterBuzzer.loop(1095); // first pulse ends 5 ms late
+    assert(!jitterSink.on);
+    jitterBuzzer.loop(1159);
+    assert(!jitterSink.on);
+    jitterBuzzer.loop(1160); // phase-preserved second pulse start
+    assert(jitterSink.on);
+    jitterBuzzer.loop(1254); // second pulse ends 4 ms late
+    assert(!jitterSink.on);
+    jitterBuzzer.loop(1319);
+    assert(!jitterSink.on);
+    jitterBuzzer.loop(1320); // phase-preserved third pulse start
+    assert(jitterSink.on);
+  }
+
   // stop() is idempotent and does not emit redundant GPIO transitions.
   buzzer.stop();
   assert(sink.transitions == 8);
@@ -77,6 +99,45 @@ int main() {
 
   buzzer.stop();
   assert(sink.transitions == 14);
+
+  // Natural Countdown completion is also exactly one three-pulse trill.
+  {
+    Sink countdownSink;
+    IDotMatrixBuzzer countdownBuzzer;
+    countdownBuzzer.attach(&output, &countdownSink);
+    countdownBuzzer.startCountdownAlert(5000);
+    assert(countdownBuzzer.isPlaying());
+    assert(countdownSink.on && countdownSink.transitions == 1);
+    countdownBuzzer.loop(5090);
+    assert(!countdownSink.on && countdownSink.transitions == 2);
+    countdownBuzzer.loop(5160);
+    assert(countdownSink.on && countdownSink.transitions == 3);
+    countdownBuzzer.loop(5250);
+    assert(!countdownSink.on && countdownSink.transitions == 4);
+    countdownBuzzer.loop(5320);
+    assert(countdownSink.on && countdownSink.transitions == 5);
+    countdownBuzzer.loop(5410);
+    assert(!countdownBuzzer.isPlaying());
+    assert(!countdownSink.on && countdownSink.transitions == 6);
+  }
+
+  // BLE connection notification is the lowest-priority notice and consists of
+  // one short 90 ms pulse only, not a full trill.
+  {
+    Sink connectionSink;
+    IDotMatrixBuzzer connectionBuzzer;
+    connectionBuzzer.attach(&output, &connectionSink);
+    connectionBuzzer.startConnectionBeep(5500);
+    assert(connectionBuzzer.isPlaying());
+    assert(connectionSink.on && connectionSink.transitions == 1);
+    connectionBuzzer.loop(5589);
+    assert(connectionSink.on && connectionSink.transitions == 1);
+    connectionBuzzer.loop(5590);
+    assert(!connectionBuzzer.isPlaying());
+    assert(!connectionSink.on && connectionSink.transitions == 2);
+    connectionBuzzer.loop(7000);
+    assert(connectionSink.transitions == 2);
+  }
 
   // A schedule notification is exactly three groups of three pulses.  It must
   // not keep sounding for the full duration of the schedule activity.

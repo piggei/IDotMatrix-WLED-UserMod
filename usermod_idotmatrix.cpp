@@ -21,6 +21,7 @@
 #include <Preferences.h>
 #include <esp32-hal-ledc.h>
 #include <esp_arduino_version.h>
+#include <esp_timer.h>
 #endif
 
 #if defined(IDOT_C3_WLED_IDF5) && !defined(CONFIG_IDF_TARGET_ESP32C3)
@@ -77,6 +78,7 @@ enum : uint8_t {
 constexpr uint32_t BUZZER_PASSIVE_FREQUENCY_HZ = 2000u;
 constexpr uint8_t BUZZER_LEDC_RESOLUTION_BITS = 10u;
 constexpr uint32_t BUZZER_LEDC_MAX_DUTY = (1u << BUZZER_LEDC_RESOLUTION_BITS) - 1u;
+constexpr uint64_t BUZZER_SERVICE_PERIOD_US = 2000u;
 #if defined(ARDUINO_ARCH_ESP32) && ESP_ARDUINO_VERSION_MAJOR < 3
 constexpr uint8_t BUZZER_LEDC_CHANNEL = 7u;
 #endif
@@ -158,7 +160,12 @@ private:
   uint32_t startAt_ = 0;
   bool bleRestartRequired_ = false;
   bool runtimeRestartRequired_ = false;
+  bool bleConnectedLast_ = false;
+  bool connectionBeepPending_ = false;
 #if defined(ARDUINO_ARCH_ESP32)
+  esp_timer_handle_t buzzerServiceTimer_ = nullptr;
+  bool buzzerServiceTimerRunning_ = false;
+  bool buzzerThreadSafe_ = false;
   esp_reset_reason_t bootResetReason_ = ESP_RST_UNKNOWN;
   CrashSnapshot previousSnapshot_{};
   bool previousSnapshotValid_ = false;
@@ -321,6 +328,42 @@ private:
     static_cast<IDotMatrixUsermod*>(context)->writeBuzzerOutput(on);
   }
 
+#if defined(ARDUINO_ARCH_ESP32)
+  static void buzzerServiceTimerThunk(void* context) {
+    auto* self = static_cast<IDotMatrixUsermod*>(context);
+    self->buzzer_.loop(millis());
+  }
+
+  void stopBuzzerServiceTimer() {
+    if (buzzerServiceTimer_ != nullptr && buzzerServiceTimerRunning_) {
+      esp_timer_stop(buzzerServiceTimer_);
+      buzzerServiceTimerRunning_ = false;
+    }
+  }
+
+  bool startBuzzerServiceTimer() {
+    if (!buzzerThreadSafe_) return false;
+    if (buzzerServiceTimer_ == nullptr) {
+      esp_timer_create_args_t args{};
+      args.callback = &IDotMatrixUsermod::buzzerServiceTimerThunk;
+      args.arg = this;
+      args.dispatch_method = ESP_TIMER_TASK;
+      args.name = "idot-buzzer";
+      args.skip_unhandled_events = true;
+      if (esp_timer_create(&args, &buzzerServiceTimer_) != ESP_OK) {
+        buzzerServiceTimer_ = nullptr;
+        return false;
+      }
+    }
+    if (buzzerServiceTimerRunning_) return true;
+    if (esp_timer_start_periodic(buzzerServiceTimer_, BUZZER_SERVICE_PERIOD_US) != ESP_OK) {
+      return false;
+    }
+    buzzerServiceTimerRunning_ = true;
+    return true;
+  }
+#endif
+
   static void clockPreferencesThunk(
     void* context,
     const IDotMatrixClockSettings& settings
@@ -403,6 +446,9 @@ private:
   }
 
   void teardownBuzzerHardware() {
+#if defined(ARDUINO_ARCH_ESP32)
+    stopBuzzerServiceTimer();
+#endif
     buzzer_.stop();
     if (buzzerHardwareReady_ && buzzerPin_ >= 0) {
       writeBuzzerOutput(false);
@@ -438,6 +484,11 @@ private:
       }
       buzzerHardwareReady_ = true;
       writeBuzzerOutput(false);
+#if defined(ARDUINO_ARCH_ESP32)
+      if (!startBuzzerServiceTimer()) {
+        DEBUG_PRINTLN(F("[iDotMatrix] buzzer esp_timer unavailable; using WLED-loop fallback"));
+      }
+#endif
       DEBUG_PRINTF_P(
         PSTR("[iDotMatrix] passive buzzer ready on GPIO %d (%lu Hz, trigger-%s)\n"),
         buzzerPin_, static_cast<unsigned long>(BUZZER_PASSIVE_FREQUENCY_HZ),
@@ -449,6 +500,11 @@ private:
     pinMode(buzzerPin_, OUTPUT);
     buzzerHardwareReady_ = true;
     writeBuzzerOutput(false);
+#if defined(ARDUINO_ARCH_ESP32)
+    if (!startBuzzerServiceTimer()) {
+      DEBUG_PRINTLN(F("[iDotMatrix] buzzer esp_timer unavailable; using WLED-loop fallback"));
+    }
+#endif
     DEBUG_PRINTF_P(
       PSTR("[iDotMatrix] active buzzer ready on GPIO %d (%s)\n"),
       buzzerPin_, buzzerActiveHigh_ ? "active-high" : "active-low"
@@ -564,6 +620,12 @@ public:
     rtcSnapshot.magic = SNAPSHOT_MAGIC;
 #endif
     buzzer_.attach(&IDotMatrixUsermod::buzzerOutputThunk, this);
+#if defined(ARDUINO_ARCH_ESP32)
+    buzzerThreadSafe_ = buzzer_.beginThreadSafe();
+    if (!buzzerThreadSafe_) {
+      DEBUG_PRINTLN(F("[iDotMatrix] buzzer mutex allocation failed; using WLED-loop timing"));
+    }
+#endif
     adapter_.setClockPreferencesCallback(&IDotMatrixUsermod::clockPreferencesThunk, this);
     loadClockPreferences();
     protocol_.setAutomationEvents(&automation_);
@@ -655,9 +717,14 @@ public:
   void loop() override {
     if (!enabled_) return;
 
-    // The optional buzzer is independent of BLE/display rendering. Keep its
-    // non-blocking pattern engine alive even when BLE is blocked by an RMT bus.
+    // ESP32 uses a high-priority esp_timer service so Alarm/Program envelope
+    // timing is independent of WLED/GIF/filesystem loop jitter. If timer setup
+    // failed, retain the original main-loop service as a safe fallback.
+#if defined(ARDUINO_ARCH_ESP32)
+    if (!buzzerServiceTimerRunning_) buzzer_.loop(millis());
+#else
     buzzer_.loop(millis());
+#endif
     if (blockedByRmt_) return;
 
 
@@ -686,6 +753,9 @@ public:
     }
     flushClockPreferencesSaveIfNeeded();
     ble_.loop();
+    const bool bleConnectedNow = ble_.isConnected();
+    if (bleConnectedNow && !bleConnectedLast_) connectionBeepPending_ = true;
+    bleConnectedLast_ = bleConnectedNow;
 
     // Selecting iDotMatrix means: stored Carousel first, otherwise
     // Clock. No BLE connection or app command is required.
@@ -706,6 +776,21 @@ public:
     preset_.loop(millis());
     automation_.loop(millis());
     adapter_.loop(millis());
+
+    // Local buzzer notifications follow the qualified priority model:
+    // Alarm > Program/Schedule > Countdown > BLE connection. Alarm/Schedule
+    // own the buzzer inside IDotMatrixAutomation; lower-priority notices are
+    // skipped rather than deferred if a higher-priority pattern is active.
+    const bool countdownBuzzer = adapter_.takeCountdownBuzzerRequest();
+    if (countdownBuzzer && !automation_.alarmActive() && !buzzer_.isPlaying()) {
+      buzzer_.startCountdownAlert(millis());
+    }
+    if (connectionBeepPending_) {
+      if (!automation_.alarmActive() && !buzzer_.isPlaying()) {
+        buzzer_.startConnectionBeep(millis());
+      }
+      connectionBeepPending_ = false;
+    }
 
     // WLED effects can be selected directly from the Web UI/API while an
     // iDotMatrix GIF or other media mode is active. Detect that ownership
@@ -896,6 +981,12 @@ public:
     } else {
       info.add(String(F("buzzer=gpio ")) + String(buzzerPin_) + F(" not-ready"));
     }
+#if defined(ARDUINO_ARCH_ESP32)
+    info.add(String(F("buzzerTiming=")) +
+      (buzzerServiceTimerRunning_ ? F("esp_timer-2ms") : F("wled-loop")) +
+      F(" lateLast=") + buzzer_.lastLatenessMs() + F("ms lateMax=") +
+      buzzer_.maxLatenessMs() + F("ms"));
+#endif
     info.add(String(F("alarms=")) + automation_.configuredAlarmCount() +
       (automation_.alarmActive()
         ? String(F(" active=")) + automation_.activeAlarmSlot()

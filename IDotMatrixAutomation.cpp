@@ -656,6 +656,7 @@ void IDotMatrixAutomation::updateAlarms(uint32_t now, bool& alarmEnded) {
 }
 
 void IDotMatrixAutomation::startAlarm(uint8_t slot, uint32_t now) {
+  (void)now;
   if (slot >= IDotMatrixAlarmSettings::SLOT_COUNT || alarmActive_) return;
 
   const bool scheduleWasActive = scheduleActiveIndex_ >= 0;
@@ -670,9 +671,15 @@ void IDotMatrixAutomation::startAlarm(uint8_t slot, uint32_t now) {
   alarmReturnValid_ = true;
   alarmActive_ = true;
   activeAlarmSlot_ = slot;
-  alarmEndsAt_ = now + uint32_t(alarms_[slot].durationSeconds) * 1000u;
   if (!loadAlarmMedia(slot)) lastError_ = Error::MediaLoad;
-  refreshBuzzer(now);
+
+  // Media loading is synchronous and can take a variable amount of time.
+  // Anchor both the audible pattern and the configured alarm duration to a
+  // fresh timestamp after loading, otherwise the first 90 ms pulse may already
+  // be expired when control returns to the main WLED loop.
+  const uint32_t alarmStartNow = millis();
+  alarmEndsAt_ = alarmStartNow + uint32_t(alarms_[slot].durationSeconds) * 1000u;
+  refreshBuzzer(alarmStartNow);
 }
 
 void IDotMatrixAutomation::stopAlarm(bool deferRestore) {
@@ -732,6 +739,7 @@ void IDotMatrixAutomation::updateSchedule(uint32_t now) {
 }
 
 void IDotMatrixAutomation::startScheduleActivity(uint8_t index, uint32_t now) {
+  (void)now;
   if (index >= IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES || alarmActive_) return;
   if (scheduleActiveIndex_ == int8_t(index)) return;
   if (scheduleActiveIndex_ >= 0) stopScheduleActivity(false);
@@ -746,10 +754,14 @@ void IDotMatrixAutomation::startScheduleActivity(uint8_t index, uint32_t now) {
     scheduleActiveIndex_ = int8_t(index);
     scheduleFailedIndex_ = -1;
     if ((scheduleGlobalFlags_ & 0x02u) != 0) {
+      // Media loading is synchronous. Use a fresh timestamp so the first
+      // 90 ms pulse starts when the media is actually ready, not from the
+      // pre-load loop timestamp passed to startScheduleActivity().
+      const uint32_t alertStartNow = millis();
       // A program sound is an activation notification, not an alarm.  Emit
       // three finite groups of three short trills and then stay silent for
       // the remainder of the activity.
-      buzzer_.startScheduleAlert(now);
+      buzzer_.startScheduleAlert(alertStartNow);
       scheduleBuzzerOwned_ = true;
       alarmBuzzerOwned_ = false;
     }

@@ -346,6 +346,10 @@ int main() {
   adapter.loop(testMillis);
   assert(!adapter.isCountdownRunning());
   assert(adapter.countdownRemainingSeconds(testMillis) == 0);
+  // Natural completion independently raises the protocol notification and the
+  // local buzzer request. Consuming one must never consume the other.
+  assert(adapter.takeCountdownBuzzerRequest());
+  assert(!adapter.takeCountdownBuzzerRequest());
   assert(adapter.takeCountdownFinished());
   assert(!adapter.takeCountdownFinished());
 

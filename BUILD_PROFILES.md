@@ -246,11 +246,11 @@ pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64 -t clean
 pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
 
-Expected `/json/info` markers for the 0.9.2 release include:
+Expected `/json/info` markers for the 0.9.1 release include:
 
 ```text
-release=0.9.2
-build=0.9.2
+release=0.9.1
+build=0.9.1
 ```
 
 plus target-specific markers such as `RMT+BLE=ESP32-C3 shared-RMT`,

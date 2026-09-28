@@ -1,6 +1,6 @@
 # Deferred / post-0.9.2 work
 
-The 0.9.2 release is complete. The items below are intentionally deferred to future releases.
+Release 0.9.2 is complete. The items below are intentionally deferred to future releases.
 
 - Validate a physical 32x32 panel when hardware is available. The 32x32 logical
   path is already exercised through the 64x64 scaler.

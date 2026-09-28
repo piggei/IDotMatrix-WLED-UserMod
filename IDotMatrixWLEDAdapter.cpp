@@ -53,6 +53,7 @@ void IDotMatrixWLEDAdapter::loop(uint32_t now) {
       countdownRunning_ = false;
       countdownPaused_ = false;
       countdownFinishPending_ = true;
+      countdownBuzzerPending_ = true;
       if (countdownActive_ && isDisplayEffectActive()) renderCountdown(now, true);
     }
   }
@@ -598,6 +599,7 @@ void IDotMatrixWLEDAdapter::onDeviceReset() {
   countdownRunning_ = false;
   countdownPaused_ = false;
   countdownFinishPending_ = false;
+  countdownBuzzerPending_ = false;
   countdownRemainingMs_ = 0;
   countdownStartMillis_ = 0;
   stopwatchRunning_ = false;
@@ -967,6 +969,7 @@ void IDotMatrixWLEDAdapter::onCountdown(
       countdownPaused_ = false;
       countdownRemainingMs_ = 0;
       countdownFinishPending_ = false;
+      countdownBuzzerPending_ = false;
       break;
     case 1:
       countdownRemainingMs_ = requestedMs;
@@ -974,6 +977,7 @@ void IDotMatrixWLEDAdapter::onCountdown(
       countdownRunning_ = true;
       countdownPaused_ = false;
       countdownFinishPending_ = false;
+      countdownBuzzerPending_ = false;
       break;
     case 2:
       if (countdownRunning_) {
@@ -1097,6 +1101,12 @@ void IDotMatrixWLEDAdapter::onScoreboard(uint16_t scoreA, uint16_t scoreB) {
 bool IDotMatrixWLEDAdapter::takeCountdownFinished() {
   if (!countdownFinishPending_) return false;
   countdownFinishPending_ = false;
+  return true;
+}
+
+bool IDotMatrixWLEDAdapter::takeCountdownBuzzerRequest() {
+  if (!countdownBuzzerPending_) return false;
+  countdownBuzzerPending_ = false;
   return true;
 }
 

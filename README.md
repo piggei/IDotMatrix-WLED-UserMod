@@ -24,30 +24,32 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-`0.9.2` is the stable release following 0.9.1. It promotes the hardware-validated
-qualified final development baseline without introducing new runtime behavior during final
-promotion.
+`0.9.2` is the stable release promoted from the final hardware-qualified
+development baseline. The stable promotion does not change runtime behavior; it
+only changes the public build identifier and consolidates release documentation.
 
-The 0.9.2 release adds:
+The 0.9.2 line adds configurable Active/Passive buzzer hardware, persistent Clock
+presentation preferences, and the final real-time buzzer scheduler. Hardware
+requalification after dev.11 confirmed the runtime sound paths used by Test
+buzzer, BLE connection, Countdown, Alarm, and Program/Schedule. On ESP32 the
+buzzer envelope is serviced by ESP-IDF `esp_timer` at 2 ms cadence, with absolute
+edge deadlines so small service delays do not accumulate across a trill. A
+WLED-loop fallback remains available if timer setup fails, and `/json/info`
+reports the active timing source plus last/max edge lateness.
 
-- **active/passive buzzer selection** in Usermod settings;
-- **2 kHz LEDC output for passive buzzers**, including the hardware-validated
-  10-bit full-scale idle handling required by low-level-trigger modules;
-- a consolidated **Buzzer** settings group with type-specific polarity controls,
-  one **Test buzzer** action, and explicit saved-settings guidance;
-- **persistent Clock presentation preferences** for style, 12/24-hour mode,
-  date visibility and RGB colour, restored before standalone Clock fallback;
-- reset cleanup for the persisted Clock presentation state.
+The 0.9.2 release also retains the validated configuration UI, passive-buzzer
+2 kHz LEDC backend and safe idle polarity handling, plus NVS persistence for
+Clock style, 12/24-hour mode, date visibility and RGB colour. Existing Carousel,
+Alarm, Program/Schedule, Preset / Default, Graffiti, GIF/media, BLE protocol and
+WLED ownership behavior remains unchanged except for the explicitly documented
+buzzer runtime routing and timing fixes introduced during the 0.9.2 development
+cycle.
 
-The qualified 0.9.1 functionality remains unchanged, including original-app
-Graffiti full-raster multipart transport, the ESP32-C3 4 MB AudioReactive +
-dual-slot OTA profile, native 64x64 MatrixPortal/HUB75 operation, TEXT/GIF/media,
-Carousel, Preset / Default, Alarm, Program / Schedule, timers, audio visualizers,
-and WLED/iDotMatrix display ownership transitions.
-
-Final 0.9.2 hardware validation confirmed the buzzer runtime and settings UI on
-the development C3 target, and the release was promoted from dev.8 with only
-version/documentation changes.
+`0.9.1` remains the previous stable maintenance release. It added the
+hardware-validated original-app Graffiti full-raster multipart path, the
+validated ESP32-C3 4 MB AudioReactive + dual-slot OTA profile, repository
+build-support housekeeping, and the final native 64x64 Clock styles 0/3
+date-spacing correction.
 
 ## Preset / Default
 
@@ -106,7 +108,7 @@ The 0.9.x line inherits its classic ESP32 and initial ESP32-C3 foundation from t
 | classic ESP32 (`esp32dev`) | WLED 16.0.1 | Arduino 2.0.17 / IDF 4.4.7 in supplied overrides | I2S LED output + BLE | 1.4.3 |
 | ESP32-C3 4 MB | pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a` | Arduino 3.3.8 / IDF 5.5.4 | WLED shared-RMT + BLE | 2.5.1 |
 
-That 0.8.2 C3 qualification covered persistent mixed Carousel playback and boot restore, Carousel-to-Carousel replacement, verified reset cleanup, alarms/programs, clock artwork, and WLED AudioReactive input from an external microphone. The current 0.9.2 C3 profiles build on that qualified IDF5/shared-RMT foundation and add the separately documented 0.9.x features and OTA profile.
+That 0.8.2 C3 qualification covered persistent mixed Carousel playback and boot restore, Carousel-to-Carousel replacement, verified reset cleanup, alarms/programs, clock artwork, and WLED AudioReactive input from an external microphone. The current 0.9.1 C3 profiles build on that qualified IDF5/shared-RMT foundation and add the separately documented 0.9.x features and OTA profile.
 
 ### Hardware validation scope
 
@@ -308,7 +310,7 @@ The MatrixPortal profile intentionally inherits the upstream WLED partition and 
 
 For first boot, configure the physical WLED matrix as 64x64 with the MatrixPortal/native HUB75 setup, configure Wi-Fi/timezone/NTP as desired, then leave the iDotMatrix logical profile at 64x64 for native operation. Logical 16x16 and 32x32 profiles are automatically upscaled to the physical 64x64 panel.
 
-Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.2`, `build=0.9.2`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
+Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.1`, `build=0.9.1`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
 
 ### Legacy qualified profiles
 
@@ -363,8 +365,8 @@ BLE connected
 profile=64x64
 canvas=16x16
 name=IDM-123456
-release=0.9.2
-build=0.9.2
+release=0.9.1
+build=0.9.1
 audioSource=phone active=phone
 audioReactive=absent
 gifDecoder=compact12/cache
@@ -387,8 +389,8 @@ RMT+BLE=ESP32-C3 shared-RMT
 framework=WLED IDF5/shared-RMT
 wledBase=d55037f
 nimble=2.x API
-release=0.9.2
-build=0.9.2
+release=0.9.1
+build=0.9.1
 audioSource=phone active=phone
 audioReactive=absent
 ```
@@ -498,10 +500,9 @@ Further documentation:
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — component boundaries, current memory model, and RAM-engineering history;
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
-- [`TODO.md`](TODO.md) — deferred/post-0.9.2 work;
+- [`TODO.md`](TODO.md) — deferred/post-0.9.1 work;
 - [`RELEASE_NOTES_0.9.2.md`](RELEASE_NOTES_0.9.2.md) — current stable 0.9.2 release notes;
-- [`RELEASE_NOTES_0.9.1.md`](RELEASE_NOTES_0.9.1.md) — previous stable 0.9.1 release notes;
-- [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — earlier stable 0.9.0 release notes;
+- [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 
 Older release/development history is consolidated in `HISTORY.md`; this source

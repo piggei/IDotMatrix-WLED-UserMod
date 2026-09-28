@@ -1,7 +1,30 @@
 # Testing
 
+## 0.9.2 final buzzer timing qualification
+
+The final 0.9.2 release is promoted directly from `0.9.2-dev.11`, after physical
+hardware requalification of the runtime buzzer paths. The final promotion does
+not alter runtime code beyond the build identifier.
+
+Hardware validation confirmed:
+
+- manual **Test buzzer**: one regular three-pulse trill;
+- BLE connection: one clean short beep;
+- natural Countdown completion: one regular three-pulse trill;
+- Alarm with protocol sound enabled: stable repeating rhythm while media is visible;
+- silent Alarm remains silent;
+- Program/Schedule with global sound enabled: stable finite notification groups;
+- Alarm and Program remain regular with heavier GIF/image media;
+- Passive low-level-trigger operation returns to its safe silent HIGH idle state.
+
+The qualified ESP32 timing path is `buzzerTiming=esp_timer-2ms`. The diagnostic
+`lateMax` remains available in `/json/info` for future regression work; a
+`buzzerTiming=wled-loop` value indicates the compatibility fallback rather than
+the qualified real-time service path.
+
+
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2**. 0.9.2 is the current stable release.
+iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2**. This is the current stable release.
 
 ## Automated host regression
 
@@ -164,19 +187,22 @@ A physical 32x32 panel is not required for the current stable release. The
 Additional iOS-specific work remains isolated and deferred unless a new
 compatibility requirement makes it necessary.
 
-## 0.9.2 buzzer / Clock qualification
+## 0.9.2 buzzer / Clock regression evidence
 
-Final 0.9.2 hardware validation was completed on the qualified development C3 target. The promoted dev.8 baseline confirmed:
+The release retains the following qualified/required behaviors:
 
-- active buzzer behavior remains unchanged;
-- passive buzzer operation uses the non-blocking 2 kHz LEDC path;
-- a low-level-trigger passive module returns to a true HIGH idle after the three-tone test, with silence and no idle heating;
-- changing **Buzzer Type** updates the visible polarity option immediately in both directions;
-- Active shows only **Active buzzer active-high:** and Passive shows only **Passive buzzer trigger:**;
-- **Test buzzer** appears exactly once, with **Save first: test uses saved settings.** on the line below;
-- the final Buzzer section spacing and title presentation are correct;
-- Clock style, 12/24-hour mode, date visibility and RGB colour persist and are restored before standalone Clock fallback;
-- the existing transient `showDate=0` protection is retained;
+- existing active buzzer mode remains unchanged;
+- passive direct/high-trigger mode emits the non-blocking trill and returns LOW while silent;
+- passive low-level-trigger transistor module emits the trill and remains HIGH while silent;
+- changing buzzer type/trigger from Usermod settings reinitializes hardware cleanly;
+- **Test buzzer**, Alarm and Program/Schedule use the same logical timing as before;
+- Clock style, 12/24-hour mode, date visibility and RGB colour survive reboot;
+- selecting the iDotMatrix WLED effect before connecting the app restores those Clock preferences;
+- app entry/style-change `showDate=0` transient protection still works;
 - device reset clears the stored Clock presentation preferences.
 
-The final `0.9.2` promotion changes only release/build identification and documentation relative to the hardware-validated `0.9.2-dev.8` runtime baseline.
+### Passive low-trigger post-tone idle
+
+The passive low-level-trigger backend is already hardware-validated: **Test buzzer** produces exactly three short tones, followed by silence with the GPIO held at its inactive HIGH level, with no residual tone or idle heating.
+
+The final 0.9.2 settings UI was also physically validated: Active shows only **Active buzzer active-high**, Passive shows only **Passive buzzer trigger**, switching type updates the page immediately in both directions, the type-specific option follows the common Buzzer help text without an extra blank gap, and **Test buzzer** appears exactly once below it with a warning to save first.

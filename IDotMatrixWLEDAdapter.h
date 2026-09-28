@@ -45,6 +45,7 @@ public:
   void onStopwatch(uint8_t mode) override;
   void onScoreboard(uint16_t scoreA, uint16_t scoreB) override;
   bool takeCountdownFinished() override;
+  bool takeCountdownBuzzerRequest();
   bool onTextBegin(const IDotMatrixTextSettings& settings) override;
   void onTextGlyph(
     uint8_t index,
@@ -250,6 +251,7 @@ private:
   bool countdownRunning_ = false;
   bool countdownPaused_ = false;
   bool countdownFinishPending_ = false;
+  bool countdownBuzzerPending_ = false;
   uint32_t countdownRemainingMs_ = 0;
   uint32_t countdownStartMillis_ = 0;
   uint32_t countdownLastRenderMillis_ = 0;

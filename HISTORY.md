@@ -1,10 +1,40 @@
 ## 0.9.2
 
-- Final stable promotion of the hardware-validated `0.9.2-dev.8` baseline.
-- Adds active/passive buzzer selection, 2 kHz passive LEDC output and safe trigger-low HIGH idle handling.
-- Adds persistent Clock presentation preferences restored before standalone Clock fallback and cleared by device reset.
-- Finalizes the Buzzer settings UI with conditional polarity, one Test buzzer action and save-first guidance.
-- No functional runtime changes were introduced during final promotion beyond the release/build identifier.
+- Promoted the hardware-qualified 0.9.2-dev.11 baseline to stable 0.9.2 with no runtime changes beyond the build identifier.
+- Final hardware requalification confirmed Test buzzer, BLE connection, natural Countdown completion, Alarm and Program/Schedule runtime sound paths.
+- Retained the dev.11 ESP-IDF `esp_timer` 2 ms buzzer service, non-accumulating absolute edge deadlines, timing diagnostics, Passive 2 kHz backend and safe idle polarity handling.
+- Consolidated the 0.9.2 development cycle: Active/Passive buzzer configuration, settings-UI cleanup, runtime notification routing, post-media-load Alarm/Program timing, and Clock presentation persistence.
+
+## 0.9.2-dev.11
+
+- Followed up dev.10 after physical testing still revealed audible timing imperfections in Alarm and Program/Schedule buzzer patterns.
+- Confirmed against the supplied 0.9.0-rc.3 source that the older branch used the same WLED-loop-driven pattern engine; there was no earlier precision scheduler to restore.
+- Decoupled ESP32 buzzer-envelope timing from the WLED main loop by servicing `IDotMatrixBuzzer` from the high-priority ESP-IDF `esp_timer` task every 2 ms.
+- Added a small FreeRTOS mutex around buzzer pattern state and GPIO/LEDC transitions so timer-task service and WLED-task start/stop commands remain serialized. If mutex/timer setup fails, the original WLED-loop service remains the fallback.
+- Changed edge scheduling to preserve the intended absolute phase after small service delays rather than scheduling every next edge from the delayed arrival time; full missed intervals are rebased to avoid compressed catch-up pulses.
+- Added `/json/info` diagnostics for timing source plus last/max edge lateness of the most recently started pattern.
+- Kept the 90 ms ON, 70 ms gap, 550 ms group pause, passive 2 kHz backend, trigger polarity and Alarm/Program/Countdown/BLE semantics unchanged.
+- Added host regression coverage for non-accumulating small service jitter.
+
+## 0.9.2-dev.10
+
+- Compared the buzzer path with the supplied 0.9.0-rc.3 source. The non-blocking 90/70/550 ms pattern engine is intentionally unchanged; the comparison exposed a caller-side timing issue instead.
+- Fixed Alarm startup timing: synchronous Alarm media loading can take a variable amount of time, so the repeating trill now receives a fresh `millis()` timestamp after media loading completes instead of the stale pre-load loop timestamp.
+- The configured Alarm duration is now anchored to that same post-load activation timestamp, preventing media load time from shortening the audible Alarm interval.
+- Fixed Program/Schedule activation timing for the same reason: the finite three-group notification starts from a fresh post-load timestamp, preventing the first 90 ms pulse from already being overdue when control returns to WLED.
+- Kept all buzzer pattern constants and event semantics unchanged: 90 ms ON, 70 ms gap, 550 ms group pause; Alarm remains conditional on its `buzzer` field and Program/Schedule remains conditional on the global sound flag.
+- Added host regression coverage that simulates a 250 ms synchronous media-load delay and proves Alarm/Program sound starts only after that delay, with Alarm duration measured from the real activation point.
+- Carried forward dev.9 BLE-connection and natural-Countdown buzzer routing unchanged.
+
+## 0.9.2-dev.9
+
+- Reopened the 0.9.2 development line after dev.8 hardware testing showed that the configuration-page buzzer test worked while expected runtime notifications were incomplete.
+- Compared the final 0.9.1 source against dev.8: `IDotMatrixBuzzer`, `IDotMatrixAutomation`, `IDotMatrixProtocol`, and `IDotMatrixBLEServer` are unchanged, confirming that Alarm/Program protocol routing was not rewritten by 0.9.2.
+- Added the previously missing BLE connection notification: one 90 ms low-priority beep.
+- Added the previously missing natural Countdown completion notification: one three-pulse trill, independent from the existing asynchronous FA03 completion reply.
+- Preserved the existing Alarm `buzzer` flag and Program/Schedule global sound semantics.
+- Added host regressions for audible/silent Alarm, Program/Schedule activation sound, Countdown completion sound, single-pulse BLE connection sound and runtime routing.
+- Final 0.9.2 promotion remains blocked pending hardware validation of all runtime buzzer events.
 
 ## 0.9.2-dev.8
 

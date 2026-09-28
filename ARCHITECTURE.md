@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2**. It builds on the stable 0.9.1 baseline and adds active/passive buzzer hardware backends plus persistent Clock presentation preferences. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
+This document describes iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2**. It builds on the stable 0.9.1 baseline and adds active/passive buzzer hardware backends, persistent Clock presentation preferences, and the hardware-qualified real-time buzzer scheduler. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
 
 ## Design goals
 
@@ -147,7 +147,7 @@ compact runtime status under `/json/info`.
 
 ### ESP32-C3 supported backend split
 
-The current 0.9.2 architecture inherits the classic ESP32 WLED 16.0.1/NimBLE 1.x path and
+The current 0.9.1 architecture inherits the classic ESP32 WLED 16.0.1/NimBLE 1.x path and
 the separately qualified C3 path on pinned WLED commit `d55037f...` from the 0.8.2 baseline. Legacy
 IDF4 RMT builds produced physical LED spikes both with and without BLE, with BLE
 advertising making the fault much more visible. The IDF5 WLED backend uses
