@@ -50,7 +50,7 @@
 #endif
 
 static constexpr const char* IDOTMATRIX_RELEASE = "0.9.2";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.2-dev.8";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.2";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 

@@ -1,7 +1,7 @@
 # Build profiles
 
 This document describes the PlatformIO profiles shipped with iDotMatrix WLED
-Usermod **release 0.9.2 / build 0.9.2-dev.6**. Stable 0.9.1 remains the current public release baseline.
+Usermod **release 0.9.2 / build 0.9.2**. 0.9.2 is the current stable release.
 
 PlatformIO override templates are stored under `overrides/`. Custom partition
 tables are stored under `partitions/`. Copy one override to WLED's
@@ -246,11 +246,11 @@ pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64 -t clean
 pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
 
-Expected `/json/info` markers for the 0.9.1 release include:
+Expected `/json/info` markers for the 0.9.2 release include:
 
 ```text
-release=0.9.1
-build=0.9.1
+release=0.9.2
+build=0.9.2
 ```
 
 plus target-specific markers such as `RMT+BLE=ESP32-C3 shared-RMT`,

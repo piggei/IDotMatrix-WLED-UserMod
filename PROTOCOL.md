@@ -1,6 +1,6 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by Release 0.9.2 / build 0.9.2-dev.6. Stable 0.9.1 remains the current public release baseline. The
+This document describes the protocol subset implemented by Release 0.9.2 / build 0.9.2. 0.9.2 is the current stable release. The
 BLE wire protocol is carried forward from the stable 0.9.0 WLED iDotMatrix Usermod and extended only where new original-app traffic has been confirmed. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
 stopwatch, scoreboard, persistent alarms and programs/schedules, active/passive-buzzer

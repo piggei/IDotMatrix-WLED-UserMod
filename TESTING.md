@@ -1,7 +1,7 @@
 # Testing
 
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2-dev.6**. Stable 0.9.1 remains the current public release baseline.
+iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2**. 0.9.2 is the current stable release.
 
 ## Automated host regression
 
@@ -164,22 +164,19 @@ A physical 32x32 panel is not required for the current stable release. The
 Additional iOS-specific work remains isolated and deferred unless a new
 compatibility requirement makes it necessary.
 
-## 0.9.2 buzzer / Clock regression gates
+## 0.9.2 buzzer / Clock qualification
 
-Before promotion, validate on hardware:
+Final 0.9.2 hardware validation was completed on the qualified development C3 target. The promoted dev.8 baseline confirmed:
 
-- existing active buzzer mode remains unchanged;
-- passive direct/high-trigger mode emits the non-blocking trill and returns LOW while silent;
-- passive low-level-trigger transistor module emits the trill and remains HIGH while silent;
-- changing buzzer type/trigger from Usermod settings reinitializes hardware cleanly;
-- **Test buzzer**, Alarm and Program/Schedule use the same logical timing as before;
-- Clock style, 12/24-hour mode, date visibility and RGB colour survive reboot;
-- selecting the iDotMatrix WLED effect before connecting the app restores those Clock preferences;
-- app entry/style-change `showDate=0` transient protection still works;
+- active buzzer behavior remains unchanged;
+- passive buzzer operation uses the non-blocking 2 kHz LEDC path;
+- a low-level-trigger passive module returns to a true HIGH idle after the three-tone test, with silence and no idle heating;
+- changing **Buzzer Type** updates the visible polarity option immediately in both directions;
+- Active shows only **Active buzzer active-high:** and Passive shows only **Passive buzzer trigger:**;
+- **Test buzzer** appears exactly once, with **Save first: test uses saved settings.** on the line below;
+- the final Buzzer section spacing and title presentation are correct;
+- Clock style, 12/24-hour mode, date visibility and RGB colour persist and are restored before standalone Clock fallback;
+- the existing transient `showDate=0` protection is retained;
 - device reset clears the stored Clock presentation preferences.
 
-### Passive low-trigger post-tone idle
-
-The passive low-level-trigger backend is already hardware-validated: **Test buzzer** produces exactly three short tones, followed by silence with the GPIO held at its inactive HIGH level, with no residual tone or idle heating.
-
-For 0.9.2-dev.6, additionally verify the settings UI: Active shows only **Active buzzer active-high**, Passive shows only **Passive buzzer trigger**, switching type updates the page immediately in both directions, the type-specific option follows the common Buzzer help text without an extra blank gap, and **Test buzzer** appears exactly once below it with a warning to save first.
+The final `0.9.2` promotion changes only release/build identification and documentation relative to the hardware-validated `0.9.2-dev.8` runtime baseline.

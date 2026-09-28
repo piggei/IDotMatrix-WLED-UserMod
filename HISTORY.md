@@ -1,3 +1,11 @@
+## 0.9.2
+
+- Final stable promotion of the hardware-validated `0.9.2-dev.8` baseline.
+- Adds active/passive buzzer selection, 2 kHz passive LEDC output and safe trigger-low HIGH idle handling.
+- Adds persistent Clock presentation preferences restored before standalone Clock fallback and cleared by device reset.
+- Finalizes the Buzzer settings UI with conditional polarity, one Test buzzer action and save-first guidance.
+- No functional runtime changes were introduced during final promotion beyond the release/build identifier.
+
 ## 0.9.2-dev.8
 
 - Final presentation-only cleanup of the Buzzer settings block.
