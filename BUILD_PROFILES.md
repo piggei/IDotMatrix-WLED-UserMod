@@ -1,7 +1,7 @@
 # Build profiles
 
 This document describes the PlatformIO profiles shipped with iDotMatrix WLED
-Usermod **release 0.9.3 / build 0.9.3**. 0.9.2 remains the previous qualified release.
+Usermod **release 0.9.3 / build 0.9.3-rc.2**. Stable 0.9.2 remains the previous qualified release.
 
 PlatformIO override templates are stored under `overrides/`. Custom partition
 tables are stored under `partitions/`. Copy one override to WLED's
@@ -21,7 +21,7 @@ custom_usermods =
 
 The supplied iDotMatrix profiles intentionally do not force this optional
 dependency. Without it, iDotMatrix still builds and the Buzzer Enable control is
-shown disabled. With WLED Buzzer Usermod 0.1.0 final, the optional weak-link bridge is resolved at link time and sound requests are routed through the external service. The final provider preserves one-shot `triple_beep` behavior and adds a 550 ms final gap only when the sound repeats, which provides the qualified Alarm cadence.
+shown disabled. With WLED Buzzer Usermod 0.1.0, the optional weak-link bridge is resolved at link time and sound requests are routed through the external service. The final 0.1.0 service preserves one-shot `triple_beep` behavior and applies the qualified 550 ms final gap only when the sound repeats.
 
 
 ## Media profiles

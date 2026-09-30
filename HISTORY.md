@@ -1,9 +1,10 @@
-## 0.9.3
+## 0.9.3-rc.2
 
-- Promoted hardware-qualified `0.9.3-rc.1` directly to stable 0.9.3 with no functional runtime changes beyond the build identifier.
-- Final hardware validation confirmed optional builds with and without the external Buzzer Usermod, BLE connect/disconnect, Countdown, Alarm repeat/stop, Program/Schedule, negative sound-policy checks and reboot/persistence.
-- Final ESP32-C3 soak validation exercised Carousel/GIF cache activity, animations, Alarm and Program operations without progressive heap degradation.
-- Qualified the stable external provider as WLED Buzzer Usermod release 0.1.0 / build final; iDotMatrix retains only the minimal weak-link consumer bridge and no buzzer hardware/timing backend.
+- Presentation-only Usermod Settings correction on top of the hardware-qualified 0.9.3-rc.1 runtime.
+- Removed duplicated visible configuration-key prefixes such as `Enabled Enabled:`, `ScreenType ScreenType:`, `DeviceName IDM-DeviceName:`, `Rescale ...`, `AudioSource Audio Source:` and `BuzzerEnabled Enable`.
+- Root cause: WLED `addInfo()` inserts text around an existing control; it does not replace the label text generated from the configuration key.
+- The settings script now relabels WLED's original text node directly, while `addInfo()` is used only for explanatory notes.
+- No protocol, BLE, renderer, media, automation or external-buzzer runtime behavior changed.
 
 ## 0.9.3-rc.1
 
