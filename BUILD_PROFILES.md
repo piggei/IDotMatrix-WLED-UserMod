@@ -1,7 +1,7 @@
 # Build profiles
 
 This document describes the PlatformIO profiles shipped with iDotMatrix WLED
-Usermod **release 0.9.3 / build 0.9.3-rc.2**. Stable 0.9.2 remains the previous qualified release.
+Usermod **release 0.9.3 / build 0.9.3**. Stable 0.9.2 remains the previous qualified release.
 
 PlatformIO override templates are stored under `overrides/`. Custom partition
 tables are stored under `partitions/`. Copy one override to WLED's

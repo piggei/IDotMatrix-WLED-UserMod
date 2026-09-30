@@ -1,7 +1,7 @@
-# WLED iDotMatrix Usermod — 0.9.3-rc.2
+# WLED iDotMatrix Usermod — 0.9.3
 
-**Release: 0.9.3 / build: 0.9.3-rc.2.**  
-**Current release candidate: 0.9.3-rc.2.**  
+**Release: 0.9.3 / build: 0.9.3.**  
+**Current stable release: 0.9.3.**  
 **Previous stable release: 0.9.2.**
 
 The 0.9.3 line builds on the 0.9 hardware/platform work that brought the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
@@ -25,8 +25,8 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-`0.9.3-rc.2` promotes the externally validated buzzer-service integration from the
-0.9.2 baseline into the 0.9.3 release-candidate line. Its main architectural change is the removal of the complete
+`0.9.3` carries forward the hardware-qualified external buzzer-service integration from the
+0.9.2 baseline as the current stable release. Its main architectural change is the removal of the complete
 internal buzzer backend. iDotMatrix no longer owns a buzzer GPIO, Active/Passive
 selection, trigger polarity, LEDC generation, playback scheduler or local buzzer
 test endpoint.
@@ -41,8 +41,7 @@ The iDotMatrix settings page therefore exposes only **Buzzer → Enable** plus t
 orange dependency note **Requires the WLED Buzzer Usermod.** If the external
 service is not part of the firmware, the checkbox is shown disabled.
 
-The BLE protocol and persistent Alarm/Program metadata remain unchanged. Stable 0.9.2 remains the previous stable baseline. The 0.9.3-rc.2 runtime is
-promoted from the hardware-tested integration build with no functional changes.
+The final 0.9.3 settings page uses the visible labels `Screen Type:` and `Device Name:`. Rescale remains directly below the Screen Type reboot/reconnection note, while the extra vertical spacing is placed after the Rescale row so Device Name starts the next logical group. The fixed `IDM-` prefix remains immediately before the editable device-name suffix. The BLE protocol and persistent Alarm/Program metadata remain unchanged. 0.9.2 remains the previous stable baseline. The final 0.9.3 runtime is promoted directly from the hardware-qualified RC5 candidate with no functional change beyond the build identifier.
 
 ## Preset / Default
 
@@ -489,7 +488,7 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9.1 work;
-- [`RELEASE_NOTES_0.9.3-rc.2.md`](RELEASE_NOTES_0.9.3-rc.2.md) — current release-candidate notes;
+- [`RELEASE_NOTES_0.9.3.md`](RELEASE_NOTES_0.9.3.md) — current stable-release notes;
 - [`RELEASE_NOTES_0.9.2.md`](RELEASE_NOTES_0.9.2.md) — previous stable 0.9.2 release notes;
 - [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;

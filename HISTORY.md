@@ -1,3 +1,31 @@
+## 0.9.3
+
+- Promoted the hardware-qualified 0.9.3-rc.5 candidate to stable 0.9.3.
+- No functional runtime changes were made during final promotion; only the build identifier and stable-release documentation changed.
+- Final settings presentation keeps `Screen Type:`, places Rescale directly below the Screen Type note, starts `Device Name: IDM-` as the next logical group, and delegates all buzzer playback to the optional WLED Buzzer Usermod.
+
+## 0.9.3-rc.5
+
+- Presentation-only follow-up to RC4.
+- Renamed the visible settings label from `DeviceName:` to `Device Name:` while preserving the fixed `IDM-` prefix before the editable suffix.
+- Moved the extra vertical spacing to after the Rescale row, keeping Screen Type + Rescale visually grouped and separating Device Name below them.
+- No protocol, BLE, media, rendering, automation or external-buzzer behavior changes.
+
+## 0.9.3-rc.4
+
+- Presentation-only follow-up to RC3.
+- Renamed the visible settings label from `ScreenType:` to `Screen Type:`.
+- Moved the `Scale the logical profile to the selected WLED 2D segment:` checkbox directly below the Screen Type reboot/reconnection note by ordering `rescale` immediately after `screenType` in the settings JSON.
+- Preserved the RC3 `DeviceName: IDM-` label/prefix presentation.
+- No protocol, BLE, media, rendering, automation or external-buzzer behavior changes.
+
+## 0.9.3-rc.3
+
+- Presentation-only follow-up to RC2.
+- Corrected the DeviceName settings row from `IDM-DeviceName:` to `DeviceName: IDM-`, where `IDM-` is the fixed visible prefix and the input stores only the editable suffix.
+- No protocol, BLE, media, rendering, automation or external-buzzer behavior changes.
+- Added regression coverage for the exact DeviceName label/prefix presentation.
+
 ## 0.9.3-rc.2
 
 - Presentation-only Usermod Settings correction on top of the hardware-qualified 0.9.3-rc.1 runtime.

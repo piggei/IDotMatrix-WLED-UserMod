@@ -48,7 +48,7 @@
 #endif
 
 static constexpr const char* IDOTMATRIX_RELEASE = "0.9.3";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.3-rc.2";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.3";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -936,15 +936,16 @@ public:
     JsonObject config = root.createNestedObject(FPSTR(USERMOD_NAME));
     config[FPSTR(CFG_ENABLED)] = enabled_;
     config[FPSTR(CFG_SCREEN_TYPE)] = screenType_;
+#if IDOT_SCREEN_MAX_DIM > 16
+    // Keep Rescale directly below Screen Type in the WLED Usermod settings.
+    config[FPSTR(CFG_RESCALE)] = rescale_;
+#endif
     // The settings page renders the fixed IDM- prefix outside the input. Store
     // only the editable suffix in the form/config; readFromConfig() accepts
     // both this format and legacy full names for backward compatibility.
     config[FPSTR(CFG_DEVICE_NAME)] = deviceName_.startsWith("IDM-")
       ? deviceName_.substring(4)
       : deviceName_;
-#if IDOT_SCREEN_MAX_DIM > 16
-    config[FPSTR(CFG_RESCALE)] = rescale_;
-#endif
     config[FPSTR(CFG_AUDIO_SOURCE)] = static_cast<uint8_t>(audioSourceMode_);
     config[FPSTR(CFG_BUZZER_ENABLED)] = buzzerEnabled_;
   }
@@ -1009,7 +1010,7 @@ public:
     // replace that generated label. Relabel the original text node directly so
     // internal JSON/config keys never leak into the visible settings UI.
     oappend(F("rl=(n,t)=>{let a=d.getElementsByName(n),e=a[0];if(!e)return;let x=e.previousSibling;if(x&&x.nodeType==3)x.nodeValue=' '+t+' '};"));
-    oappend(F("rl('iDotMatrix:enabled','Enabled:');rl('iDotMatrix:screenType','ScreenType:');rl('iDotMatrix:deviceName','IDM-DeviceName:');"));
+    oappend(F("rl('iDotMatrix:enabled','Enabled:');rl('iDotMatrix:screenType','Screen Type:');rl('iDotMatrix:deviceName','Device Name: IDM-');"));
 #if IDOT_SCREEN_MAX_DIM > 16
     oappend(F("rl('iDotMatrix:rescale','Scale the logical profile to the selected WLED 2D segment:');"));
 #endif
@@ -1017,6 +1018,7 @@ public:
     oappend(F("addInfo('iDotMatrix:enabled',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Changing Enabled requires reboot.</div>');"));
 #if IDOT_SCREEN_MAX_DIM > 16
     oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
+    oappend(F("addInfo('iDotMatrix:rescale',1,'<div style=\"height:12px\"></div>');"));
 #endif
     oappend(F("addInfo('iDotMatrix:deviceName',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
     oappend(F("addInfo('iDotMatrix:audioSource',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">AudioReactive uses WLED Usermod data when available. Auto falls back to Phone / BLE.</div><style>.sec:has(#ib)>hr,#ib+br{display:none}</style><div id=\"ib\" style=\"margin-top:20px;font-size:1.15em;font-weight:bold\">Buzzer</div>');"));

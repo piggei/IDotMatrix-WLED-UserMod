@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3-rc.2**. It builds on the stable 0.9.2 baseline and removes the internal buzzer hardware/scheduler implementation in favour of the optional standalone WLED Buzzer Usermod service. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
+This document describes iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3**. It builds on the stable 0.9.2 baseline and removes the internal buzzer hardware/scheduler implementation in favour of the optional standalone WLED Buzzer Usermod service. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
 
 ## Design goals
 

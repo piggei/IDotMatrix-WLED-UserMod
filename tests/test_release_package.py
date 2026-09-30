@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-candidate package and critical-section regression checks for 0.9.3-rc.2."""
+"""Stable-release package and critical-section regression checks for 0.9.3."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.3-rc.2"
+    assert library["version"] == "0.9.3"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     assert 'IDOTMATRIX_RELEASE = "0.9.3"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.3-rc.2"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.3"' in usermod
     assert "IDOTMATRIX_APP_RELEASE_MINOR = 0x09" in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
@@ -38,7 +38,7 @@ def check_release_surface() -> None:
         "overrides/matrixportal-s3-hub75.ini",
         "partitions/WLED_ESP32_4MB_IDOT_NO_OTA.csv",
         "partitions/WLED_ESP32_4MB_IDOT_OTA.csv",
-        "RELEASE_NOTES_0.9.3-rc.2.md",
+        "RELEASE_NOTES_0.9.3.md",
         "RELEASE_NOTES_0.9.2.md",
         "RELEASE_NOTES_0.9.1.md",
         "RELEASE_NOTES_0.9.0.md",
@@ -65,7 +65,7 @@ def check_release_surface() -> None:
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.2-dev.*.md"))
-    assert list(ROOT.glob("RELEASE_NOTES_0.9.3-rc.2.md"))
+    assert list(ROOT.glob("RELEASE_NOTES_0.9.3.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.10.0-dev.*.md"))
 
 def check_markdown_links() -> None:
@@ -85,6 +85,8 @@ def check_documentation_contract() -> None:
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "release-candidate qualification" not in protocol.lower()
+    assert "current release candidate" not in readme.lower()
     profiles = (ROOT / "BUILD_PROFILES.md").read_text(encoding="utf-8")
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
@@ -116,15 +118,15 @@ def check_documentation_contract() -> None:
     assert "Preset / Default active, pending, cache and backup files" in protocol
     assert "17.0.0-devV5" in readme
     assert "0.17.0-devV5" not in readme
-    assert "0.9.3-rc.2" in testing
+    assert "0.9.3" in testing
     assert "30-second `HH:MM` / 5-second `DD/MM` alternation" in protocol
     assert protocol.count("30-second `HH:MM` / 5-second `DD/MM` alternation") == 1
     assert "styles **0** and **3** use the extra" in protocol
     assert "the date day field stays fixed while the `/` separator and both month digits are" in protocol
 
-    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.3-rc.2\n")
-    assert "Release: 0.9.3 / build: 0.9.3-rc.2" in readme
-    assert "current release candidate: 0.9.3-rc.2" in readme.lower()
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.3\n")
+    assert "Release: 0.9.3 / build: 0.9.3" in readme
+    assert "current stable release: 0.9.3" in readme.lower()
     assert "Graffiti full-raster multipart" in readme
     assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
     assert "partitions/" in readme
@@ -135,7 +137,7 @@ def check_documentation_contract() -> None:
     assert "0.9.2-dev.11" not in readme
     assert "promotion to final 0.9.2 remains blocked" not in readme.lower()
 
-    release_notes = (ROOT / "RELEASE_NOTES_0.9.3-rc.2.md").read_text(encoding="utf-8")
+    release_notes = (ROOT / "RELEASE_NOTES_0.9.3.md").read_text(encoding="utf-8")
     assert "WLED Buzzer Usermod" in release_notes
     assert "IDotMatrixBuzzerBridge.h" in release_notes
     assert "Buzzer -> Enable" in release_notes
@@ -150,7 +152,7 @@ def check_documentation_contract() -> None:
     assert "hardware-validated" in testing
     assert "complex photographic images" in testing
     history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
-    assert history.startswith("## 0.9.3-rc.2\n")
+    assert history.startswith("## 0.9.3\n")
     assert "4096-byte RGB chunks" in history
     assert "## 0.9.0\n" in history
     assert "## 0.9.0-rc.5" in history and "live TEXT" in history
@@ -174,7 +176,7 @@ def check_documentation_contract() -> None:
 def check_final_documentation_hygiene() -> None:
     current = [
         "README.md", "PROTOCOL.md", "ARCHITECTURE.md", "BUILD_PROFILES.md",
-        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.3-rc.2.md",
+        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.3.md",
         "RELEASE_NOTES_0.9.2.md", "RELEASE_NOTES_0.9.1.md",
     ]
     for name in current:
@@ -182,7 +184,7 @@ def check_final_documentation_hygiene() -> None:
         assert "0.9.1-rc." not in text, f"{name}: stale RC marker"
         assert "0.9.1-dev." not in text, f"{name}: stale previous-development marker"
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "current release candidate: 0.9.3-rc.2" in readme.lower()
+    assert "current stable release: 0.9.3" in readme.lower()
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     assert "`iDotMatrix\nDisplay`" not in protocol
     assert "device-level rotation, energy-saving, and reset commands" not in protocol
@@ -440,8 +442,15 @@ def check_external_buzzer_integration() -> None:
     # added as a second prefix via addInfo().
     assert "rl=(n,t)=>" in usermod
     assert "rl('iDotMatrix:enabled','Enabled:')" in usermod
-    assert "rl('iDotMatrix:screenType','ScreenType:')" in usermod
-    assert "rl('iDotMatrix:deviceName','IDM-DeviceName:')" in usermod
+    assert "rl('iDotMatrix:screenType','Screen Type:')" in usermod
+    assert "rl('iDotMatrix:deviceName','Device Name: IDM-')" in usermod
+    assert "ScreenType:" not in usermod
+    cfg_block = usermod.split('void addToConfig(JsonObject& root) override', 1)[1].split('bool readFromConfig', 1)[0]
+    assert cfg_block.index('CFG_SCREEN_TYPE') < cfg_block.index('CFG_RESCALE') < cfg_block.index('CFG_DEVICE_NAME')
+    assert "IDM-DeviceName:" not in usermod
+    assert "DeviceName: IDM-" not in usermod
+    assert "Device Name: IDM-" in usermod
+    assert "addInfo('iDotMatrix:rescale',1,'<div style=\\\"height:12px\\\"></div>')" in usermod
     assert "rl('iDotMatrix:audioSource','Audio Source:')" in usermod
     assert "rl('iDotMatrix:buzzerEnabled','Enable')" in usermod
     assert "idotmatrix-prefix" not in usermod
