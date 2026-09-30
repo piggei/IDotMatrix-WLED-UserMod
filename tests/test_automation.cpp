@@ -39,10 +39,9 @@ struct Fixture {
   IDotMatrixRenderer renderer;
   IDotMatrixWLEDAdapter adapter;
   IDotMatrixMedia media;
-  IDotMatrixBuzzer buzzer;
   IDotMatrixAutomation automation;
 
-  Fixture() : automation(renderer, adapter, media, buzzer) {}
+  Fixture() : automation(renderer, adapter, media) {}
 };
 
 static void resetState() {
@@ -362,7 +361,7 @@ static void testAppTimeSyncOverridesValidWledClockForAlarm() {
   f.automation.loop(1600);
   assert(f.automation.alarmActive_);
   assert(f.automation.activeAlarmSlot_ == 0);
-  assert(f.buzzer.isPlaying());
+  assert(f.automation.alarmSoundRequested());
   assert((f.automation.alarms_[0].flags & 0x01u) == 0); // one-shot consumed
 }
 
@@ -390,7 +389,7 @@ static void testSilentAlarmRemainsSilent() {
 
   f.automation.loop(1600);
   assert(f.automation.alarmActive_);
-  assert(!f.buzzer.isPlaying());
+  assert(!f.automation.alarmSoundRequested());
 }
 
 static void testScheduleSoundStartsOnActivation() {
@@ -413,7 +412,8 @@ static void testScheduleSoundStartsOnActivation() {
 
   f.automation.loop(1600);
   assert(f.automation.scheduleActiveIndex_ == 0);
-  assert(f.buzzer.isPlaying());
+  assert(f.automation.takeScheduleSoundRequest());
+  assert(!f.automation.takeScheduleSoundRequest());
 }
 
 
@@ -449,7 +449,7 @@ static void testAlarmSoundUsesPostMediaTimestamp() {
   f.automation.loop(1600);
 
   assert(f.automation.alarmActive_);
-  assert(f.buzzer.lastTrillStart_ == 1850);
+  assert(f.automation.alarmSoundRequested());
   assert(f.automation.alarmEndsAt_ == 11850);
 }
 
@@ -476,7 +476,8 @@ static void testScheduleSoundUsesPostMediaTimestamp() {
   f.automation.loop(1600);
 
   assert(f.automation.scheduleActiveIndex_ == 0);
-  assert(f.buzzer.lastScheduleStart_ == 1850);
+  assert(testMillis == 1850);
+  assert(f.automation.takeScheduleSoundRequest());
 }
 
 static void testDeviceResetClearsPersistentAutomationButKeepsTimeSync() {

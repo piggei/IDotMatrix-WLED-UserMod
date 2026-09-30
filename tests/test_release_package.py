@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stable-release and critical-section regression checks for 0.9.2."""
+"""Release-candidate package and critical-section regression checks for 0.9.3-rc.1."""
 
 from __future__ import annotations
 
@@ -12,10 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.2"
+    assert library["version"] == "0.9.3-rc.1"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
-    assert 'IDOTMATRIX_RELEASE = "0.9.2"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.2"' in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.9.3"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.3-rc.1"' in usermod
+    assert "IDOTMATRIX_APP_RELEASE_MINOR = 0x09" in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
     assert '"iDotMatrix@;;;2"' in adapter
@@ -37,6 +38,7 @@ def check_release_surface() -> None:
         "overrides/matrixportal-s3-hub75.ini",
         "partitions/WLED_ESP32_4MB_IDOT_NO_OTA.csv",
         "partitions/WLED_ESP32_4MB_IDOT_OTA.csv",
+        "RELEASE_NOTES_0.9.3-rc.1.md",
         "RELEASE_NOTES_0.9.2.md",
         "RELEASE_NOTES_0.9.1.md",
         "RELEASE_NOTES_0.9.0.md",
@@ -63,6 +65,8 @@ def check_release_surface() -> None:
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.2-dev.*.md"))
+    assert list(ROOT.glob("RELEASE_NOTES_0.9.3-rc.1.md"))
+    assert not list(ROOT.glob("RELEASE_NOTES_0.10.0-dev.*.md"))
 
 def check_markdown_links() -> None:
     for path in ROOT.glob("*.md"):
@@ -112,15 +116,15 @@ def check_documentation_contract() -> None:
     assert "Preset / Default active, pending, cache and backup files" in protocol
     assert "17.0.0-devV5" in readme
     assert "0.17.0-devV5" not in readme
-    assert "current development build" not in testing
+    assert "0.9.3-rc.1" in testing
     assert "30-second `HH:MM` / 5-second `DD/MM` alternation" in protocol
     assert protocol.count("30-second `HH:MM` / 5-second `DD/MM` alternation") == 1
     assert "styles **0** and **3** use the extra" in protocol
     assert "the date day field stays fixed while the `/` separator and both month digits are" in protocol
 
-    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.2\n")
-    assert "Release: 0.9.2 / build: 0.9.2" in readme
-    assert "current stable release: 0.9.2" in readme.lower()
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.3-rc.1\n")
+    assert "Release: 0.9.3 / build: 0.9.3-rc.1" in readme
+    assert "current release candidate: 0.9.3-rc.1" in readme.lower()
     assert "Graffiti full-raster multipart" in readme
     assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
     assert "partitions/" in readme
@@ -131,11 +135,14 @@ def check_documentation_contract() -> None:
     assert "0.9.2-dev.11" not in readme
     assert "promotion to final 0.9.2 remains blocked" not in readme.lower()
 
-    release_notes = (ROOT / "RELEASE_NOTES_0.9.2.md").read_text(encoding="utf-8")
-    assert "Passive buzzer" in release_notes
-    assert "buzzerType" in release_notes and "buzzerPassiveTrigger" in release_notes
-    assert "Clock presentation persistence" in release_notes
-    assert "NVS" in release_notes and "showDate=0" in release_notes
+    release_notes = (ROOT / "RELEASE_NOTES_0.9.3-rc.1.md").read_text(encoding="utf-8")
+    assert "WLED Buzzer Usermod" in release_notes
+    assert "IDotMatrixBuzzerBridge.h" in release_notes
+    assert "Buzzer -> Enable" in release_notes
+    assert "IDotMatrixBuzzer" in release_notes
+    stable_notes = (ROOT / "RELEASE_NOTES_0.9.2.md").read_text(encoding="utf-8")
+    assert "Clock presentation persistence" in stable_notes
+    assert "NVS" in stable_notes and "showDate=0" in stable_notes
 
     assert "host" in testing.lower()
     assert "Graffiti full-raster validation" in testing
@@ -143,7 +150,7 @@ def check_documentation_contract() -> None:
     assert "hardware-validated" in testing
     assert "complex photographic images" in testing
     history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
-    assert history.startswith("## 0.9.2\n")
+    assert history.startswith("## 0.9.3-rc.1\n")
     assert "4096-byte RGB chunks" in history
     assert "## 0.9.0\n" in history
     assert "## 0.9.0-rc.5" in history and "live TEXT" in history
@@ -158,22 +165,24 @@ def check_documentation_contract() -> None:
     assert "partitions/WLED_ESP32_4MB_IDOT_OTA.csv" in profiles
     assert "NimBLE-Arduino" not in library.get("dependencies", {})
     assert "h2zero/NimBLE-Arduino" not in library.get("dependencies", {})
-    assert "buzzerType" in usermod and "buzzerPassiveTrigger" in usermod
+    assert "CFG_BUZZER_ENABLED" in usermod
+    assert "IDotMatrixBuzzerBridge::installed()" in usermod
+    assert "buzzerType" not in usermod and "buzzerPassiveTrigger" not in usermod
     assert "clockPreferencesCallback_" in adapter
     assert "CLOCK_PREFS_NAMESPACE" in usermod
 
 def check_final_documentation_hygiene() -> None:
     current = [
         "README.md", "PROTOCOL.md", "ARCHITECTURE.md", "BUILD_PROFILES.md",
-        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.2.md",
-        "RELEASE_NOTES_0.9.1.md",
+        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.3-rc.1.md",
+        "RELEASE_NOTES_0.9.2.md", "RELEASE_NOTES_0.9.1.md",
     ]
     for name in current:
         text = (ROOT / name).read_text(encoding="utf-8")
         assert "0.9.1-rc." not in text, f"{name}: stale RC marker"
         assert "0.9.1-dev." not in text, f"{name}: stale previous-development marker"
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "current release-candidate" not in readme.lower()
+    assert "current release candidate: 0.9.3-rc.1" in readme.lower()
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     assert "`iDotMatrix\nDisplay`" not in protocol
     assert "device-level rotation, energy-saving, and reset commands" not in protocol
@@ -377,44 +386,56 @@ def check_repository_cleanliness() -> None:
 
 
 
-def check_buzzer_settings_ui_layout() -> None:
+def check_external_buzzer_integration() -> None:
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
-    assert 'font-weight:bold\\">Buzzer</div>' in usermod
-    assert '.sec:has(#ib)>hr,#ib+br{display:none}' in usermod
-    assert 'id=\\"ib\\"' in usermod
-    assert usermod.index('config[FPSTR(CFG_BUZZER_PIN)]') < usermod.index('config[FPSTR(CFG_BUZZER_TYPE)]')
-    assert "d.getElementsByName('iDotMatrix:'+k)" in usermod
-    assert "d.createElement('span')" in usermod
-    assert "s.firstChild.textContent=''" in usermod
-    assert "p=w(q('buzzerPassiveTrigger')),a=w(q('buzzerActiveHigh'))" in usermod
-    assert 'margin-top:8px\\">Active: static GPIO. Passive: 2 kHz LEDC.' not in usermod
-    assert "if(a)a.hidden=x" in usermod
-    assert "if(p)p.hidden=!x" in usermod
-    assert '<b>Buzzer test</b>' not in usermod
-    assert usermod.count('>Test buzzer</button>') == 1
-    assert '>Test buzzer</button><br><i style=\\"color:#fa0\\">Save first: test uses saved settings.</i>' in usermod
-    assert "Save first: test uses saved settings." in usermod
-    assert "let idh=" not in usermod
-    assert "addInfo('iDotMatrix:buzzerActiveHigh',1,'','Active buzzer active-high:')" in usermod
-    assert "addInfo('iDotMatrix:buzzerPassiveTrigger',1,'','Passive buzzer trigger:')" in usermod
+    automation_h = (ROOT / "IDotMatrixAutomation.h").read_text(encoding="utf-8")
+    automation_cpp = (ROOT / "IDotMatrixAutomation.cpp").read_text(encoding="utf-8")
 
+    # The old hardware/pattern backend is completely removed from this repository.
+    assert not (ROOT / "IDotMatrixBuzzer.h").exists()
+    assert not (ROOT / "IDotMatrixBuzzer.cpp").exists()
+    for forbidden in (
+        "buzzer-pin", "buzzerType", "buzzerActiveHigh", "buzzerPassiveTrigger",
+        "ledcWriteTone", "BUZZER_SERVICE_PERIOD_US", "esp_timer_start_periodic",
+        "/idotmatrix/buzzer-test", "PinManager::isPinOk",
+    ):
+        assert forbidden not in usermod, forbidden
 
+    # Optional consumer contract for the standalone WLED Buzzer Usermod.
+    bridge = (ROOT / "IDotMatrixBuzzerBridge.h").read_text(encoding="utf-8")
+    assert '__has_include("WLEDBuzzerService.h")' not in usermod
+    assert '#include "WLEDBuzzerService.h"' not in usermod
+    assert "WLEDBuzzerService::instance()" not in usermod
+    for symbol in (
+        "wledBuzzerServiceReady", "wledBuzzerServicePlaying",
+        "wledBuzzerServicePlay", "wledBuzzerServiceStop",
+        "wledBuzzerServiceCurrentSoundId",
+    ):
+        assert symbol in bridge
+    assert '__attribute__((weak))' in bridge
+    assert 'BUZZER_SOUND_ALARM = "triple_beep"' in usermod
+    assert 'BUZZER_SOUND_PROGRAM = "notification"' in usermod
+    assert 'BUZZER_SOUND_COUNTDOWN = "triple_beep"' in usermod
+    assert 'BUZZER_SOUND_CONNECT = "connect"' in usermod
+    assert 'BUZZER_SOUND_DISCONNECT = "disconnect"' in usermod
+    assert "playBuzzerSound(BUZZER_SOUND_ALARM, true)" in usermod
+    assert "disconnectionBeepPending_" in usermod
+    assert "serviceExternalBuzzerEvents();" in usermod
 
-def check_buzzer_realtime_timing_contract() -> None:
-    buzzer_h = (ROOT / "IDotMatrixBuzzer.h").read_text(encoding="utf-8")
-    buzzer_cpp = (ROOT / "IDotMatrixBuzzer.cpp").read_text(encoding="utf-8")
-    usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
-    test = (ROOT / "tests/test_buzzer.cpp").read_text(encoding="utf-8")
-    assert "BUZZER_SERVICE_PERIOD_US = 2000u" in usermod
-    assert "esp_timer_start_periodic" in usermod
-    assert "ESP_TIMER_TASK" in usermod
-    assert "buzzerServiceTimerThunk" in usermod
-    assert "if (!buzzerServiceTimerRunning_) buzzer_.loop(millis());" in usermod
-    assert "beginThreadSafe" in buzzer_h and "xSemaphoreCreateMutex" in buzzer_cpp
-    assert "scheduleNextLocked" in buzzer_cpp
-    assert "const uint32_t phaseNext = nextChangeAt_ + intervalMs" in buzzer_cpp
-    assert "buzzerTiming=" in usermod and "lateMax=" in usermod
-    assert "phase-preserved second pulse start" in test
+    # Automation now publishes only logical sound intent.
+    assert "IDotMatrixBuzzer" not in automation_h
+    assert "IDotMatrixBuzzer" not in automation_cpp
+    assert "alarmSoundRequested() const" in automation_h
+    assert "takeScheduleSoundRequest()" in automation_h
+
+    # Settings UI contains only Enable plus the requested dependency note.
+    assert 'Buzzer</div>' in usermod
+    assert "addInfo('iDotMatrix:buzzerEnabled'" in usermod
+    assert "Requires the WLED Buzzer Usermod." in usermod
+    assert "e.disabled=true" in usermod
+    assert "WLED Buzzer Usermod is not installed in this build." in usermod
+    assert ">Test buzzer</button>" not in usermod
+
 
 def check_append_config_data_budget() -> None:
     import re
@@ -440,8 +461,7 @@ def main() -> None:
     check_rc4_large_text_contract()
     check_rc5_text_ownership_contract()
     check_graffiti_multipart_contract()
-    check_buzzer_settings_ui_layout()
-    check_buzzer_realtime_timing_contract()
+    check_external_buzzer_integration()
     check_append_config_data_budget()
     check_repository_cleanliness()
     check_final_documentation_hygiene()

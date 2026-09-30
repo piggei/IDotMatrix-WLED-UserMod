@@ -1,6 +1,38 @@
 # Testing
 
-## 0.9.2 final buzzer timing qualification
+## 0.9.3-rc.1 optional Buzzer bridge and disconnect notification
+
+This release candidate changes the sound architecture but deliberately keeps the
+iDotMatrix wire protocol unchanged. The primary 0.9.3 gate is therefore consumer
+integration rather than GPIO/LEDC qualification inside this repository.
+
+Automated checks must verify:
+
+- `IDotMatrixBuzzer.*` is absent from the source package;
+- no iDotMatrix buzzer GPIO, Active/Passive, polarity, LEDC, `esp_timer` or local
+  buzzer-test implementation remains;
+- the package compiles and links without the Buzzer Usermod even when its repository exists beside the WLED tree;
+- with WLED Buzzer Usermod rc.7 present, calls use the documented weak C bridge without including the external C++ header;
+- Alarm, Program/Schedule, Countdown, BLE connection and BLE disconnection still produce logical sound requests;
+- the settings UI contains only **Buzzer → Enable** and the orange
+  **Requires the WLED Buzzer Usermod.** note;
+- without the external Usermod, the Enable control is visibly disabled.
+
+Hardware qualification completed before RC1 promotion:
+
+- firmware without WLED Buzzer Usermod: build PASS; Buzzer Enable is disabled;
+- firmware with WLED Buzzer Usermod: Buzzer Enable is available;
+- BLE connection: `connect` PASS;
+- BLE disconnection: `disconnect` PASS;
+- natural Countdown completion: one `triple_beep` PASS;
+- Alarm: looping `triple_beep` PASS, including the RC7 550 ms inter-repeat silence;
+- Program/Schedule: one `notification` PASS;
+- the broader reboot, silent-Alarm, no-sound Program and repeated-event checks were also reported PASS.
+
+Stable 0.9.2 remains the previous stable baseline. RC1 is a version/documentation promotion of the physically tested runtime; no functional runtime change was introduced during the renumbering; the app-visible release byte was restored from temporary 0x0A to the 0.9 line value 0x09 from the temporary 0.10.0 development identifiers.
+
+
+## Historical 0.9.2 final buzzer timing qualification
 
 The final 0.9.2 release is promoted directly from `0.9.2-dev.11`, after physical
 hardware requalification of the runtime buzzer paths. The final promotion does
@@ -24,7 +56,7 @@ the qualified real-time service path.
 
 
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2**. This is the current stable release.
+iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3-rc.1**. Stable 0.9.2 remains the previous hardware-qualified baseline.
 
 ## Automated host regression
 
@@ -187,7 +219,7 @@ A physical 32x32 panel is not required for the current stable release. The
 Additional iOS-specific work remains isolated and deferred unless a new
 compatibility requirement makes it necessary.
 
-## 0.9.2 buzzer / Clock regression evidence
+## Historical 0.9.2 buzzer / Clock regression evidence
 
 The release retains the following qualified/required behaviors:
 

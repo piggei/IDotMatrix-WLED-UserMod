@@ -22,9 +22,6 @@ $CXX $FLAGS IDotMatrixAudioSource.cpp tests/test_audio_source.cpp -o "$TMP/idotm
 $CXX $FLAGS IDotMatrixRenderer.cpp tests/test_renderer.cpp -o "$TMP/idotmatrix_renderer_test"
 "$TMP/idotmatrix_renderer_test"
 
-$CXX $FLAGS IDotMatrixBuzzer.cpp tests/test_buzzer.cpp -o "$TMP/idotmatrix_buzzer_test"
-"$TMP/idotmatrix_buzzer_test"
-
 # Keep a syntax-only pass through the production include path in addition to
 # the behavioral host harness below.
 $CXX $FLAGS -Itests/automation_stub -fsyntax-only IDotMatrixAutomation.cpp
@@ -72,7 +69,12 @@ $CXX $FLAGS -DIDOT_GIF_BITS=11 -DIDOT_GIF_MAX_DIM=32 -Itests/media_stub IDotMatr
 $CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media12_test"
 "$TMP/idotmatrix_media12_test"
 
-python3 tests/test_buzzer_backend.py
+$CXX $FLAGS -I. tests/test_buzzer_bridge_absent.cpp -o "$TMP/idotmatrix_buzzer_bridge_absent_test"
+"$TMP/idotmatrix_buzzer_bridge_absent_test"
+$CXX $FLAGS -I. tests/test_buzzer_bridge_present.cpp -o "$TMP/idotmatrix_buzzer_bridge_present_test"
+"$TMP/idotmatrix_buzzer_bridge_present_test"
+
+python3 tests/test_external_buzzer_contract.py
 python3 tests/test_patch_profiles.py
 python3 tests/test_platformio_profiles.py
 python3 tests/test_release_package.py

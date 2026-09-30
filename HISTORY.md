@@ -1,3 +1,30 @@
+## 0.9.3-rc.1
+
+- Renumbered the externally validated buzzer-service integration from the temporary 0.10.0 development identifiers to the 0.9.3 release line.
+- Promoted the hardware-tested 0.10.0-dev.2 runtime without functional changes; only release/build identity, the app-visible 0.9 release byte and release-candidate documentation changed in iDotMatrix.
+- Qualified the optional dependency boundary on hardware: iDotMatrix builds with and without WLED Buzzer Usermod, and the Buzzer Enable control correctly reflects service availability.
+- Qualified BLE connect/disconnect, natural Countdown, Alarm and Program/Schedule sound routing with the external service.
+- Updated the recommended external dependency to WLED Buzzer Usermod release 0.1.0 / build rc.7, whose `triple_beep` adds a 550 ms repeat-only trailing gap for the Alarm cadence while preserving one-shot playback.
+- Kept the consumer bridge intentionally minimal: readiness, playing state, named-sound play, stop and current sound ID are sufficient for the current iDotMatrix event policy.
+
+## 0.10.0-dev.2
+
+- Changed Alarm playback from the siren-like `alarm` sound to a looping `triple_beep`.
+- Added BLE disconnection notification using the external `disconnect` sound.
+- Replaced direct `WLEDBuzzerService.h` discovery with a weak `extern "C"` bridge, preventing PlatformIO LDF from pulling the Buzzer repository into builds where it is not selected.
+- Added provider-present/provider-absent bridge regression tests.
+- External sound integration now targets WLED Buzzer Usermod release 0.1.0 / build rc.6.
+
+## 0.10.0-dev.1
+
+- Started the 0.10 development line from stable 0.9.2.
+- Removed the complete internal buzzer implementation: `IDotMatrixBuzzer.*`, GPIO/pin handling, Active/Passive settings, polarity settings, LEDC output, buzzer `esp_timer`, local buzzer-test endpoint and Test button.
+- Added optional consumer integration with the standalone WLED Buzzer Usermod through `WLEDBuzzerService`.
+- Reduced iDotMatrix Buzzer configuration to a single `buzzerEnabled` preference.
+- The settings page shows **Buzzer → Enable** plus the orange **Requires the WLED Buzzer Usermod.** note; the control is disabled when the external service is not compiled.
+- Preserved protocol-level sound intent for Alarm, Program/Schedule, Countdown completion and BLE connection, while delegating physical hardware and sound playback to the external service.
+- Stable 0.9.2 remains the qualified baseline pending 0.10 hardware validation with and without the external Buzzer Usermod.
+
 ## 0.9.2
 
 - Promoted the hardware-qualified 0.9.2-dev.11 baseline to stable 0.9.2 with no runtime changes beyond the build identifier.

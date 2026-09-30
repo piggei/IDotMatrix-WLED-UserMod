@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes iDotMatrix WLED Usermod **release 0.9.2 / build 0.9.2**. It builds on the stable 0.9.1 baseline and adds active/passive buzzer hardware backends, persistent Clock presentation preferences, and the hardware-qualified real-time buzzer scheduler. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
+This document describes iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3-rc.1**. It builds on the stable 0.9.2 baseline and removes the internal buzzer hardware/scheduler implementation in favour of the optional standalone WLED Buzzer Usermod service. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
 
 ## Design goals
 
@@ -538,29 +538,50 @@ path with BLE active. It does not yet prove:
 Those tests should preserve the invariants above rather than reintroducing
 unsafe dictionary truncation or permanent large DRAM allocations.
 
-## Buzzer hardware boundary
+## External buzzer service boundary
 
-The optional buzzer is owned by the iDotMatrix usermod rather than the WLED effect engine. `IDotMatrixBuzzer` remains a hardware-agnostic non-blocking pattern state machine. The Usermod maps logical ON/OFF transitions to either an active self-oscillating GPIO backend or a passive ESP32 LEDC backend. Passive modules have an independent high/low trigger setting so their inactive level can be held continuously while silent.
+The 0.9.3 line deliberately removes buzzer hardware ownership from iDotMatrix.
+There is no `IDotMatrixBuzzer` engine, buzzer GPIO allocation, Active/Passive
+selection, trigger polarity, LEDC output, `esp_timer` scheduler or iDotMatrix
+buzzer-test endpoint in this repository.
 
-The Usermod settings page can request a **one-shot test trill** through a small same-origin POST endpoint. The endpoint never changes persistent configuration and only operates on the GPIO/polarity already applied by WLED, so testing cannot silently drive an unsaved or conflicting pin. The one-shot path stops after three beeps; alarms use the repeating pattern, while programs use a finite multi-group activation notice.
+iDotMatrix does not include `WLEDBuzzerService.h`. Instead,
+`IDotMatrixBuzzerBridge.h` weak-links the small `extern "C"` service ABI exported
+by WLED Buzzer Usermod release 0.1.0 / build rc.7. If that Usermod is not linked
+into the firmware, the weak symbols resolve to null and the rest of iDotMatrix
+compiles and links unchanged. The Buzzer Enable control is then rendered disabled.
 
-The logical sound pattern matches the standalone emulator for both backends: three 90 ms pulses, 70 ms gaps, then a 550 ms pause. No `delay()` is used. Direct GPIO drive of a particular buzzer is an electrical hardware property rather than a target-support requirement; the C3 release validation does not claim a specific 5 V buzzer can be driven directly from a 3.3 V GPIO.
+When the bridge is present, iDotMatrix checks service readiness before issuing a
+request. The external Usermod is the sole owner of physical hardware, sound
+definitions and playback timing. iDotMatrix only owns **event policy**:
 
-WLED 0.16.x requires a compile-time `PinOwner` enum value for true PinManager ownership, which an out-of-tree library cannot add safely. The module therefore does not borrow another usermod's owner. The configuration key ends in `pin` so WLED's Usermods settings page includes it in its pin-use scan, and runtime setup rejects GPIOs already allocated by WLED. If WLED later adds external PinOwner registration, only the hardware setup/teardown boundary needs to change.
+- Alarm with its protocol buzzer flag set requests `triple_beep` in loop mode and
+  stops the sound when the Alarm ends;
+- Program/Schedule with the global sound flag requests one `notification` at a
+  real activity-start transition;
+- natural Countdown completion requests one `triple_beep`;
+- BLE application connection requests one `connect` sound;
+- BLE application disconnection requests one `disconnect` sound.
 
-## Countdown, stopwatch and scoreboard artwork
+This weak-link boundary also prevents PlatformIO Library Dependency Finder from
+auto-discovering a sibling Buzzer repository that was not selected in
+`custom_usermods`.
 
-The current implementation ports the reconstructed original-device B154 visuals without changing protocol state. Countdown uses a 7x10 hourglass with ten 200 ms frames, white minutes, orange seconds and red seconds during the final ten seconds; at `00:00` the last hourglass frame remains visible. Stopwatch uses an independent 7x9 face with orange button, gray/lilac case, white dial, red hand and orange seconds. Its eight hand positions advance every 100 ms from elapsed time, which naturally freezes the hand while paused. Scoreboard uses two 4x7 three-digit rows (`000..999`) with player A at the top in `#7858F8` and player B at the bottom in `#F82078`. All three are composed on the legacy 16x16 canvas and then use the normal logical/physical scaling path.
+The bridge intentionally exposes only the service operations currently required by iDotMatrix: readiness, playing state, named-sound playback, stop and current sound ID. `playRepeat`, raw `beep` and raw `tone` are not part of the iDotMatrix consumer contract because all current events use predefined sound IDs; the Alarm repeat is requested through the `loop` argument of named-sound playback.
 
+Alarm is the highest-priority iDotMatrix sound. Program, Countdown and connection/disconnection
+notifications are skipped if another sound is already playing; they are not
+queued. This avoids one consumer unexpectedly interrupting playback already
+owned by the external sound service. The external Buzzer service API does
+not expose ownership tokens, so iDotMatrix tracks only whether it started the
+looping Alarm sound and stops that sound only while the service still reports
+`triple_beep` as the active sound ID.
 
-## Alarm and program buzzer semantics
-
-The buzzer has two deliberately different automation semantics:
-
-- an alarm with its buzzer flag set owns the buzzer for the alarm lifetime and repeats the three-pulse trill until the alarm ends;
-- a program/schedule with global sound enabled emits only an activation notice: three groups of three short trills, then remains silent for the rest of the activity window.
-
-Program sound is started only by a real `startScheduleActivity()` transition. The normal automation loop never restarts the finite notice simply because the schedule remains active. If an alarm fires while the finite program notice is still playing, the alarm takes priority and switches the buzzer to its repeating pattern. The implementation remains non-blocking and does not change display ownership.
+`IDotMatrixAutomation` no longer depends on any buzzer class. It publishes two
+small logical signals to the top-level Usermod: `alarmSoundRequested()` for the
+stateful Alarm flag and `takeScheduleSoundRequest()` for the one-shot Program
+activation event. Countdown plus BLE connection/disconnection requests are collected from their
+existing owners in the same top-level sound-policy pass.
 
 ## Audio/Rhythm stream, source selection and rendering
 

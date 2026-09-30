@@ -1,9 +1,9 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by release 0.9.2 / build 0.9.2. 0.9.2 is the current stable release. The
+This document describes the protocol subset implemented by release 0.9.3 / build 0.9.3-rc.1. Stable 0.9.2 remains the previous stable baseline while the 0.9.3 external-buzzer integration is in release-candidate qualification. The
 BLE wire protocol is carried forward from the stable 0.9.0 WLED iDotMatrix Usermod and extended only where new original-app traffic has been confirmed. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
-stopwatch, scoreboard, persistent alarms and programs/schedules, active/passive-buzzer
+stopwatch, scoreboard, persistent alarms and programs/schedules, optional external-buzzer
 mapping, and five LEVEL plus five FFT Audio/Rhythm visualizers. The standalone
 `IDotMatrix-ESP32-Emulator` repository remains the primary, complete protocol
 reference.
@@ -642,7 +642,7 @@ This assembly is above FA02 transport reassembly: BLE fragmentation first produc
 
 ## Alarm / program sound mapping
 
-The wire protocol is unchanged. Active/passive buzzer selection and electrical trigger polarity are local Usermod hardware configuration and add no BLE fields. Active buzzers use a static GPIO level; passive buzzers use a 2 kHz hardware LEDC square wave and return to the configured inactive trigger level while silent. Alarm packets retain their per-alarm buzzer request. Program global flags retain bit 1 as the sound request. The WLED mapping intentionally differentiates them: alarms repeat the non-blocking trill for their configured duration, while a program activity emits three groups of three short trills once when the activity becomes active and does not sound continuously for the full time window.
+The wire protocol is unchanged. Alarm packets retain their per-alarm buzzer request and Program global flags retain bit 1 as the sound request. Starting with 0.9.3, electrical buzzer configuration is no longer part of iDotMatrix at all. If the standalone WLED Buzzer Usermod is compiled and the iDotMatrix Buzzer Enable setting is active, these protocol events are translated to logical requests through the optional weak-link Buzzer service bridge. The external Usermod owns GPIO, hardware type, polarity, waveform generation and playback timing.
 
 
 ## Device reset (`03 80`)
@@ -659,7 +659,7 @@ It is a **live iDotMatrix protocol reset**, not an ESP32/WLED reboot. The Usermo
 - erases all volatile Preset / Default active, pending, cache and backup files;
 - erases all persisted alarms and alarm media;
 - erases all persisted schedules/programs, staging data and schedule media;
-- stops active alarm/program/buzzer ownership and clears transient iDotMatrix display content;
+- stops active Alarm/Program sound intent and clears transient iDotMatrix display content;
 - preserves WLED configuration, Wi-Fi/BLE operation, system time and the last valid app time synchronization.
 
 The normal acknowledgement is `05 00 03 80 01`. If `iDotMatrix` remains selected after reset, the normal no-Carousel standalone policy may subsequently show the Clock fallback.

@@ -1,9 +1,10 @@
-# WLED iDotMatrix Usermod — 0.9.2
+# WLED iDotMatrix Usermod — 0.9.3-rc.1
 
-**Release: 0.9.2 / build: 0.9.2.**  
-**Current stable release: 0.9.2.**
+**Release: 0.9.3 / build: 0.9.3-rc.1.**  
+**Current release candidate: 0.9.3-rc.1.**  
+**Previous stable release: 0.9.2.**
 
-The 0.9 line brings the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
+The 0.9.3 line builds on the 0.9 hardware/platform work that brought the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
 native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
 path. The primary 64x64 target is an Adafruit MatrixPortal ESP32-S3 driving a
 64x64 HUB75 panel on the qualified WLED 17.0.0-devV5 baseline
@@ -24,32 +25,24 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-`0.9.2` is the stable release promoted from the final hardware-qualified
-development baseline. The stable promotion does not change runtime behavior; it
-only changes the public build identifier and consolidates release documentation.
+`0.9.3-rc.1` promotes the externally validated buzzer-service integration from the
+0.9.2 baseline into the 0.9.3 release-candidate line. Its main architectural change is the removal of the complete
+internal buzzer backend. iDotMatrix no longer owns a buzzer GPIO, Active/Passive
+selection, trigger polarity, LEDC generation, playback scheduler or local buzzer
+test endpoint.
 
-The 0.9.2 line adds configurable Active/Passive buzzer hardware, persistent Clock
-presentation preferences, and the final real-time buzzer scheduler. Hardware
-requalification after dev.11 confirmed the runtime sound paths used by Test
-buzzer, BLE connection, Countdown, Alarm, and Program/Schedule. On ESP32 the
-buzzer envelope is serviced by ESP-IDF `esp_timer` at 2 ms cadence, with absolute
-edge deadlines so small service delays do not accumulate across a trill. A
-WLED-loop fallback remains available if timer setup fails, and `/json/info`
-reports the active timing source plus last/max edge lateness.
+Sound output is now optional and delegated to the standalone **WLED Buzzer
+Usermod** through its optional weak-link service bridge. When that Usermod is compiled into the
+same WLED firmware, iDotMatrix can request logical sounds for Alarm,
+Program/Schedule, Countdown completion, BLE connection and BLE disconnection. When it is absent,
+iDotMatrix continues to operate normally with sound disabled.
 
-The 0.9.2 release also retains the validated configuration UI, passive-buzzer
-2 kHz LEDC backend and safe idle polarity handling, plus NVS persistence for
-Clock style, 12/24-hour mode, date visibility and RGB colour. Existing Carousel,
-Alarm, Program/Schedule, Preset / Default, Graffiti, GIF/media, BLE protocol and
-WLED ownership behavior remains unchanged except for the explicitly documented
-buzzer runtime routing and timing fixes introduced during the 0.9.2 development
-cycle.
+The iDotMatrix settings page therefore exposes only **Buzzer → Enable** plus the
+orange dependency note **Requires the WLED Buzzer Usermod.** If the external
+service is not part of the firmware, the checkbox is shown disabled.
 
-`0.9.1` remains the previous stable maintenance release. It added the
-hardware-validated original-app Graffiti full-raster multipart path, the
-validated ESP32-C3 4 MB AudioReactive + dual-slot OTA profile, repository
-build-support housekeeping, and the final native 64x64 Clock styles 0/3
-date-spacing correction.
+The BLE protocol and persistent Alarm/Program metadata remain unchanged. Stable 0.9.2 remains the previous stable baseline. The 0.9.3-rc.1 runtime is
+promoted from the hardware-tested integration build with no functional changes.
 
 ## Preset / Default
 
@@ -163,8 +156,7 @@ On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile an
 | 32x32 profile | profile `0x03` | logical profile + optional rescale | Hardware-validated with physical 16x16 |
 | 64x64 profile | profile `0x04` | logical profile + optional low-memory rescale | Hardware-validated with physical 16x16/no PSRAM |
 
-Alarms and programs/schedules include persistent metadata/media and active/passive-buzzer
-integration. Display rotation and energy-saving remain owned by WLED; the verified `03 80` protocol reset clears Usermod-owned Carousel/Device Assets, Preset/Default, alarm, program/schedule and transient iDotMatrix state without rebooting WLED. WLED configuration, connectivity, system time and unrelated filesystem content are preserved.
+Alarms and programs/schedules include persistent metadata/media and preserve their protocol-level sound requests. Sound playback is delegated to the optional standalone WLED Buzzer Usermod. Display rotation and energy-saving remain owned by WLED; the verified `03 80` protocol reset clears Usermod-owned Carousel/Device Assets, Preset/Default, alarm, program/schedule and transient iDotMatrix state without rebooting WLED. WLED configuration, connectivity, system time and unrelated filesystem content are preserved.
 These responsibilities remain in WLED rather than being duplicated in the BLE emulator.
 
 ## Hardware requirements
@@ -187,7 +179,7 @@ These responsibilities remain in WLED rather than being duplicated in the BLE em
 - WLED IDF5 `WLED_USE_SHARED_RMT` backend;
 - NimBLE-Arduino 2.5.1 and AnimatedGIF 1.4.7 as pinned by `overrides/esp32c3-16x16.ini`.
 
-The optional active/passive-buzzer path is independent of the matrix/BLE/OTA qualification. Use an appropriate external driver when the selected buzzer cannot be driven safely or loudly enough from a 3.3 V GPIO.
+Buzzer hardware is no longer owned by iDotMatrix. Install and configure the standalone WLED Buzzer Usermod when sound output is required; it owns the GPIO, hardware type, trigger polarity, LEDC resources and playback timing.
 
 PSRAM is not required for either supported 16x16 target.
 
@@ -282,6 +274,7 @@ Keep the repositories beside one another because the supplied override uses a re
 ```text
 <workdir>/WLED/
 <workdir>/wled-usermod-idotmatrix/
+<workdir>/wled-usermod-buzzer/        # optional; required only for sound
 ```
 
 Prepare the exact qualified WLED base and copy the MatrixPortal override:
@@ -347,10 +340,6 @@ with Carousel, Preset and Schedule content already populated.
   when no name is saved, a stable six-digit default (`IDM-xxxxxx`) is derived
   from the ESP32 eFuse MAC;
 - `rescale`: test-only nearest-neighbour mapping from a deliberately mismatched logical profile to the selected WLED 2D segment/storage canvas; hidden and forced off in the standard 16x16 build;
-- `buzzer-pin`: optional buzzer GPIO; leave unassigned to disable buzzer hardware;
-- `buzzerType`: selects **Active** (self-oscillating/static GPIO) or **Passive** (2 kHz LEDC tone);
-- `buzzerActiveHigh`: selects the static active level for an active buzzer;
-- `buzzerPassiveTrigger`: selects **High** or **Low** trigger polarity for a passive buzzer/module. Low-level-trigger transistor modules are held HIGH while silent;
 - `audioSource`: `Phone / BLE` (default), `WLED AudioReactive`, or `Auto`. The
   AudioReactive choices consume WLED's existing processed audio data when the
   AudioReactive Usermod is compiled and enabled.
@@ -487,7 +476,6 @@ The PSRAM/direct backend, native physical 64x64 output and WLED native HUB75 DMA
 - `IDotMatrixAutomation.*` — persistent alarms and program/schedule execution;
 - `IDotMatrixPreset.*` — volatile six-slot Preset / Default staging and transactional activation;
 - `IDotMatrixAudioSource.*` — Phone/BLE vs WLED AudioReactive source selection and band mapping;
-- `IDotMatrixBuzzer.*` — non-blocking active/passive-buzzer pattern engine;
 - `patch_animatedgif_profiles.py` — selects 10/11/12-bit AnimatedGIF build profile;
 - `partitions/` — custom no-OTA tables plus the validated 4 MB dual-slot OTA table;
 - `overrides/` — PlatformIO media/hardware target templates;
@@ -501,7 +489,8 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9.1 work;
-- [`RELEASE_NOTES_0.9.2.md`](RELEASE_NOTES_0.9.2.md) — current stable 0.9.2 release notes;
+- [`RELEASE_NOTES_0.9.3-rc.1.md`](RELEASE_NOTES_0.9.3-rc.1.md) — current release-candidate notes;
+- [`RELEASE_NOTES_0.9.2.md`](RELEASE_NOTES_0.9.2.md) — previous stable 0.9.2 release notes;
 - [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
 
@@ -522,17 +511,38 @@ Complementary iDotMatrix projects and protocol clients:
 Most are clients/controllers for real iDotMatrix hardware. This repository makes
 WLED behave as the BLE peripheral expected by the official app.
 
-## Optional active/passive buzzer
+## Optional external Buzzer Usermod
 
-The buzzer backend is configured in **Config → Usermods → iDotMatrix**. Leaving the pin unassigned disables buzzer hardware. `buzzerType` selects either an **Active** self-oscillating buzzer driven by a static GPIO level or a **Passive** buzzer driven by the ESP32 LEDC peripheral at 2 kHz.
+Starting with 0.9.3, iDotMatrix contains no buzzer hardware backend. The optional
+sound path is provided by **WLED Buzzer Usermod release 0.1.0 / build rc.7** or newer. RC7 exposes the optional weak-link bridge used by iDotMatrix and retains the validated `triple_beep` one-shot while adding a 550 ms repeat gap. It owns GPIO allocation, Active/Passive hardware,
+polarity, LEDC, volume and playback scheduling.
 
-For active buzzers, `buzzerActiveHigh` selects the active GPIO polarity. For passive buzzers, `buzzerPassiveTrigger` selects the module trigger level. A low-level-trigger transistor module is held HIGH while silent and receives the hardware square wave only while sound is requested, preventing DC bias/heating at rest.
+To enable sound, compile both repositories into the same WLED firmware:
 
-The passive backend uses 10-bit LEDC, matching the resolution selected by Arduino-ESP32 3.x `ledcWriteTone()`, so a trigger-low module returns to a true constant-HIGH idle after each tone.
+```ini
+custom_usermods =
+  symlink://../wled-usermod-buzzer
+  symlink://../wled-usermod-idotmatrix
+```
 
-After saving, **Test buzzer** emits one finite three-short-beep trill. The buzzer settings are grouped under a dedicated **Buzzer** heading in the order Pin -> Type -> type-specific polarity -> Test. Only the polarity control relevant to the selected buzzer type is shown. Alarm and Program/Schedule continue to use the existing non-blocking sound policies; BLE and rendering remain active while the tone is generated.
+The iDotMatrix settings page then exposes only **Buzzer → Enable**. Directly
+under it the orange note states **Requires the WLED Buzzer Usermod.** If the
+external service is not compiled into the firmware, the Enable checkbox is
+shown disabled and no buzzer request is emitted.
 
-Clock presentation preferences received from the app (style, 12/24-hour mode, date visibility and RGB colour) are persisted in NVS with a deferred write. They are loaded during Usermod setup before a standalone iDotMatrix Clock fallback can be selected, so choosing the iDotMatrix effect before the phone reconnects preserves the previously selected Clock appearance. Device reset (`03 80`) clears these stored Clock presentation preferences together with the other iDotMatrix-owned device state.
+iDotMatrix requests logical sound IDs rather than electrical waveforms:
+
+| Event | Request |
+|---|---|
+| Alarm with buzzer flag | `triple_beep`, looped until Alarm stop |
+| Program / Schedule sound flag | `notification`, once on activation |
+| Natural Countdown completion | `triple_beep`, once |
+| BLE application connection | `connect`, once |
+| BLE application disconnection | `disconnect`, once |
+
+The external Buzzer Usermod is therefore the only place that should configure or
+drive the physical buzzer. iDotMatrix does not allocate a buzzer pin and does
+not contain a local Test buzzer action.
 
 ## License
 

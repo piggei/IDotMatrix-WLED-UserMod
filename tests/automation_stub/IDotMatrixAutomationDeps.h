@@ -8,19 +8,6 @@ extern uint32_t testMillis;
 class IDotMatrixRenderer {};
 class IDotMatrixMedia {};
 
-class IDotMatrixBuzzer {
-public:
-  void startScheduleAlert(uint32_t now) { playing_ = true; lastScheduleStart_ = now; }
-  void startTrill(uint32_t now) { playing_ = true; lastTrillStart_ = now; }
-  void stop() { playing_ = false; }
-  bool isPlaying() const { return playing_; }
-
-  uint32_t lastScheduleStart_ = 0;
-  uint32_t lastTrillStart_ = 0;
-private:
-  bool playing_ = false;
-};
-
 class IDotMatrixWLEDAdapter {
 public:
   uint32_t mediaLoadDelayMs = 0;

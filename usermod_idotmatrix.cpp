@@ -4,12 +4,12 @@
 #include "IDotMatrixRenderer.h"
 #include "IDotMatrixMedia.h"
 #include "IDotMatrixWLEDAdapter.h"
-#include "IDotMatrixBuzzer.h"
 #include "IDotMatrixAutomation.h"
 #include "IDotMatrixCarousel.h"
 #include "IDotMatrixPreset.h"
 #include "IDotMatrixBuildProfile.h"
 #include "IDotMatrixAudioSource.h"
+#include "IDotMatrixBuzzerBridge.h"
 
 #ifndef IDOT_DEFAULT_SCREEN_TYPE
 #define IDOT_DEFAULT_SCREEN_TYPE 0x01
@@ -19,9 +19,6 @@
 #include <esp_system.h>
 #include <esp_heap_caps.h>
 #include <Preferences.h>
-#include <esp32-hal-ledc.h>
-#include <esp_arduino_version.h>
-#include <esp_timer.h>
 #endif
 
 #if defined(IDOT_C3_WLED_IDF5) && !defined(CONFIG_IDF_TARGET_ESP32C3)
@@ -50,8 +47,8 @@
 #error "ESP32-S3 iDotMatrix HUB75 profile requires NimBLE-Arduino 2.x"
 #endif
 
-static constexpr const char* IDOTMATRIX_RELEASE = "0.9.2";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.2";
+static constexpr const char* IDOTMATRIX_RELEASE = "0.9.3";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.3-rc.1";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -61,27 +58,16 @@ const char CFG_ENABLED[] PROGMEM = "enabled";
 const char CFG_SCREEN_TYPE[] PROGMEM = "screenType";
 const char CFG_DEVICE_NAME[] PROGMEM = "deviceName";
 const char CFG_RESCALE[] PROGMEM = "rescale";
-const char CFG_BUZZER_PIN[] PROGMEM = "buzzer-pin";
-const char CFG_BUZZER_TYPE[] PROGMEM = "buzzerType";
-const char CFG_BUZZER_ACTIVE_HIGH[] PROGMEM = "buzzerActiveHigh";
-const char CFG_BUZZER_PASSIVE_TRIGGER[] PROGMEM = "buzzerPassiveTrigger";
+const char CFG_BUZZER_ENABLED[] PROGMEM = "buzzerEnabled";
 const char CFG_AUDIO_SOURCE[] PROGMEM = "audioSource";
 
-enum : uint8_t {
-  BUZZER_TYPE_ACTIVE = 0,
-  BUZZER_TYPE_PASSIVE = 1,
-};
-enum : uint8_t {
-  BUZZER_TRIGGER_HIGH = 0,
-  BUZZER_TRIGGER_LOW = 1,
-};
-constexpr uint32_t BUZZER_PASSIVE_FREQUENCY_HZ = 2000u;
-constexpr uint8_t BUZZER_LEDC_RESOLUTION_BITS = 10u;
-constexpr uint32_t BUZZER_LEDC_MAX_DUTY = (1u << BUZZER_LEDC_RESOLUTION_BITS) - 1u;
-constexpr uint64_t BUZZER_SERVICE_PERIOD_US = 2000u;
-#if defined(ARDUINO_ARCH_ESP32) && ESP_ARDUINO_VERSION_MAJOR < 3
-constexpr uint8_t BUZZER_LEDC_CHANNEL = 7u;
-#endif
+// Logical sound IDs are owned by the standalone WLED Buzzer Usermod. iDotMatrix
+// only requests semantic events and never touches GPIO, LEDC or playback timing.
+constexpr const char* BUZZER_SOUND_ALARM = "triple_beep";
+constexpr const char* BUZZER_SOUND_PROGRAM = "notification";
+constexpr const char* BUZZER_SOUND_COUNTDOWN = "triple_beep";
+constexpr const char* BUZZER_SOUND_CONNECT = "connect";
+constexpr const char* BUZZER_SOUND_DISCONNECT = "disconnect";
 
 constexpr const char* CLOCK_PREFS_NAMESPACE = "idotclock";
 constexpr const char* CLOCK_PREFS_VALID = "valid";
@@ -129,13 +115,8 @@ private:
   uint8_t screenType_ = IDOT_DEFAULT_SCREEN_TYPE;
   String deviceName_;
   bool rescale_ = false;
-  int8_t buzzerPin_ = -1;
-  uint8_t buzzerType_ = BUZZER_TYPE_ACTIVE;
-  bool buzzerActiveHigh_ = true;
-  uint8_t buzzerPassiveTrigger_ = BUZZER_TRIGGER_HIGH;
-  bool buzzerHardwareReady_ = false;
-  bool buzzerLedcAttached_ = false;
-  bool buzzerPinUnavailable_ = false;
+  bool buzzerEnabled_ = true;
+  bool externalAlarmSoundOwned_ = false;
   IDotMatrixAudioSourceMode audioSourceMode_ = IDotMatrixAudioSourceMode::Phone;
   bool audioReactivePresent_ = false;
   bool audioReactiveDataAvailable_ = false;
@@ -145,14 +126,13 @@ private:
   IDotMatrixClockSettings pendingClockPrefs_{};
   uint32_t handledProtocolResetCount_ = 0;
   bool setupComplete_ = false;
-  IDotMatrixBuzzer buzzer_;
   IDotMatrixRenderer renderer_;
   IDotMatrixMedia media_{renderer_};
   IDotMatrixWLEDAdapter adapter_{renderer_, &media_};
   IDotMatrixProtocol protocol_{adapter_};
   IDotMatrixCarousel carousel_{protocol_, adapter_};
   IDotMatrixPreset preset_{protocol_, adapter_};
-  IDotMatrixAutomation automation_{renderer_, adapter_, media_, buzzer_};
+  IDotMatrixAutomation automation_{renderer_, adapter_, media_};
   IDotMatrixBLEServer ble_{protocol_};
   bool rmtBusActive_ = false;
   bool blockedByRmt_ = false;
@@ -162,10 +142,8 @@ private:
   bool runtimeRestartRequired_ = false;
   bool bleConnectedLast_ = false;
   bool connectionBeepPending_ = false;
+  bool disconnectionBeepPending_ = false;
 #if defined(ARDUINO_ARCH_ESP32)
-  esp_timer_handle_t buzzerServiceTimer_ = nullptr;
-  bool buzzerServiceTimerRunning_ = false;
-  bool buzzerThreadSafe_ = false;
   esp_reset_reason_t bootResetReason_ = ESP_RST_UNKNOWN;
   CrashSnapshot previousSnapshot_{};
   bool previousSnapshotValid_ = false;
@@ -324,191 +302,88 @@ private:
   }
 
 
-  static void buzzerOutputThunk(void* context, bool on) {
-    static_cast<IDotMatrixUsermod*>(context)->writeBuzzerOutput(on);
+  bool buzzerServiceInstalled() const {
+    return IDotMatrixBuzzerBridge::installed();
   }
 
-#if defined(ARDUINO_ARCH_ESP32)
-  static void buzzerServiceTimerThunk(void* context) {
-    auto* self = static_cast<IDotMatrixUsermod*>(context);
-    self->buzzer_.loop(millis());
+  bool buzzerServiceReady() const {
+    return IDotMatrixBuzzerBridge::ready();
   }
 
-  void stopBuzzerServiceTimer() {
-    if (buzzerServiceTimer_ != nullptr && buzzerServiceTimerRunning_) {
-      esp_timer_stop(buzzerServiceTimer_);
-      buzzerServiceTimerRunning_ = false;
-    }
+  bool buzzerServicePlaying() const {
+    return IDotMatrixBuzzerBridge::playing();
   }
 
-  bool startBuzzerServiceTimer() {
-    if (!buzzerThreadSafe_) return false;
-    if (buzzerServiceTimer_ == nullptr) {
-      esp_timer_create_args_t args{};
-      args.callback = &IDotMatrixUsermod::buzzerServiceTimerThunk;
-      args.arg = this;
-      args.dispatch_method = ESP_TIMER_TASK;
-      args.name = "idot-buzzer";
-      args.skip_unhandled_events = true;
-      if (esp_timer_create(&args, &buzzerServiceTimer_) != ESP_OK) {
-        buzzerServiceTimer_ = nullptr;
-        return false;
+  bool playBuzzerSound(const char* soundId, bool loop = false) {
+    if (!buzzerEnabled_) return false;
+    return IDotMatrixBuzzerBridge::ready() && IDotMatrixBuzzerBridge::play(soundId, loop);
+  }
+
+  void stopOwnedAlarmSound() {
+    if (externalAlarmSoundOwned_) {
+      const char* current = IDotMatrixBuzzerBridge::currentSoundId();
+      if (current != nullptr && strcmp(current, BUZZER_SOUND_ALARM) == 0) {
+        IDotMatrixBuzzerBridge::stop();
       }
     }
-    if (buzzerServiceTimerRunning_) return true;
-    if (esp_timer_start_periodic(buzzerServiceTimer_, BUZZER_SERVICE_PERIOD_US) != ESP_OK) {
-      return false;
-    }
-    buzzerServiceTimerRunning_ = true;
-    return true;
+    externalAlarmSoundOwned_ = false;
   }
-#endif
+
+  void serviceExternalBuzzerEvents() {
+    const bool alarmWanted = buzzerEnabled_ && automation_.alarmSoundRequested();
+
+    if (alarmWanted) {
+      if (externalAlarmSoundOwned_ && !buzzerServicePlaying()) {
+        externalAlarmSoundOwned_ = false;
+      }
+      if (!externalAlarmSoundOwned_ && buzzerServiceReady()) {
+        // Alarm repeats the classic iDotMatrix triple-beep cadence. The
+        // standalone Buzzer Usermod owns the waveform, GPIO and scheduler.
+        externalAlarmSoundOwned_ = playBuzzerSound(BUZZER_SOUND_ALARM, true);
+      }
+      // Lower-priority notifications are intentionally skipped, not deferred,
+      // while an Alarm owns the iDotMatrix sound policy.
+      automation_.takeScheduleSoundRequest();
+      adapter_.takeCountdownBuzzerRequest();
+      connectionBeepPending_ = false;
+      disconnectionBeepPending_ = false;
+      return;
+    }
+
+    if (externalAlarmSoundOwned_) stopOwnedAlarmSound();
+
+    // Program/Schedule > Countdown > BLE connection/disconnection. All are
+    // one-shot requests and never interrupt another consumer's sound.
+    const bool programSound = automation_.takeScheduleSoundRequest();
+    if (programSound && buzzerEnabled_ && buzzerServiceReady() && !buzzerServicePlaying()) {
+      playBuzzerSound(BUZZER_SOUND_PROGRAM);
+    }
+
+    const bool countdownSound = adapter_.takeCountdownBuzzerRequest();
+    if (countdownSound && buzzerEnabled_ && buzzerServiceReady() && !buzzerServicePlaying()) {
+      playBuzzerSound(BUZZER_SOUND_COUNTDOWN);
+    }
+
+    if (connectionBeepPending_) {
+      if (buzzerEnabled_ && buzzerServiceReady() && !buzzerServicePlaying()) {
+        playBuzzerSound(BUZZER_SOUND_CONNECT);
+      }
+      connectionBeepPending_ = false;
+    }
+
+    if (disconnectionBeepPending_) {
+      if (buzzerEnabled_ && buzzerServiceReady() && !buzzerServicePlaying()) {
+        playBuzzerSound(BUZZER_SOUND_DISCONNECT);
+      }
+      disconnectionBeepPending_ = false;
+    }
+  }
 
   static void clockPreferencesThunk(
     void* context,
     const IDotMatrixClockSettings& settings
   ) {
     static_cast<IDotMatrixUsermod*>(context)->scheduleClockPreferencesSave(settings);
-  }
-
-  bool passiveTriggerLow() const {
-    return buzzerPassiveTrigger_ == BUZZER_TRIGGER_LOW;
-  }
-
-  uint32_t passiveIdleDuty() const {
-    return passiveTriggerLow() ? BUZZER_LEDC_MAX_DUTY : 0u;
-  }
-
-  int passiveIdleLevel() const {
-    // A low-level trigger module must idle HIGH while silent.
-    return passiveTriggerLow() ? HIGH : LOW;
-  }
-
-  bool attachPassiveBuzzer() {
-#if defined(ARDUINO_ARCH_ESP32)
-    pinMode(buzzerPin_, OUTPUT);
-    digitalWrite(buzzerPin_, passiveIdleLevel());
-  #if ESP_ARDUINO_VERSION_MAJOR >= 3
-    buzzerLedcAttached_ = ledcAttach(
-      buzzerPin_, BUZZER_PASSIVE_FREQUENCY_HZ, BUZZER_LEDC_RESOLUTION_BITS);
-    return buzzerLedcAttached_;
-  #else
-    if (ledcSetup(BUZZER_LEDC_CHANNEL, BUZZER_PASSIVE_FREQUENCY_HZ,
-                  BUZZER_LEDC_RESOLUTION_BITS) <= 0.0) {
-      return false;
-    }
-    ledcAttachPin(buzzerPin_, BUZZER_LEDC_CHANNEL);
-    buzzerLedcAttached_ = true;
-    return true;
-  #endif
-#else
-    return false;
-#endif
-  }
-
-  void detachPassiveBuzzer() {
-#if defined(ARDUINO_ARCH_ESP32)
-    if (!buzzerLedcAttached_) return;
-  #if ESP_ARDUINO_VERSION_MAJOR >= 3
-    ledcDetach(buzzerPin_);
-  #else
-    ledcDetachPin(buzzerPin_);
-  #endif
-    buzzerLedcAttached_ = false;
-#endif
-  }
-
-  void writeBuzzerOutput(bool on) {
-    if (!buzzerHardwareReady_ || buzzerPin_ < 0) return;
-
-    if (buzzerType_ == BUZZER_TYPE_PASSIVE) {
-#if defined(ARDUINO_ARCH_ESP32)
-      // Arduino-ESP32 3.x ledcWriteTone() switches the channel to 10-bit
-      // resolution. Keep our attached channel and idle-duty calculation at
-      // the same resolution, otherwise trigger-low idle would become ~25%
-      // PWM (255/1023) after the first tone and the buzzer would keep sounding.
-  #if ESP_ARDUINO_VERSION_MAJOR >= 3
-      if (on) ledcWriteTone(buzzerPin_, BUZZER_PASSIVE_FREQUENCY_HZ);
-      else ledcWrite(buzzerPin_, passiveIdleDuty());
-  #else
-      if (on) ledcWriteTone(BUZZER_LEDC_CHANNEL, BUZZER_PASSIVE_FREQUENCY_HZ);
-      else ledcWrite(BUZZER_LEDC_CHANNEL, passiveIdleDuty());
-  #endif
-#endif
-      return;
-    }
-
-    digitalWrite(
-      buzzerPin_,
-      on ? (buzzerActiveHigh_ ? HIGH : LOW)
-         : (buzzerActiveHigh_ ? LOW : HIGH)
-    );
-  }
-
-  void teardownBuzzerHardware() {
-#if defined(ARDUINO_ARCH_ESP32)
-    stopBuzzerServiceTimer();
-#endif
-    buzzer_.stop();
-    if (buzzerHardwareReady_ && buzzerPin_ >= 0) {
-      writeBuzzerOutput(false);
-      if (buzzerType_ == BUZZER_TYPE_PASSIVE) detachPassiveBuzzer();
-      pinMode(buzzerPin_, INPUT);
-    }
-    buzzerHardwareReady_ = false;
-    buzzerLedcAttached_ = false;
-    buzzerPinUnavailable_ = false;
-  }
-
-  void setupBuzzerHardware() {
-    buzzer_.stop();
-    buzzerHardwareReady_ = false;
-    buzzerLedcAttached_ = false;
-    buzzerPinUnavailable_ = false;
-    if (!enabled_ || buzzerPin_ < 0) return;
-
-    // WLED does not provide a collision-safe PinOwner for this out-of-tree
-    // usermod. Keep the existing defensive allocation check and refuse pins
-    // already owned by WLED or another registered component.
-    if (!PinManager::isPinOk(buzzerPin_, true) || PinManager::isPinAllocated(buzzerPin_)) {
-      buzzerPinUnavailable_ = true;
-      DEBUG_PRINTF_P(PSTR("[iDotMatrix] buzzer GPIO %d unavailable\n"), buzzerPin_);
-      return;
-    }
-
-    if (buzzerType_ == BUZZER_TYPE_PASSIVE) {
-      if (!attachPassiveBuzzer()) {
-        DEBUG_PRINTF_P(PSTR("[iDotMatrix] passive buzzer LEDC attach failed on GPIO %d\n"), buzzerPin_);
-        pinMode(buzzerPin_, INPUT);
-        return;
-      }
-      buzzerHardwareReady_ = true;
-      writeBuzzerOutput(false);
-#if defined(ARDUINO_ARCH_ESP32)
-      if (!startBuzzerServiceTimer()) {
-        DEBUG_PRINTLN(F("[iDotMatrix] buzzer esp_timer unavailable; using WLED-loop fallback"));
-      }
-#endif
-      DEBUG_PRINTF_P(
-        PSTR("[iDotMatrix] passive buzzer ready on GPIO %d (%lu Hz, trigger-%s)\n"),
-        buzzerPin_, static_cast<unsigned long>(BUZZER_PASSIVE_FREQUENCY_HZ),
-        passiveTriggerLow() ? "low" : "high"
-      );
-      return;
-    }
-
-    pinMode(buzzerPin_, OUTPUT);
-    buzzerHardwareReady_ = true;
-    writeBuzzerOutput(false);
-#if defined(ARDUINO_ARCH_ESP32)
-    if (!startBuzzerServiceTimer()) {
-      DEBUG_PRINTLN(F("[iDotMatrix] buzzer esp_timer unavailable; using WLED-loop fallback"));
-    }
-#endif
-    DEBUG_PRINTF_P(
-      PSTR("[iDotMatrix] active buzzer ready on GPIO %d (%s)\n"),
-      buzzerPin_, buzzerActiveHigh_ ? "active-high" : "active-low"
-    );
   }
 
   void scheduleClockPreferencesSave(const IDotMatrixClockSettings& settings) {
@@ -574,39 +449,6 @@ private:
     adapter_.setClockPreferences(pendingClockPrefs_);
   }
 
-  void registerBuzzerTestEndpoint() {
-    server.on(F("/idotmatrix/buzzer-test"), HTTP_POST, [this](AsyncWebServerRequest* request) {
-      if (strlen(settingsPIN) > 0 && !correctPIN) {
-        request->send(403, FPSTR(CONTENT_TYPE_PLAIN), F("Unlock WLED settings before testing the buzzer."));
-        return;
-      }
-      if (!enabled_) {
-        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("iDotMatrix usermod is disabled."));
-        return;
-      }
-      if (buzzerPin_ < 0) {
-        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("Configure the buzzer GPIO and save first."));
-        return;
-      }
-      if (buzzerPinUnavailable_) {
-        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("The configured buzzer GPIO is unavailable."));
-        return;
-      }
-      if (!buzzerHardwareReady_) {
-        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("Buzzer hardware is not ready."));
-        return;
-      }
-      if (buzzer_.isPlaying()) {
-        request->send(409, FPSTR(CONTENT_TYPE_PLAIN), F("Buzzer is already active."));
-        return;
-      }
-
-      // One finite three-beep trill is enough to validate wiring and polarity.
-      // Alarms use the repeating pattern; schedules use a finite activation alert.
-      buzzer_.startTest(millis());
-      request->send(200, FPSTR(CONTENT_TYPE_PLAIN), F("ok"));
-    });
-  }
 
 public:
   void setup() override {
@@ -619,13 +461,6 @@ public:
     rtcSnapshot = CrashSnapshot{};
     rtcSnapshot.magic = SNAPSHOT_MAGIC;
 #endif
-    buzzer_.attach(&IDotMatrixUsermod::buzzerOutputThunk, this);
-#if defined(ARDUINO_ARCH_ESP32)
-    buzzerThreadSafe_ = buzzer_.beginThreadSafe();
-    if (!buzzerThreadSafe_) {
-      DEBUG_PRINTLN(F("[iDotMatrix] buzzer mutex allocation failed; using WLED-loop timing"));
-    }
-#endif
     adapter_.setClockPreferencesCallback(&IDotMatrixUsermod::clockPreferencesThunk, this);
     loadClockPreferences();
     protocol_.setAutomationEvents(&automation_);
@@ -633,8 +468,6 @@ public:
     protocol_.setPresetEvents(&preset_);
     protocol_.setDeviceReleaseVersion(IDOTMATRIX_APP_RELEASE_MAJOR, IDOTMATRIX_APP_RELEASE_MINOR);
     automation_.attachProtocol(&protocol_);
-    registerBuzzerTestEndpoint();
-    setupBuzzerHardware();
     if (deviceName_.isEmpty()) deviceName_ = defaultDeviceName();
     if (!enabled_) { setupComplete_ = true; return; }
 
@@ -717,14 +550,6 @@ public:
   void loop() override {
     if (!enabled_) return;
 
-    // ESP32 uses a high-priority esp_timer service so Alarm/Program envelope
-    // timing is independent of WLED/GIF/filesystem loop jitter. If timer setup
-    // failed, retain the original main-loop service as a safe fallback.
-#if defined(ARDUINO_ARCH_ESP32)
-    if (!buzzerServiceTimerRunning_) buzzer_.loop(millis());
-#else
-    buzzer_.loop(millis());
-#endif
     if (blockedByRmt_) return;
 
 
@@ -754,7 +579,10 @@ public:
     flushClockPreferencesSaveIfNeeded();
     ble_.loop();
     const bool bleConnectedNow = ble_.isConnected();
-    if (bleConnectedNow && !bleConnectedLast_) connectionBeepPending_ = true;
+    if (bleConnectedNow != bleConnectedLast_) {
+      if (bleConnectedNow) connectionBeepPending_ = true;
+      else if (bleConnectedLast_) disconnectionBeepPending_ = true;
+    }
     bleConnectedLast_ = bleConnectedNow;
 
     // Selecting iDotMatrix means: stored Carousel first, otherwise
@@ -777,20 +605,10 @@ public:
     automation_.loop(millis());
     adapter_.loop(millis());
 
-    // Local buzzer notifications follow the qualified priority model:
-    // Alarm > Program/Schedule > Countdown > BLE connection. Alarm/Schedule
-    // own the buzzer inside IDotMatrixAutomation; lower-priority notices are
-    // skipped rather than deferred if a higher-priority pattern is active.
-    const bool countdownBuzzer = adapter_.takeCountdownBuzzerRequest();
-    if (countdownBuzzer && !automation_.alarmActive() && !buzzer_.isPlaying()) {
-      buzzer_.startCountdownAlert(millis());
-    }
-    if (connectionBeepPending_) {
-      if (!automation_.alarmActive() && !buzzer_.isPlaying()) {
-        buzzer_.startConnectionBeep(millis());
-      }
-      connectionBeepPending_ = false;
-    }
+    // Sound playback is delegated to the optional standalone WLED Buzzer
+    // Usermod. iDotMatrix keeps only event policy and priority; it never owns
+    // the GPIO, waveform, timer or sound definition.
+    serviceExternalBuzzerEvents();
 
     // WLED effects can be selected directly from the Web UI/API while an
     // iDotMatrix GIF or other media mode is active. Detect that ownership
@@ -938,6 +756,10 @@ public:
       F(" active=") + effectiveAudioSourceText());
     info.add(String(F("audioReactive=")) +
       (audioReactivePresent_ ? (audioReactiveDataAvailable_ ? F("data") : F("present")) : F("absent")));
+    info.add(String(F("buzzer=external enabled:")) + (buzzerEnabled_ ? F("1") : F("0")) +
+      F(" installed:") + (buzzerServiceInstalled() ? F("1") : F("0")) +
+      F(" ready:") + (buzzerServiceReady() ? F("1") : F("0")) +
+      F(" playing:") + (buzzerServicePlaying() ? F("1") : F("0")));
     info.add(String(F("gifDecoder=")) + media_.gifDecoderModeText());
     info.add(String(F("gifDecoderBytes=")) + media_.gifDecoderBytes());
     if (media_.gifProbeFree() > 0) {
@@ -965,28 +787,24 @@ public:
     if (adapter_.isScoreboardActive()) {
       info.add(String(F("score=")) + adapter_.scoreA() + ':' + adapter_.scoreB());
     }
-    if (buzzerPin_ < 0) {
-      info.add(F("buzzer=disabled"));
-    } else if (buzzerPinUnavailable_) {
-      info.add(String(F("buzzer=gpio ")) + String(buzzerPin_) + F(" unavailable"));
-    } else if (buzzerHardwareReady_ && buzzerType_ == BUZZER_TYPE_PASSIVE) {
-      info.add(String(F("buzzer=passive gpio=")) + String(buzzerPin_) +
-        F(" frequency=") + String(BUZZER_PASSIVE_FREQUENCY_HZ) +
-        F("Hz trigger=") + (passiveTriggerLow() ? F("low ") : F("high ")) +
-        (buzzer_.isPlaying() ? F("playing") : F("idle")));
-    } else if (buzzerHardwareReady_) {
-      info.add(String(F("buzzer=active gpio=")) + String(buzzerPin_) +
-        F(" polarity=") + (buzzerActiveHigh_ ? F("high ") : F("low ")) +
-        (buzzer_.isPlaying() ? F("playing") : F("idle")));
-    } else {
-      info.add(String(F("buzzer=gpio ")) + String(buzzerPin_) + F(" not-ready"));
+    {
+      String buzzerLine(F("buzzer=external "));
+      if (!buzzerEnabled_) {
+        buzzerLine += F("disabled");
+      } else if (!buzzerServiceInstalled()) {
+        buzzerLine += F("usermod-not-installed");
+      } else if (!buzzerServiceReady()) {
+        buzzerLine += F("not-ready");
+      } else {
+        buzzerLine += F("ready");
+        if (buzzerServicePlaying()) {
+          buzzerLine += F(" playing=");
+          const char* soundId = IDotMatrixBuzzerBridge::currentSoundId();
+          buzzerLine += soundId != nullptr ? soundId : "unknown";
+        }
+      }
+      info.add(buzzerLine);
     }
-#if defined(ARDUINO_ARCH_ESP32)
-    info.add(String(F("buzzerTiming=")) +
-      (buzzerServiceTimerRunning_ ? F("esp_timer-2ms") : F("wled-loop")) +
-      F(" lateLast=") + buzzer_.lastLatenessMs() + F("ms lateMax=") +
-      buzzer_.maxLatenessMs() + F("ms"));
-#endif
     info.add(String(F("alarms=")) + automation_.configuredAlarmCount() +
       (automation_.alarmActive()
         ? String(F(" active=")) + automation_.activeAlarmSlot()
@@ -1127,24 +945,15 @@ public:
 #if IDOT_SCREEN_MAX_DIM > 16
     config[FPSTR(CFG_RESCALE)] = rescale_;
 #endif
-    // Keep audio configuration separate from the buzzer controls. Buzzer
-    // settings are intentionally last so the shared Test buzzer action can
-    // appear at the bottom of the section instead of looking active-only.
     config[FPSTR(CFG_AUDIO_SOURCE)] = static_cast<uint8_t>(audioSourceMode_);
-    config[FPSTR(CFG_BUZZER_PIN)] = buzzerPin_;
-    config[FPSTR(CFG_BUZZER_TYPE)] = buzzerType_;
-    config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)] = buzzerActiveHigh_;
-    config[FPSTR(CFG_BUZZER_PASSIVE_TRIGGER)] = buzzerPassiveTrigger_;
+    config[FPSTR(CFG_BUZZER_ENABLED)] = buzzerEnabled_;
   }
 
   bool readFromConfig(JsonObject& root) override {
     JsonObject config = root[FPSTR(USERMOD_NAME)];
     if (config.isNull()) return false;
 
-    const int8_t previousBuzzerPin = buzzerPin_;
-    const uint8_t previousBuzzerType = buzzerType_;
-    const bool previousBuzzerActiveHigh = buzzerActiveHigh_;
-    const uint8_t previousBuzzerPassiveTrigger = buzzerPassiveTrigger_;
+    const bool previousBuzzerEnabled = buzzerEnabled_;
     const bool previousEnabled = enabled_;
     const IDotMatrixAudioSourceMode previousAudioSource = audioSourceMode_;
     uint8_t audioSourceRaw = static_cast<uint8_t>(audioSourceMode_);
@@ -1160,12 +969,7 @@ public:
     // remove any stale rescale setting inherited from a larger firmware.
     rescale_ = false;
 #endif
-    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_PIN)], buzzerPin_, int8_t(-1));
-    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_TYPE)], buzzerType_, uint8_t(BUZZER_TYPE_ACTIVE));
-    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_ACTIVE_HIGH)], buzzerActiveHigh_, true);
-    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_PASSIVE_TRIGGER)], buzzerPassiveTrigger_, uint8_t(BUZZER_TRIGGER_HIGH));
-    if (buzzerType_ > BUZZER_TYPE_PASSIVE) buzzerType_ = BUZZER_TYPE_ACTIVE;
-    if (buzzerPassiveTrigger_ > BUZZER_TRIGGER_LOW) buzzerPassiveTrigger_ = BUZZER_TRIGGER_HIGH;
+    complete &= getJsonValue(config[FPSTR(CFG_BUZZER_ENABLED)], buzzerEnabled_, true);
     complete &= getJsonValue(config[FPSTR(CFG_AUDIO_SOURCE)], audioSourceRaw, uint8_t(0));
 
     audioSourceMode_ = IDotMatrixAudioSource::normalizeMode(audioSourceRaw);
@@ -1178,26 +982,9 @@ public:
       adapter_.setAudioDataOverride(audioSourceMode_ == IDotMatrixAudioSourceMode::AudioReactive);
     }
     if (setupComplete_ && previousEnabled != enabled_) runtimeRestartRequired_ = true;
-    if (setupComplete_ &&
-        (previousBuzzerPin != buzzerPin_ ||
-         previousBuzzerType != buzzerType_ ||
-         previousBuzzerActiveHigh != buzzerActiveHigh_ ||
-         previousBuzzerPassiveTrigger != buzzerPassiveTrigger_ ||
-         previousEnabled != enabled_)) {
-      const int8_t requestedPin = buzzerPin_;
-      const uint8_t requestedType = buzzerType_;
-      const bool requestedActiveHigh = buzzerActiveHigh_;
-      const uint8_t requestedPassiveTrigger = buzzerPassiveTrigger_;
-      buzzerPin_ = previousBuzzerPin;
-      buzzerType_ = previousBuzzerType;
-      buzzerActiveHigh_ = previousBuzzerActiveHigh;
-      buzzerPassiveTrigger_ = previousBuzzerPassiveTrigger;
-      teardownBuzzerHardware();
-      buzzerPin_ = requestedPin;
-      buzzerType_ = requestedType;
-      buzzerActiveHigh_ = requestedActiveHigh;
-      buzzerPassiveTrigger_ = requestedPassiveTrigger;
-      setupBuzzerHardware();
+    if (setupComplete_ && ((previousBuzzerEnabled && !buzzerEnabled_) ||
+                           (previousEnabled && !enabled_))) {
+      stopOwnedAlarmSound();
     }
     // Derive this status from the configuration currently active in the BLE
     // stack. Comparing with the value held before readFromConfig() made the
@@ -1215,8 +1002,6 @@ public:
 #if IDOT_SCREEN_MAX_DIM >= 64
     oappend(F("addOption(dd,'64 x 64',4);"));
 #endif
-    oappend(F("dd=addDropdown('iDotMatrix','buzzerType');addOption(dd,'Active',0);addOption(dd,'Passive',1);"));
-    oappend(F("dd=addDropdown('iDotMatrix','buzzerPassiveTrigger');addOption(dd,'High',0);addOption(dd,'Low',1);"));
     oappend(F("dd=addDropdown('iDotMatrix','audioSource');addOption(dd,'Phone / BLE',0);addOption(dd,'WLED AudioReactive',1);addOption(dd,'Auto (AudioReactive, then Phone)',2);"));
 
     // Use addInfo()'s label override instead of a large DOM-rewrite script. The
@@ -1232,16 +1017,12 @@ public:
     oappend(F("addInfo('iDotMatrix:rescale',1,'','Scale the logical profile to the selected WLED 2D segment:');"));
 #endif
     oappend(F("addInfo('iDotMatrix:audioSource',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">AudioReactive uses WLED Usermod data when available. Auto falls back to Phone / BLE.</div><style>.sec:has(#ib)>hr,#ib+br{display:none}</style><div id=\"ib\" style=\"margin-top:20px;font-size:1.15em;font-weight:bold\">Buzzer</div>','Audio Source:');"));
-    oappend(F("addInfo('iDotMatrix:buzzer-pin',1,'','Buzzer Pin:');"));
-    oappend(F("addInfo('iDotMatrix:buzzerType',1,'<br><i style=\"color:#fa0\">Active: static GPIO. Passive: 2 kHz LEDC.</i>','Buzzer Type:');"));
-
-    // WLED renders Usermod fields as a flat sequence separated by <br>, not as
-    // per-field rows. Wrap the later Passive line first, then the Active line: if
-    // Active is wrapped first, the Passive backward scan can absorb that wrapper
-    // and hiding Passive also hides Active. Only these two lines are toggled.
-    oappend(F("addInfo('iDotMatrix:buzzerActiveHigh',1,'','Active buzzer active-high:');"));
-    oappend(F("addInfo('iDotMatrix:buzzerPassiveTrigger',1,'','Passive buzzer trigger:');"));
-    oappend(F("setTimeout(()=>{let q=k=>{let v=d.getElementsByName('iDotMatrix:'+k);return v[v.length-1]},w=e=>{if(!e)return;let b=e;while(b.previousSibling&&b.previousSibling.nodeName!='BR')b=b.previousSibling;let s=d.createElement('span');b.before(s);while(s.nextSibling){let n=s.nextSibling;s.append(n);if(n.nodeName=='BR')break}s.firstChild.textContent='';return s},t=q('buzzerType'),p=w(q('buzzerPassiveTrigger')),a=w(q('buzzerActiveHigh'));if(p)p.insertAdjacentHTML('afterend',`<span><button type=\"button\" onclick=\"fetch('/idotmatrix/buzzer-test',{method:'POST'}).then(async r=>{if(!r.ok)alert(await r.text())}).catch(()=>alert('Buzzer test failed'))\">Test buzzer</button><br><i style=\"color:#fa0\">Save first: test uses saved settings.</i><br></span>`);let u=()=>{let x=t&&t.value=='1';if(a)a.hidden=x;if(p)p.hidden=!x};if(t){t.addEventListener('change',u);u()}},0);"));
+    oappend(F("addInfo('iDotMatrix:buzzerEnabled',1,'<br><i style=\"color:#fa0\">Requires the WLED Buzzer Usermod.</i>','Enable:');"));
+    if (!buzzerServiceInstalled()) {
+      // Keep the preference stored, but make the control unavailable when the
+      // optional bridge is not linked into this firmware image.
+      oappend(F("setTimeout(()=>{let v=d.getElementsByName('iDotMatrix:buzzerEnabled'),e=v[v.length-1];if(e){e.checked=false;e.disabled=true;e.title='WLED Buzzer Usermod is not installed in this build.'}},0);"));
+    }
 
     oappend(F("setTimeout(()=>{let e=d.querySelector('[name=\"iDotMatrix:deviceName\"]');if(e&&!d.getElementById('idotmatrix-prefix'))e.insertAdjacentHTML('beforebegin','<span id=\"idotmatrix-prefix\">IDM-</span>')},0);"));
   }

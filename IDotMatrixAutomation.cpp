@@ -3,7 +3,6 @@
 #if defined(IDOT_AUTOMATION_HOST_TEST)
 #include "tests/automation_stub/IDotMatrixAutomationDeps.h"
 #else
-#include "IDotMatrixBuzzer.h"
 #include "IDotMatrixMedia.h"
 #include "IDotMatrixRenderer.h"
 #include "IDotMatrixWLEDAdapter.h"
@@ -49,9 +48,8 @@ void scheduleBackupPath(uint8_t index, char* buffer, size_t length) {
 IDotMatrixAutomation::IDotMatrixAutomation(
   IDotMatrixRenderer& renderer,
   IDotMatrixWLEDAdapter& adapter,
-  IDotMatrixMedia& media,
-  IDotMatrixBuzzer& buzzer
-) : renderer_(renderer), adapter_(adapter), media_(media), buzzer_(buzzer) {}
+  IDotMatrixMedia& media
+) : renderer_(renderer), adapter_(adapter), media_(media) {}
 
 IDotMatrixAutomation::~IDotMatrixAutomation() {
   cancelScheduleUpload();
@@ -87,9 +85,7 @@ void IDotMatrixAutomation::resetPersistent() {
   scheduleFailedIndex_ = -1;
   scheduleReturnValid_ = false;
   cancelScheduleUpload();
-  buzzer_.stop();
-  alarmBuzzerOwned_ = false;
-  scheduleBuzzerOwned_ = false;
+  scheduleSoundPending_ = false;
   adapter_.cancelAutomationContent();
   lastResetOk_ = true;
 
@@ -398,8 +394,8 @@ void IDotMatrixAutomation::onScheduleGlobal(uint8_t flags) {
     saveScheduleGlobal();
     cancelScheduleUpload();
     scheduleFailedIndex_ = -1;
+    scheduleSoundPending_ = false;
     if (scheduleActiveIndex_ >= 0) stopScheduleActivity(true);
-    refreshBuzzer(millis());
     return;
   }
   beginScheduleUpload(flags);
@@ -673,13 +669,10 @@ void IDotMatrixAutomation::startAlarm(uint8_t slot, uint32_t now) {
   activeAlarmSlot_ = slot;
   if (!loadAlarmMedia(slot)) lastError_ = Error::MediaLoad;
 
-  // Media loading is synchronous and can take a variable amount of time.
-  // Anchor both the audible pattern and the configured alarm duration to a
-  // fresh timestamp after loading, otherwise the first 90 ms pulse may already
-  // be expired when control returns to the main WLED loop.
+  // Media loading is synchronous and can take a variable amount of time. Anchor
+  // the configured alarm duration to the moment the media is actually ready.
   const uint32_t alarmStartNow = millis();
   alarmEndsAt_ = alarmStartNow + uint32_t(alarms_[slot].durationSeconds) * 1000u;
-  refreshBuzzer(alarmStartNow);
 }
 
 void IDotMatrixAutomation::stopAlarm(bool deferRestore) {
@@ -754,16 +747,9 @@ void IDotMatrixAutomation::startScheduleActivity(uint8_t index, uint32_t now) {
     scheduleActiveIndex_ = int8_t(index);
     scheduleFailedIndex_ = -1;
     if ((scheduleGlobalFlags_ & 0x02u) != 0) {
-      // Media loading is synchronous. Use a fresh timestamp so the first
-      // 90 ms pulse starts when the media is actually ready, not from the
-      // pre-load loop timestamp passed to startScheduleActivity().
-      const uint32_t alertStartNow = millis();
-      // A program sound is an activation notification, not an alarm.  Emit
-      // three finite groups of three short trills and then stay silent for
-      // the remainder of the activity.
-      buzzer_.startScheduleAlert(alertStartNow);
-      scheduleBuzzerOwned_ = true;
-      alarmBuzzerOwned_ = false;
+      // Playback is delegated by the top-level Usermod to the standalone WLED
+      // Buzzer service. Keep only the protocol-level one-shot request here.
+      scheduleSoundPending_ = true;
     }
   } else {
     scheduleFailedIndex_ = int8_t(index);
@@ -773,23 +759,18 @@ void IDotMatrixAutomation::startScheduleActivity(uint8_t index, uint32_t now) {
       scheduleReturnValid_ = false;
     }
   }
-  refreshBuzzer(millis());
 }
 
 void IDotMatrixAutomation::stopScheduleActivity(bool restoreOutput) {
   if (scheduleActiveIndex_ < 0) return;
   scheduleActiveIndex_ = -1;
-  if (scheduleBuzzerOwned_) {
-    buzzer_.stop();
-    scheduleBuzzerOwned_ = false;
-  }
+  scheduleSoundPending_ = false;
   if (restoreOutput) {
     restoreEffect(scheduleReturnEffect_, scheduleReturnValid_);
     scheduleReturnValid_ = false;
   } else {
     adapter_.cancelAutomationContent();
   }
-  refreshBuzzer(millis());
 }
 
 bool IDotMatrixAutomation::writeFile(const char* path, const uint8_t* data, size_t length) {
@@ -930,38 +911,16 @@ void IDotMatrixAutomation::restoreEffect(uint8_t effect, bool valid) {
   strip.trigger();
 }
 
-void IDotMatrixAutomation::refreshBuzzer(uint32_t now) {
-  const bool alarmWanted = alarmActive_ &&
+bool IDotMatrixAutomation::alarmSoundRequested() const {
+  return alarmActive_ &&
     activeAlarmSlot_ < IDotMatrixAlarmSettings::SLOT_COUNT &&
     alarms_[activeAlarmSlot_].buzzer != 0;
+}
 
-  if (alarmWanted) {
-    if (!alarmBuzzerOwned_) {
-      // An alarm has priority over a manual test or a finite program alert and
-      // repeats for the configured alarm duration.
-      buzzer_.startTrill(now);
-      alarmBuzzerOwned_ = true;
-      scheduleBuzzerOwned_ = false;
-    }
-    return;
-  }
-
-  if (alarmBuzzerOwned_) {
-    buzzer_.stop();
-    alarmBuzzerOwned_ = false;
-  }
-
-  if (scheduleBuzzerOwned_) {
-    // Program audio is only a finite activation notice.  Never restart it just
-    // because the activity remains active.  Stop it early only if the program
-    // ends or its global sound option is disabled.
-    if (scheduleActiveIndex_ < 0 || (scheduleGlobalFlags_ & 0x02u) == 0) {
-      buzzer_.stop();
-      scheduleBuzzerOwned_ = false;
-    } else if (!buzzer_.isPlaying()) {
-      scheduleBuzzerOwned_ = false;
-    }
-  }
+bool IDotMatrixAutomation::takeScheduleSoundRequest() {
+  if (!scheduleSoundPending_) return false;
+  scheduleSoundPending_ = false;
+  return true;
 }
 
 void IDotMatrixAutomation::loop(uint32_t now) {
@@ -969,7 +928,6 @@ void IDotMatrixAutomation::loop(uint32_t now) {
   bool alarmEnded = false;
   updateAlarms(now, alarmEnded);
   updateSchedule(now);
-  refreshBuzzer(now);
 
   if (alarmEnded) {
     if (scheduleActiveIndex_ < 0) {

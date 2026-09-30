@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 
-class IDotMatrixBuzzer;
 class IDotMatrixMedia;
 class IDotMatrixRenderer;
 class IDotMatrixWLEDAdapter;
@@ -13,15 +12,14 @@ class Preferences;
 
 // Persistent alarm/program engine for the iDotMatrix protocol.  It deliberately
 // lives outside the renderer: schedules own time, metadata, filesystem payloads
-// and the optional buzzer, then reuse the same iDotMatrix paths as a
+// and sound-event policy, then reuse the same iDotMatrix paths as a
 // normal app command when content actually has to be shown.
 class IDotMatrixAutomation final : public IDotMatrixAutomationEvents {
 public:
   IDotMatrixAutomation(
     IDotMatrixRenderer& renderer,
     IDotMatrixWLEDAdapter& adapter,
-    IDotMatrixMedia& media,
-    IDotMatrixBuzzer& buzzer
+    IDotMatrixMedia& media
   );
   ~IDotMatrixAutomation();
 
@@ -49,6 +47,8 @@ public:
 
   bool timeValid() const { return appTimeValid_; }
   bool alarmActive() const { return alarmActive_; }
+  bool alarmSoundRequested() const;
+  bool takeScheduleSoundRequest();
   uint8_t activeAlarmSlot() const { return activeAlarmSlot_; }
   uint8_t configuredAlarmCount() const;
   void alarmDiagnosticSummary(char* buffer, size_t length, uint32_t now) const;
@@ -154,7 +154,6 @@ private:
   bool automationOwnsDisplay() const;
   uint8_t selectedEffect() const;
   void restoreEffect(uint8_t effect, bool valid);
-  void refreshBuzzer(uint32_t now);
 
   static uint32_t crc32(const uint8_t* data, size_t length);
   static void* allocateTemporary(size_t size);
@@ -163,7 +162,6 @@ private:
   IDotMatrixRenderer& renderer_;
   IDotMatrixWLEDAdapter& adapter_;
   IDotMatrixMedia& media_;
-  IDotMatrixBuzzer& buzzer_;
   IDotMatrixProtocol* protocol_ = nullptr;
 
   AlarmSlot alarms_[IDotMatrixAlarmSettings::SLOT_COUNT]{};
@@ -194,8 +192,7 @@ private:
   uint8_t scheduleReturnEffect_ = 0;
   bool scheduleReturnValid_ = false;
 
-  bool alarmBuzzerOwned_ = false;
-  bool scheduleBuzzerOwned_ = false;
+  bool scheduleSoundPending_ = false;
   Error lastError_ = Error::None;
   bool lastResetOk_ = true;
 };
