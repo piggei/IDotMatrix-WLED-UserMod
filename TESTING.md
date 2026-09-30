@@ -1,36 +1,34 @@
 # Testing
 
-## 0.9.3-rc.1 optional Buzzer bridge and disconnect notification
+## 0.9.3 final qualification
 
-This release candidate changes the sound architecture but deliberately keeps the
-iDotMatrix wire protocol unchanged. The primary 0.9.3 gate is therefore consumer
-integration rather than GPIO/LEDC qualification inside this repository.
+Release 0.9.3 changes the sound architecture while deliberately keeping the iDotMatrix wire protocol unchanged. The final package is promoted directly from hardware-qualified `0.9.3-rc.1`; no functional runtime code changes were introduced during final promotion.
 
-Automated checks must verify:
+Automated checks verify:
 
 - `IDotMatrixBuzzer.*` is absent from the source package;
-- no iDotMatrix buzzer GPIO, Active/Passive, polarity, LEDC, `esp_timer` or local
-  buzzer-test implementation remains;
+- no iDotMatrix buzzer GPIO, Active/Passive, polarity, LEDC, `esp_timer` or local buzzer-test implementation remains;
 - the package compiles and links without the Buzzer Usermod even when its repository exists beside the WLED tree;
-- with WLED Buzzer Usermod rc.7 present, calls use the documented weak C bridge without including the external C++ header;
-- Alarm, Program/Schedule, Countdown, BLE connection and BLE disconnection still produce logical sound requests;
-- the settings UI contains only **Buzzer → Enable** and the orange
-  **Requires the WLED Buzzer Usermod.** note;
+- with the external provider present, calls use the documented weak C bridge without including the external C++ header;
+- Alarm, Program/Schedule, Countdown, BLE connection and BLE disconnection produce the expected logical sound requests;
+- the settings UI contains only **Buzzer -> Enable** and the orange **Requires the WLED Buzzer Usermod.** note;
 - without the external Usermod, the Enable control is visibly disabled.
 
-Hardware qualification completed before RC1 promotion:
+Hardware qualification completed before stable promotion:
 
-- firmware without WLED Buzzer Usermod: build PASS; Buzzer Enable is disabled;
-- firmware with WLED Buzzer Usermod: Buzzer Enable is available;
+- firmware without WLED Buzzer Usermod: build PASS; Buzzer Enable disabled;
+- firmware with WLED Buzzer Usermod: build PASS; Buzzer Enable available;
+- WLED Buzzer Usermod release 0.1.0 / build final used for the final integration/soak pass;
 - BLE connection: `connect` PASS;
 - BLE disconnection: `disconnect` PASS;
 - natural Countdown completion: one `triple_beep` PASS;
-- Alarm: looping `triple_beep` PASS, including the RC7 550 ms inter-repeat silence;
+- Alarm: looping `triple_beep` PASS, including the 550 ms inter-repeat silence and clean stop;
 - Program/Schedule: one `notification` PASS;
-- the broader reboot, silent-Alarm, no-sound Program and repeated-event checks were also reported PASS.
+- reboot/persistence, silent Alarm, no-sound Program and repeated-event checks: PASS;
+- Carousel/GIF, Alarm, animation and Program activity under continued BLE operation: PASS;
+- ESP32-C3 soak snapshot reached `gifCacheStats=build:23 reuse:15` with current free heap recovering to 58016 bytes, minimum heap unchanged at 13856 bytes and largest free block unchanged at 47104 bytes, with no progressive memory degradation observed.
 
-Stable 0.9.2 remains the previous stable baseline. RC1 is a version/documentation promotion of the physically tested runtime; no functional runtime change was introduced during the renumbering; the app-visible release byte was restored from temporary 0x0A to the 0.9 line value 0x09 from the temporary 0.10.0 development identifiers.
-
+The app-visible release byte remains `0x09`, matching the 0.9 release line.
 
 ## Historical 0.9.2 final buzzer timing qualification
 
@@ -56,7 +54,7 @@ the qualified real-time service path.
 
 
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3-rc.1**. Stable 0.9.2 remains the previous hardware-qualified baseline.
+iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3**. Release 0.9.2 remains the previous hardware-qualified baseline.
 
 ## Automated host regression
 

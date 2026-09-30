@@ -1,3 +1,10 @@
+## 0.9.3
+
+- Promoted hardware-qualified `0.9.3-rc.1` directly to stable 0.9.3 with no functional runtime changes beyond the build identifier.
+- Final hardware validation confirmed optional builds with and without the external Buzzer Usermod, BLE connect/disconnect, Countdown, Alarm repeat/stop, Program/Schedule, negative sound-policy checks and reboot/persistence.
+- Final ESP32-C3 soak validation exercised Carousel/GIF cache activity, animations, Alarm and Program operations without progressive heap degradation.
+- Qualified the stable external provider as WLED Buzzer Usermod release 0.1.0 / build final; iDotMatrix retains only the minimal weak-link consumer bridge and no buzzer hardware/timing backend.
+
 ## 0.9.3-rc.1
 
 - Renumbered the externally validated buzzer-service integration from the temporary 0.10.0 development identifiers to the 0.9.3 release line.

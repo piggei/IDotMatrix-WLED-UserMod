@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3-rc.1**. It builds on the stable 0.9.2 baseline and removes the internal buzzer hardware/scheduler implementation in favour of the optional standalone WLED Buzzer Usermod service. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
+This document describes iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3**. It builds on the stable 0.9.2 baseline and removes the internal buzzer hardware/scheduler implementation in favour of the optional standalone WLED Buzzer Usermod service. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
 
 ## Design goals
 
@@ -547,7 +547,7 @@ buzzer-test endpoint in this repository.
 
 iDotMatrix does not include `WLEDBuzzerService.h`. Instead,
 `IDotMatrixBuzzerBridge.h` weak-links the small `extern "C"` service ABI exported
-by WLED Buzzer Usermod release 0.1.0 / build rc.7. If that Usermod is not linked
+by WLED Buzzer Usermod release 0.1.0 / build final. If that Usermod is not linked
 into the firmware, the weak symbols resolve to null and the rest of iDotMatrix
 compiles and links unchanged. The Buzzer Enable control is then rendered disabled.
 

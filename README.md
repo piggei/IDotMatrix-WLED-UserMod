@@ -1,7 +1,7 @@
-# WLED iDotMatrix Usermod — 0.9.3-rc.1
+# WLED iDotMatrix Usermod — 0.9.3
 
-**Release: 0.9.3 / build: 0.9.3-rc.1.**  
-**Current release candidate: 0.9.3-rc.1.**  
+**Release: 0.9.3 / build: 0.9.3.**  
+**Current stable release: 0.9.3.**  
 **Previous stable release: 0.9.2.**
 
 The 0.9.3 line builds on the 0.9 hardware/platform work that brought the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
@@ -25,8 +25,8 @@ through the `iDotMatrix` WLED effect.
 
 ## Release status
 
-`0.9.3-rc.1` promotes the externally validated buzzer-service integration from the
-0.9.2 baseline into the 0.9.3 release-candidate line. Its main architectural change is the removal of the complete
+`0.9.3` promotes the externally validated buzzer-service integration from the
+0.9.2 baseline into the stable 0.9.3 line. Its main architectural change is the removal of the complete
 internal buzzer backend. iDotMatrix no longer owns a buzzer GPIO, Active/Passive
 selection, trigger polarity, LEDC generation, playback scheduler or local buzzer
 test endpoint.
@@ -41,8 +41,8 @@ The iDotMatrix settings page therefore exposes only **Buzzer → Enable** plus t
 orange dependency note **Requires the WLED Buzzer Usermod.** If the external
 service is not part of the firmware, the checkbox is shown disabled.
 
-The BLE protocol and persistent Alarm/Program metadata remain unchanged. Stable 0.9.2 remains the previous stable baseline. The 0.9.3-rc.1 runtime is
-promoted from the hardware-tested integration build with no functional changes.
+The BLE protocol and persistent Alarm/Program metadata remain unchanged. 0.9.2 remains the previous stable baseline. The 0.9.3 final runtime is
+promoted directly from hardware-qualified 0.9.3-rc.1 with no functional changes beyond the build identifier.
 
 ## Preset / Default
 
@@ -488,8 +488,8 @@ Further documentation:
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — component boundaries, current memory model, and RAM-engineering history;
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
-- [`TODO.md`](TODO.md) — deferred/post-0.9.1 work;
-- [`RELEASE_NOTES_0.9.3-rc.1.md`](RELEASE_NOTES_0.9.3-rc.1.md) — current release-candidate notes;
+- [`TODO.md`](TODO.md) — deferred/post-0.9.3 work;
+- [`RELEASE_NOTES_0.9.3.md`](RELEASE_NOTES_0.9.3.md) — current stable 0.9.3 release notes;
 - [`RELEASE_NOTES_0.9.2.md`](RELEASE_NOTES_0.9.2.md) — previous stable 0.9.2 release notes;
 - [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;
 - [`RELEASE_NOTES_0.8.2.md`](RELEASE_NOTES_0.8.2.md) — stable pre-0.9 release notes;
@@ -514,7 +514,7 @@ WLED behave as the BLE peripheral expected by the official app.
 ## Optional external Buzzer Usermod
 
 Starting with 0.9.3, iDotMatrix contains no buzzer hardware backend. The optional
-sound path is provided by **WLED Buzzer Usermod release 0.1.0 / build rc.7** or newer. RC7 exposes the optional weak-link bridge used by iDotMatrix and retains the validated `triple_beep` one-shot while adding a 550 ms repeat gap. It owns GPIO allocation, Active/Passive hardware,
+sound path is provided by **WLED Buzzer Usermod release 0.1.0 / build final** or newer. The qualified provider exposes the optional weak-link bridge used by iDotMatrix and retains the validated `triple_beep` one-shot while adding a 550 ms repeat gap. It owns GPIO allocation, Active/Passive hardware,
 polarity, LEDC, volume and playback scheduling.
 
 To enable sound, compile both repositories into the same WLED firmware:
