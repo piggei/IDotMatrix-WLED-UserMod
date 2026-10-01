@@ -41,7 +41,6 @@ HUB_TARGETS = {
     "esp32s3dev_4MB_qspi_hub75_idotmatrix": ("env:esp32s3dev_4MB_qspi_hub75", "4MB"),
     "adafruit_matrixportal_esp32s3_idotmatrix": ("env:adafruit_matrixportal_esp32s3", "8MB"),
     "esp32s3dev_16MB_opi_hub75_idotmatrix": ("env:esp32s3dev_16MB_opi_hub75", "16MB"),
-    "waveshare_esp32s3_32MB_hub75_idotmatrix": ("env:waveshare_esp32s3_32MB_hub75", "32MB"),
 }
 
 PARTITIONS = {
@@ -228,14 +227,14 @@ def check_nimble_api_bridge() -> None:
     assert "advertising_ = advertising->start();" in source
     assert "ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
     assert "ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
-    assert 'IDOTMATRIX_RELEASE = "0.9.3"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.3"' in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.9.4"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.4-dev.5"' in usermod
     assert "IDOTMATRIX_APP_RELEASE_MINOR = 0x09" in usermod
     assert "RMT+BLE=ESP32-C3 shared-RMT" in usermod
     assert "UsermodManager::getUMData(&data, USERMOD_ID_AUDIOREACTIVE)" in usermod
 
     library = (ROOT / "library.json").read_text(encoding="utf-8")
-    assert '"version": "0.9.3"' in library
+    assert '"version": "0.9.4-dev.5"' in library
     assert '"h2zero/NimBLE-Arduino"' not in library
     # NimBLE is target-dependent and pinned by each official PlatformIO profile.
 
@@ -328,6 +327,48 @@ def check_matrixportal_s3_hub75_profile() -> None:
     assert "06ae26db67107cb3f6a3d107a92340035991a063" in profile_text
     assert USERMOD in usermods
 
+def check_waveshare_s3_hub75_profile() -> None:
+    parser = read_ini("waveshare-s3-hub75.ini")
+    section = "env:waveshare"
+    sections = {name for name in parser.sections() if name.startswith("env:")}
+    assert sections == {section}
+    assert value(parser, section, "extends") == "env:waveshare_esp32s3_32MB_hub75"
+    # Keep the upstream WLED 17 Waveshare platform, partition/OTA policy and board setup.
+    assert not parser.has_option(section, "platform")
+    assert not parser.has_option(section, "platform_packages")
+    assert not parser.has_option(section, "board_build.partitions")
+
+    flags = value(parser, section, "build_flags")
+    assert "${env:waveshare_esp32s3_32MB_hub75.build_flags}" in flags
+    assert "-D IDOT_GIF_LZW12" in flags
+    assert "-D IDOT_SCREEN_MAX_DIM=64" in flags
+    assert "-D IDOT_DEFAULT_SCREEN_TYPE=0x04" in flags
+    assert "-D IDOT_S3_HUB75_WLED_IDF5" in flags
+    assert "-D IDOT_WAVESHARE_S3_RGB_MATRIX" in flags
+    assert "WLED_DISABLE_OTA" not in flags
+
+    deps = value(parser, section, "lib_deps")
+    assert "${env:waveshare_esp32s3_32MB_hub75.lib_deps}" in deps
+    assert NIMBLE_V2 in deps
+    assert GIF in deps
+
+    usermods = [line.strip() for line in value(parser, section, "custom_usermods").splitlines() if line.strip()]
+    assert usermods == [
+        "Internal_Temperature",
+        "audioreactive = https://github.com/MoonModules/WLED-AudioReactive-Usermod#8d988e985901e00a0a92e119aaa8e3249f817754",
+        "SHTC3_v2 = git+https://github.com/lost-hope/SHTC3_v2.git#1f6e3fc7d6135b704aa41fadf09a36cbf6712834",
+        USERMOD,
+    ]
+
+    profile_text = (ROOT / "overrides" / "waveshare-s3-hub75.ini").read_text(encoding="utf-8")
+    assert "17.0.0-devV5" in profile_text
+    assert "/SHTC3_v2/commit/" not in profile_text
+    assert "git+https://github.com/lost-hope/SHTC3_v2.git#1f6e3fc" in profile_text
+    assert "32 MB flash / 16 MB PSRAM" in profile_text
+
+    legacy = (ROOT / "overrides" / "hub75-legacy.ini").read_text(encoding="utf-8")
+    assert "waveshare_esp32s3_32MB_hub75_idotmatrix" not in legacy
+
 def check_profile_environment_isolation() -> None:
     """Every media profile gets its own PIOENV/build/libdeps namespace."""
     files = [
@@ -340,6 +381,7 @@ def check_profile_environment_isolation() -> None:
         "esp32c3-16x16-audio.ini",
         "esp32c3-16x16-audio-ota.ini",
         "matrixportal-s3-hub75.ini",
+        "waveshare-s3-hub75.ini",
     ]
     owners: dict[str, str] = {}
     for filename in files:
@@ -414,6 +456,7 @@ def main() -> None:
     check_c3_audio_profile()
     check_c3_audio_ota_profile()
     check_matrixportal_s3_hub75_profile()
+    check_waveshare_s3_hub75_profile()
     check_nimble_api_bridge()
     check_profile_environment_isolation()
     check_partitions()

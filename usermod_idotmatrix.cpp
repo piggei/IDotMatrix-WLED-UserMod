@@ -46,9 +46,15 @@
 #if defined(IDOT_S3_HUB75_WLED_IDF5) && !defined(IDOT_NIMBLE_V2_API)
 #error "ESP32-S3 iDotMatrix HUB75 profile requires NimBLE-Arduino 2.x"
 #endif
+#if defined(IDOT_WAVESHARE_S3_RGB_MATRIX) && !defined(IDOT_S3_HUB75_WLED_IDF5)
+#error "Waveshare ESP32-S3 RGB Matrix profile requires IDOT_S3_HUB75_WLED_IDF5"
+#endif
+#if defined(IDOT_WAVESHARE_S3_RGB_MATRIX) && !defined(WAVESHARE_S3_PINOUT)
+#error "Waveshare iDotMatrix profile must extend WLED env:waveshare_esp32s3_32MB_hub75"
+#endif
 
-static constexpr const char* IDOTMATRIX_RELEASE = "0.9.3";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.3";
+static constexpr const char* IDOTMATRIX_RELEASE = "0.9.4";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.4-dev.5";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -691,8 +697,14 @@ public:
 #endif
 #if defined(IDOT_S3_HUB75_WLED_IDF5)
     info.add(F("framework=WLED IDF5/HUB75"));
+#if defined(IDOT_WAVESHARE_S3_RGB_MATRIX)
+    info.add(F("target=Waveshare-ESP32-S3-RGB-Matrix"));
+    info.add(F("wledRelease=17.0.0-devV5"));
+    info.add(F("wledBase=devV5"));
+#else
     info.add(F("target=MatrixPortal-S3"));
     info.add(F("wledBase=06ae26d"));
+#endif
 #if defined(IDOT_NIMBLE_V2_API)
     info.add(F("nimble=2.x API"));
 #else

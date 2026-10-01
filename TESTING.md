@@ -1,5 +1,56 @@
 # Testing
 
+## 0.9.4-dev.5 — Waveshare ESP32-S3-RGB-Matrix qualification gate
+
+0.9.4-dev.5 starts from stable 0.9.3 and targets the Waveshare board on WLED 17.0.0-devV5. It also carries a local build-only workaround for the malformed upstream SHTC3_v2 custom-usermod URL discovered during the first compile attempt. The first qualification goal is therefore to prove the existing iDotMatrix behavior on the new controller before introducing any PSRAM tuning or larger physical layouts.
+
+### Pre-iDotMatrix hardware baseline — PASS
+
+The physical board has already passed a WLED-only baseline using the official WLED 16.0.1 `ESP32-S3_Waveshare_HUB75` binary:
+
+```text
+controller  = Waveshare ESP32-S3-RGB-Matrix / ESP32-S3-N32R16
+flash       = 32 MB
+PSRAM       = 16 MB
+panel       = one 64x64 HUB75
+WLED output = HUB75 (Half Scan)
+layout      = 1 x 1
+LED count   = 4096
+```
+
+The full panel renders correctly. The earlier symptom where only four rows were visible was traced to a WLED 2D Matrix configuration accidentally left at 16x16; it was not a HUB75 pinout, scan-mode or panel-driver fault.
+
+### iDotMatrix dev.5 hardware gate — MOSTLY PASS
+
+Build with:
+
+```text
+overrides/waveshare-s3-hub75.ini
+env:waveshare
+```
+
+Current hardware evidence:
+
+1. WLED boot and complete 64x64 output — **PASS**;
+2. PSRAM visible in `/json/info` — **PASS**;
+3. iDotMatrix release/build and Waveshare target diagnostics — **PASS**;
+4. BLE advertising, original-app connection and reconnect — **PASS**;
+5. Clock — **PASS**;
+6. TEXT, including 64x64 text paths — **PASS**;
+7. static image — **PASS**;
+8. GIF — **PASS**;
+9. Carousel — **PASS**;
+10. 16x16 -> 64x64 output scaling — **PENDING**;
+11. 32x32 -> 64x64 output scaling — **PENDING**;
+12. native 64x64 — **PASS**;
+13. reboot and persistence — **PASS**;
+14. Alarm / Program and Matrix Auto Rotation coexistence — **PASS**;
+15. onboard-microphone AudioReactive — **PASS** after disabling UDP Sound Sync receive mode.
+
+The dev.4 one-shot I2C diagnostic physically confirmed `ES8311 @ 0x18` and `ES7210 @ 0x40` on the shared `SDA 47 / SCL 48` bus. Dev.5 removes that temporary probe now that the audio path is understood.
+
+Before starting cache changes, complete a 30-60 minute GIF/Carousel + AudioReactive soak and capture a final `/json/info` memory snapshot. Larger 128x64/128x128 physical layouts remain deferred until matching panels are available.
+
 ## 0.9.3 final qualification
 
 This stable release changes the sound architecture but deliberately keeps the
@@ -56,7 +107,7 @@ the qualified real-time service path.
 
 
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3**. 0.9.2 remains the previous hardware-qualified stable baseline.
+iDotMatrix WLED Usermod **release 0.9.4 / build 0.9.4-dev.5**. Stable 0.9.3 remains the qualified behavioral baseline for this development build.
 
 ## Automated host regression
 

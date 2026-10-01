@@ -1,7 +1,7 @@
 # Build profiles
 
 This document describes the PlatformIO profiles shipped with iDotMatrix WLED
-Usermod **release 0.9.3 / build 0.9.3**. Stable 0.9.2 remains the previous qualified release.
+Usermod **release 0.9.4 / build 0.9.4-dev.5**. Stable 0.9.3 remains the current qualified release.
 
 PlatformIO override templates are stored under `overrides/`. Custom partition
 tables are stored under `partitions/`. Copy one override to WLED's
@@ -9,7 +9,7 @@ tables are stored under `partitions/`. Copy one override to WLED's
 
 ## Optional WLED Buzzer Usermod
 
-The 0.9.3 line no longer contains a buzzer hardware backend. Sound support is an
+The 0.9.4 line retains the 0.9.3 architecture and contains no buzzer hardware backend. Sound support is an
 optional second out-of-tree Usermod. Add the Buzzer repository to the same
 `custom_usermods` list when required:
 
@@ -24,6 +24,39 @@ dependency. Without it, iDotMatrix still builds and the Buzzer Enable control is
 shown disabled. With WLED Buzzer Usermod 0.1.0, the optional weak-link bridge is resolved at link time and sound requests are routed through the external service. The final 0.1.0 service preserves one-shot `triple_beep` behavior and applies the qualified 550 ms final gap only when the sound repeats.
 
 
+
+## Waveshare ESP32-S3-RGB-Matrix — 0.9.4 qualification target
+
+```text
+override    = overrides/waveshare-s3-hub75.ini
+environment = waveshare
+base WLED   = 17.0.0-devV5
+base env    = env:waveshare_esp32s3_32MB_hub75
+board       = Waveshare ESP32-S3-RGB-Matrix / ESP32-S3-N32R16
+flash       = 32 MB
+PSRAM       = 16 MB
+logical max = 64x64
+default     = 64x64
+```
+
+This is the primary 0.9.4-dev.5 hardware-qualification profile. It **does not** override the upstream PlatformIO platform, board definition, partition table or OTA policy. Those remain owned by WLED's Waveshare environment.
+
+The local environment is deliberately named `waveshare`, matching the short alias used in the project's global override. WLED 17.0.0-devV5 currently contains a malformed `SHTC3_v2` custom-usermod source (`.../commit/<sha>`), which PlatformIO cannot clone. For that reason the 0.9.4 Waveshare profile does **not** inherit the upstream `custom_usermods` string. It reproduces the same `Internal_Temperature` and pinned AudioReactive entries, rewrites only SHTC3_v2 as `git+https://github.com/lost-hope/SHTC3_v2.git#1f6e3fc...`, then adds iDotMatrix.
+
+The iDotMatrix additions are limited to:
+
+- complete 12-bit GIF support;
+- `IDOT_SCREEN_MAX_DIM=64`;
+- default logical screen type 64x64;
+- the existing ESP32-S3/HUB75/IDF5 compile guard;
+- a Waveshare-specific target guard/diagnostic marker (target identity only; the temporary dev.4 audio probe is removed);
+- NimBLE-Arduino 2.5.1 and AnimatedGIF 1.4.7;
+- the external iDotMatrix Usermod itself.
+
+Before iDotMatrix integration, the board was physically verified with the official WLED 16.0.1 binary, one 64x64 HUB75 panel, Half Scan, 1x1. `/json/info` reported 4096 LEDs, 32 MB flash and 16 MB PSRAM. The current iDotMatrix build targets WLED 17.0.0-devV5 and has passed native 64x64 rendering, BLE/app connectivity, TEXT, static image, GIF, Carousel, reboot/persistence, Alarm/Program, Matrix Auto Rotation and onboard-microphone AudioReactive checks. The remaining gate is 16x16/32x32 logical scaling plus a sustained soak.
+
+The older Waveshare entry has been removed from `overrides/hub75-legacy.ini`; the dedicated profile above is the only supported recipe for this board in the 0.9.4 development line.
+
 ## Media profiles
 
 The compiled media profile limits the largest logical iDotMatrix screen type and
@@ -36,7 +69,8 @@ geometry configured in WLED.
 | `overrides/32x32.ini` | compact LZW11 | 16x16, 32x32 | 32x32-capable test profile |
 | `overrides/64x64.ini` | complete LZW12 | 16x16, 32x32, 64x64 | 64x64-capable targets |
 | `overrides/64x64-lite.ini` | complete LZW12 / low internal RAM | 16x16, 32x32, 64x64 | classic ESP32 no-PSRAM 64x64 logical path |
-| `overrides/matrixportal-s3-hub75.ini` | LZW12 + PSRAM | 16x16, 32x32, 64x64 | primary MatrixPortal S3 / HUB75 target |
+| `overrides/matrixportal-s3-hub75.ini` | LZW12 + PSRAM | 16x16, 32x32, 64x64 | qualified MatrixPortal S3 / HUB75 target |
+| `overrides/waveshare-s3-hub75.ini` | LZW12 + PSRAM | 16x16, 32x32, 64x64 | 0.9.4 Waveshare qualification target |
 
 The settings UI never advertises a logical profile larger than the compiled
 capacity. On the 0.9 native-matrix path logical and physical resolutions may
@@ -124,7 +158,9 @@ same customized source tree.
 
 ## HUB75 targets
 
-`overrides/hub75-legacy.ini` contains legacy WLED 16.x HUB75 wrappers. HUB75 GPIO
+`overrides/waveshare-s3-hub75.ini` is the dedicated 0.9.4 Waveshare qualification profile.
+
+`overrides/hub75-legacy.ini` contains the remaining legacy WLED 16.x HUB75 wrappers. HUB75 GPIO
 mapping is board-specific; never choose a profile only because flash/PSRAM size
 looks similar.
 
@@ -158,7 +194,9 @@ There are explicit, documented exceptions:
 - `overrides/esp32c3-16x16-audio-ota.ini` adds AudioReactive and Animartrix because
   that exact combination was used for OTA/memory qualification;
 - `overrides/matrixportal-s3-hub75.ini` preserves the pinned MatrixPortal base
-  Usermods from the exact qualified WLED revision, then adds iDotMatrix.
+  Usermods from the exact qualified WLED revision, then adds iDotMatrix;
+- `overrides/waveshare-s3-hub75.ini` preserves the official WLED 16.0.1
+  Waveshare Usermods, including AudioReactive, then adds iDotMatrix.
 
 These exceptions are qualification facts, not permission to assume arbitrary
 future WLED revisions are equivalent.
@@ -171,6 +209,7 @@ The project intentionally supports different framework generations:
 classic ESP32: WLED 16.0.1 + Arduino 2.0.17 / IDF 4.4.7 + NimBLE 1.4.3
 ESP32-C3:      WLED d55037f + Arduino 3.3.8 / IDF 5.5.4 + NimBLE 2.5.1
 MatrixPortal:  WLED 06ae26d (17.0.0-devV5) + upstream S3/IDF5 configuration
+Waveshare S3: WLED 17.0.0-devV5 + upstream 32 MB S3/HUB75/IDF5 configuration
 ```
 
 The C3 profiles must inherit `env:esp32c3dev`. Compile-time guards require

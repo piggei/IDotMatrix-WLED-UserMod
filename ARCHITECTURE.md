@@ -1,6 +1,9 @@
 # Architecture
 
-This document describes iDotMatrix WLED Usermod **release 0.9.3 / build 0.9.3**. It builds on the stable 0.9.2 baseline and removes the internal buzzer hardware/scheduler implementation in favour of the optional standalone WLED Buzzer Usermod service. The qualified Graffiti multipart path, C3 OTA profile, native 64x64 Clock layout, ESP32/ESP32-C3 foundations, ESP32-S3 / PSRAM / native WLED HUB75 path, universal 16/32/64 logical-to-physical scaling, multi-packet Alarm/Program media, and volatile Preset / Default bank remain otherwise unchanged.
+This document describes iDotMatrix WLED Usermod **release 0.9.4 / build 0.9.4-dev.5**. The runtime architecture remains based on stable 0.9.3: external buzzer ownership, qualified protocol/media paths, C3 OTA support, native 64x64 rendering, PSRAM-aware allocation and universal 16/32/64 logical-to-physical scaling are unchanged.
+
+The 0.9.4 architectural addition is a dedicated Waveshare ESP32-S3-RGB-Matrix integration profile. The Waveshare profile targets WLED 17.0.0-devV5 and extends its upstream Waveshare HUB75 environment rather than redefining the board, pinout, partitions or OTA policy. Because devV5 currently contains a non-cloneable SHTC3_v2 `/commit/` URL, the local profile repeats the board's custom-usermod list with the same SHTC3 commit expressed as a cloneable Git URL, while preserving Internal_Temperature and AudioReactive. A target-specific compile-time marker verifies that `WAVESHARE_S3_PINOUT` is present and exposes accurate target identity in `/json/info`. The temporary dev.4 audio I2C probe is not part of dev.5.
+
 
 ## Design goals
 
@@ -147,7 +150,7 @@ compact runtime status under `/json/info`.
 
 ### ESP32-C3 supported backend split
 
-The current 0.9.1 architecture inherits the classic ESP32 WLED 16.0.1/NimBLE 1.x path and
+The current 0.9.x architecture inherits the classic ESP32 WLED 16.0.1/NimBLE 1.x path and
 the separately qualified C3 path on pinned WLED commit `d55037f...` from the 0.8.2 baseline. Legacy
 IDF4 RMT builds produced physical LED spikes both with and without BLE, with BLE
 advertising making the fault much more visible. The IDF5 WLED backend uses
@@ -649,3 +652,8 @@ Preset Bulk uploads reuse the Carousel transfer indicator. The UI is kept active
 Preset / Default remains intentionally volatile. Activation is transactional only within the current boot/session: active files are moved to temporary `.bak` names, every pending replacement is promoted, and metadata is committed only after the full filesystem operation succeeds. On any intermediate failure the previous active bank is restored. At boot, Preset active/pending/cache/backup files are removed; no Preset journaling or cross-reboot recovery is performed.
 
 The 0.9.0 large-TEXT path removes the former three permanent 4096-byte TEXT scratch areas. BulkTransfer now allocates exactly the declared TEXT payload size, up to 16654 bytes, only for the lifetime of the transfer/result and prefers PSRAM on ESP32 when available. Carousel and Preset allocate a temporary scratch buffer only while reading a stored TEXT object for playback, then free it immediately after `processTextPayload()`. This supports the complete 64-glyph 32x64 payload without permanently reserving roughly 50 KiB simply to raise all three old buffers to the new maximum.
+
+### Waveshare ESP32-S3-RGB-Matrix profile
+
+`overrides/waveshare-s3-hub75.ini` preserves the official WLED 17.0.0-devV5 `env:waveshare_esp32s3_32MB_hub75` hardware stack and upstream Usermods, including AudioReactive, then adds iDotMatrix. Dev.1 does not introduce a new allocator or cache policy; it first qualifies the existing PSRAM-aware runtime on the 32 MB flash / 16 MB PSRAM controller.
+

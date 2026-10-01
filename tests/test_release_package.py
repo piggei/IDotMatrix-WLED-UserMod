@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stable-release package and critical-section regression checks for 0.9.3."""
+"""Development-package and critical-section regression checks for 0.9.4-dev.5."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.3"
+    assert library["version"] == "0.9.4-dev.5"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
-    assert 'IDOTMATRIX_RELEASE = "0.9.3"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.3"' in usermod
+    assert 'IDOTMATRIX_RELEASE = "0.9.4"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.4-dev.5"' in usermod
     assert "IDOTMATRIX_APP_RELEASE_MINOR = 0x09" in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
@@ -36,8 +36,10 @@ def check_release_surface() -> None:
         "overrides/esp32c3-16x16-audio.ini",
         "overrides/esp32c3-16x16-audio-ota.ini",
         "overrides/matrixportal-s3-hub75.ini",
+        "overrides/waveshare-s3-hub75.ini",
         "partitions/WLED_ESP32_4MB_IDOT_NO_OTA.csv",
         "partitions/WLED_ESP32_4MB_IDOT_OTA.csv",
+        "RELEASE_NOTES_0.9.4-dev.5.md",
         "RELEASE_NOTES_0.9.3.md",
         "RELEASE_NOTES_0.9.2.md",
         "RELEASE_NOTES_0.9.1.md",
@@ -65,6 +67,7 @@ def check_release_surface() -> None:
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.2-dev.*.md"))
+    assert list(ROOT.glob("RELEASE_NOTES_0.9.4-dev.5.md"))
     assert list(ROOT.glob("RELEASE_NOTES_0.9.3.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.10.0-dev.*.md"))
 
@@ -118,14 +121,14 @@ def check_documentation_contract() -> None:
     assert "Preset / Default active, pending, cache and backup files" in protocol
     assert "17.0.0-devV5" in readme
     assert "0.17.0-devV5" not in readme
-    assert "0.9.3" in testing
+    assert "0.9.4-dev.5" in testing
     assert "30-second `HH:MM` / 5-second `DD/MM` alternation" in protocol
     assert protocol.count("30-second `HH:MM` / 5-second `DD/MM` alternation") == 1
     assert "styles **0** and **3** use the extra" in protocol
     assert "the date day field stays fixed while the `/` separator and both month digits are" in protocol
 
-    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.3\n")
-    assert "Release: 0.9.3 / build: 0.9.3" in readme
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.4 development\n")
+    assert "Release: 0.9.4 / build: 0.9.4-dev.5" in readme
     assert "current stable release: 0.9.3" in readme.lower()
     assert "Graffiti full-raster multipart" in readme
     assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
@@ -137,11 +140,15 @@ def check_documentation_contract() -> None:
     assert "0.9.2-dev.11" not in readme
     assert "promotion to final 0.9.2 remains blocked" not in readme.lower()
 
-    release_notes = (ROOT / "RELEASE_NOTES_0.9.3.md").read_text(encoding="utf-8")
-    assert "WLED Buzzer Usermod" in release_notes
-    assert "IDotMatrixBuzzerBridge.h" in release_notes
-    assert "Buzzer -> Enable" in release_notes
-    assert "IDotMatrixBuzzer" in release_notes
+    release_notes = (ROOT / "RELEASE_NOTES_0.9.4-dev.5.md").read_text(encoding="utf-8")
+    assert "Waveshare ESP32-S3-RGB-Matrix" in release_notes
+    assert "waveshare-s3-hub75.ini" in release_notes
+    assert "0.9.3" in release_notes and "Stable baseline" in release_notes
+    stable_093_notes = (ROOT / "RELEASE_NOTES_0.9.3.md").read_text(encoding="utf-8")
+    assert "WLED Buzzer Usermod" in stable_093_notes
+    assert "IDotMatrixBuzzerBridge.h" in stable_093_notes
+    assert "Buzzer -> Enable" in stable_093_notes
+    assert "IDotMatrixBuzzer" in stable_093_notes
     stable_notes = (ROOT / "RELEASE_NOTES_0.9.2.md").read_text(encoding="utf-8")
     assert "Clock presentation persistence" in stable_notes
     assert "NVS" in stable_notes and "showDate=0" in stable_notes
@@ -152,7 +159,7 @@ def check_documentation_contract() -> None:
     assert "hardware-validated" in testing
     assert "complex photographic images" in testing
     history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
-    assert history.startswith("## 0.9.3\n")
+    assert history.startswith("## 0.9.4-dev.5\n")
     assert "4096-byte RGB chunks" in history
     assert "## 0.9.0\n" in history
     assert "## 0.9.0-rc.5" in history and "live TEXT" in history
@@ -176,7 +183,7 @@ def check_documentation_contract() -> None:
 def check_final_documentation_hygiene() -> None:
     current = [
         "README.md", "PROTOCOL.md", "ARCHITECTURE.md", "BUILD_PROFILES.md",
-        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.3.md",
+        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.4-dev.5.md", "RELEASE_NOTES_0.9.3.md",
         "RELEASE_NOTES_0.9.2.md", "RELEASE_NOTES_0.9.1.md",
     ]
     for name in current:
@@ -188,6 +195,40 @@ def check_final_documentation_hygiene() -> None:
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     assert "`iDotMatrix\nDisplay`" not in protocol
     assert "device-level rotation, energy-saving, and reset commands" not in protocol
+
+
+def check_waveshare_dev5_contract() -> None:
+    usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
+    override = (ROOT / "overrides/waveshare-s3-hub75.ini").read_text(encoding="utf-8")
+    legacy = (ROOT / "overrides/hub75-legacy.ini").read_text(encoding="utf-8")
+    profiles = (ROOT / "BUILD_PROFILES.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "IDOT_WAVESHARE_S3_RGB_MATRIX" in usermod
+    assert "target=Waveshare-ESP32-S3-RGB-Matrix" in usermod
+    assert "wledRelease=17.0.0-devV5" in usermod
+    assert "wledBase=devV5" in usermod
+    assert "WAVESHARE_S3_PINOUT" in usermod
+
+    assert "extends = env:waveshare_esp32s3_32MB_hub75" in override
+    assert "[env:waveshare]" in override
+    assert "${env:waveshare_esp32s3_32MB_hub75.custom_usermods}" not in override
+    assert "SHTC3_v2 = git+https://github.com/lost-hope/SHTC3_v2.git#1f6e3fc" in override
+    assert "/SHTC3_v2/commit/" not in override
+    assert "IDOT_SCREEN_MAX_DIM=64" in override
+    assert "IDOT_DEFAULT_SCREEN_TYPE=0x04" in override
+    assert "IDOT_WAVESHARE_AUDIO_DIAG" not in override
+    assert "-D SR_DEBUG" not in override
+    assert "audioDiag=i2c:" not in usermod
+    assert "[IDM AUDIO DIAG]" not in usermod
+    assert "WLED_DISABLE_OTA" not in override
+    assert "board_build.partitions" not in override
+    assert "waveshare_esp32s3_32MB_hub75_idotmatrix" not in legacy
+
+    assert "waveshare-s3-hub75.ini" in profiles
+    assert "environment = waveshare" in profiles
+    assert "WLED 17.0.0-devV5" in readme
+    assert "16 MB PSRAM" in readme
 
 
 def check_idot_display_fallback() -> None:
@@ -471,6 +512,7 @@ def main() -> None:
     check_release_surface()
     check_markdown_links()
     check_documentation_contract()
+    check_waveshare_dev5_contract()
     check_idot_display_fallback()
     check_device_reset_contract()
     check_no_heap_free_inside_queue_spinlock()

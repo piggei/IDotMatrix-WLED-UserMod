@@ -1,3 +1,37 @@
+## 0.9.4-dev.5
+
+- Removes the temporary Waveshare I2C audio diagnostic and its `IDOT_WAVESHARE_AUDIO_DIAG` build flag after hardware diagnosis completed.
+- Hardware confirmed both `ES8311 @ 0x18` and `ES7210 @ 0x40` on the shared `SDA 47 / SCL 48` bus.
+- Hardware confirmed onboard-microphone AudioReactive operation with `SD 39`, `WS 38`, `SCK 43`, `MCLK 12` after disabling UDP Sound Sync receive mode.
+- Records PASS results for native 64x64, BLE reconnect, TEXT, static image, GIF, Carousel, reboot/persistence, Alarm/Program and Matrix Auto Rotation coexistence.
+- Keeps stable 0.9.3 behavior unchanged and leaves 16x16/32x32 scaling plus a sustained soak as the remaining Waveshare qualification work.
+- Establishes PSRAM/cache telemetry as the next development step after qualification; larger physical layouts remain deferred until hardware is available.
+
+## 0.9.4-dev.4
+
+- Keeps the Waveshare one-shot I2C audio diagnostic introduced in dev.3.
+- Removes the temporary AudioReactive `SR_DEBUG` compile flag after hardware compilation showed that the pinned fork's legacy `DEBUGOUTLN` / `DEBUGOUTF` macros are incompatible with WLED 17.0.0-devV5 on the ESP32-S3 USB-CDC build.
+- No protocol, renderer, BLE, media, automation, settings-layout or buzzer behavior changes.
+
+## 0.9.4-dev.2
+
+- Switched the Waveshare development target to WLED 17.0.0-devV5, matching the current iDotMatrix WLED development line.
+- Changed the local Waveshare environment name to the short `waveshare` alias used by the project-wide override.
+- Fixed the build blocker discovered during the first compile attempt: the upstream Waveshare `SHTC3_v2` custom-usermod entry points at a GitHub `/commit/` web page, which PlatformIO cannot clone.
+- Reproduced the upstream Waveshare custom-usermod set locally, preserving `Internal_Temperature` and the pinned AudioReactive Usermod while pinning SHTC3_v2 with the cloneable `git+https://...git#<sha>` form.
+- Updated Waveshare `/json/info` diagnostics to report WLED 17.0.0-devV5.
+- No intentional protocol, BLE, media, rendering, automation, settings-layout or external-buzzer behavior change from stable 0.9.3.
+
+## 0.9.4-dev.1
+
+- Opened release line 0.9.4 from the stable 0.9.3 runtime.
+- Added a dedicated `overrides/waveshare-s3-hub75.ini` profile for the Waveshare ESP32-S3-RGB-Matrix on WLED v16.0.1 / release commit `29b389d`.
+- The new profile inherits WLED's official Waveshare HUB75 pinout/backend, 32 MB partition/OTA policy, 16 MB PSRAM setup, ES8311/SD flags and upstream board-specific Usermods, including AudioReactive.
+- Added `IDOT_WAVESHARE_S3_RGB_MATRIX` compile-time validation and target-specific `/json/info` diagnostics while preserving the existing MatrixPortal diagnostics.
+- Removed the older Waveshare entry from `overrides/hub75-legacy.ini` so there is one authoritative build recipe for this board.
+- Physically verified the pre-iDotMatrix board baseline using the official WLED 16.0.1 Waveshare binary with one 64x64 HUB75 Half-Scan panel; iDotMatrix dev.1 hardware qualification remains pending.
+- No intentional protocol, media, rendering, automation, settings-layout or external-buzzer behavior change from stable 0.9.3.
+
 ## 0.9.3
 
 - Promoted the hardware-qualified 0.9.3-rc.5 candidate to stable 0.9.3.

@@ -1,21 +1,27 @@
-# WLED iDotMatrix Usermod — 0.9.3
+# WLED iDotMatrix Usermod — 0.9.4 development
 
-**Release: 0.9.3 / build: 0.9.3.**  
-**Current stable release: 0.9.3.**  
-**Previous stable release: 0.9.2.**
+**Release: 0.9.4 / build: 0.9.4-dev.5.**  
+**Current development build: 0.9.4-dev.5.**  
+**Current stable release: 0.9.3.**
 
-The 0.9.3 line builds on the 0.9 hardware/platform work that brought the iDotMatrix compatibility layer to ESP32-S3 / PSRAM /
-native WLED HUB75 hardware while retaining the qualified ESP32-C3 / 16x16
-path. The primary 64x64 target is an Adafruit MatrixPortal ESP32-S3 driving a
-64x64 HUB75 panel on the qualified WLED 17.0.0-devV5 baseline
-`06ae26db67107cb3f6a3d107a92340035991a063`.
+0.9.4-dev.5 is the cleanup build after the successful Waveshare ESP32-S3-RGB-Matrix bring-up. Stable 0.9.3 remains the behavioral baseline; the WLED target is **17.0.0-devV5**. The board uses an ESP32-S3-N32R16 with **32 MB flash / 16 MB PSRAM** and WLED's native HUB75 backend. Dev.5 removes the temporary audio-diagnostic probe used in dev.4 and introduces no intentional protocol, rendering, media, automation, settings or buzzer behavior change.
 
-For the 64x64 reference build use `overrides/matrixportal-s3-hub75.ini`.
+Before adding iDotMatrix, the physical Waveshare board was verified with the official **WLED 16.0.1** `ESP32-S3_Waveshare_HUB75` binary and one 64x64 HUB75 panel configured as **HUB75 (Half Scan), 64x64, one panel, 1x1**. The complete panel renders correctly; `/json/info` reports 4096 LEDs, 32 MB flash, 16 MB PSRAM and AudioReactive. The iDotMatrix development build has now also been exercised on real hardware: native 64x64 output, TEXT, static image, GIF, Carousel, BLE reconnect, reboot/persistence, Alarm/Program and Matrix Auto Rotation all passed. Local AudioReactive input also works after disabling UDP Sound Sync receive mode. The remaining qualification work is a sustained soak plus the 16x16/32x32 logical-to-64x64 scaling checks.
 
-WLED remains the owner of LED output, effects, 2D mapping, presets, playlists,
-brightness, HTTP/JSON APIs, Home Assistant and network realtime protocols. The
-Usermod adds the iDotMatrix-compatible BLE peripheral and renders app content
-through the `iDotMatrix` WLED effect.
+For the Waveshare build use:
+
+```text
+overrides/waveshare-s3-hub75.ini
+env:waveshare
+```
+
+The short `waveshare` name is intentional so this section can be merged into the same global `platformio_override.ini` used for the other local board aliases. It extends WLED 17.0.0-devV5's upstream `env:waveshare_esp32s3_32MB_hub75` hardware environment. Board definition, HUB75 pinout/backend, PSRAM configuration, 32 MB partition/OTA policy, ES8311 pins and SD flags remain inherited from WLED.
+
+The upstream devV5 environment currently lists `SHTC3_v2` with a GitHub `/commit/` page URL. PlatformIO tries to clone that page as a repository and fails before compilation. Dev.3 therefore repeats the Waveshare `custom_usermods` list and changes only that entry to the cloneable pinned Git form `git+https://github.com/lost-hope/SHTC3_v2.git#1f6e3fc...`, while retaining `Internal_Temperature`, the pinned Waveshare AudioReactive Usermod, and iDotMatrix.
+
+No protocol, media-semantic, rendering, automation or external-buzzer change is intentionally introduced in dev.5. Larger physical layouts remain deferred until hardware is available. After the 64x64 soak completes, the next development step is PSRAM/cache instrumentation and optimization on the qualified 64x64 platform.
+
+WLED remains the owner of LED output, effects, 2D mapping, presets, playlists, brightness, HTTP/JSON APIs, Home Assistant and network realtime protocols. The Usermod adds the iDotMatrix-compatible BLE peripheral and renders app content through the `iDotMatrix` WLED effect.
 
 > **BLE compatibility/security:** the compatibility GATT profile is intentionally
 > unauthenticated, matching the observed original-device/app exchange. A nearby
@@ -23,25 +29,13 @@ through the `iDotMatrix` WLED effect.
 > commands. CRC fields provide integrity checking, not authentication. Disable
 > the Usermod/BLE service when this proximity-access model is not acceptable.
 
-## Release status
+## Development status
 
-`0.9.3` carries forward the hardware-qualified external buzzer-service integration from the
-0.9.2 baseline as the current stable release. Its main architectural change is the removal of the complete
-internal buzzer backend. iDotMatrix no longer owns a buzzer GPIO, Active/Passive
-selection, trigger polarity, LEDC generation, playback scheduler or local buzzer
-test endpoint.
+`0.9.4-dev.5` is a **qualification build**, not a stable release. Stable `0.9.3` remains the reference for protocol and feature behavior.
 
-Sound output is now optional and delegated to the standalone **WLED Buzzer
-Usermod** through its optional weak-link service bridge. When that Usermod is compiled into the
-same WLED firmware, iDotMatrix can request logical sounds for Alarm,
-Program/Schedule, Countdown completion, BLE connection and BLE disconnection. When it is absent,
-iDotMatrix continues to operate normally with sound disabled.
+The 0.9.3 line removed the internal buzzer backend and delegated sound to the optional standalone **WLED Buzzer Usermod** through the weak-link service bridge. That architecture is unchanged in 0.9.4-dev.5. The settings page also preserves the final 0.9.3 presentation: `Screen Type:`, Rescale grouped directly below it, `Device Name: IDM-`, `Audio Source:` and the optional Buzzer `Enable` control.
 
-The iDotMatrix settings page therefore exposes only **Buzzer → Enable** plus the
-orange dependency note **Requires the WLED Buzzer Usermod.** If the external
-service is not part of the firmware, the checkbox is shown disabled.
-
-The final 0.9.3 settings page uses the visible labels `Screen Type:` and `Device Name:`. Rescale remains directly below the Screen Type reboot/reconnection note, while the extra vertical spacing is placed after the Rescale row so Device Name starts the next logical group. The fixed `IDM-` prefix remains immediately before the editable device-name suffix. The BLE protocol and persistent Alarm/Program metadata remain unchanged. 0.9.2 remains the previous stable baseline. The final 0.9.3 runtime is promoted directly from the hardware-qualified RC5 candidate with no functional change beyond the build identifier.
+The remaining Waveshare qualification gate is intentionally conservative: complete the 16x16/32x32 logical-to-64x64 scaling checks and a sustained 30-60 minute media/audio soak. Native 64x64, BLE, TEXT, static image, GIF, Carousel, reboot/persistence, Alarm/Program, auto-rotation and local AudioReactive input are already hardware-verified.
 
 ## Preset / Default
 
@@ -100,7 +94,7 @@ The 0.9.x line inherits its classic ESP32 and initial ESP32-C3 foundation from t
 | classic ESP32 (`esp32dev`) | WLED 16.0.1 | Arduino 2.0.17 / IDF 4.4.7 in supplied overrides | I2S LED output + BLE | 1.4.3 |
 | ESP32-C3 4 MB | pinned WLED commit `d55037f7510541eddc390c8f3d01afc5787aa44a` | Arduino 3.3.8 / IDF 5.5.4 | WLED shared-RMT + BLE | 2.5.1 |
 
-That 0.8.2 C3 qualification covered persistent mixed Carousel playback and boot restore, Carousel-to-Carousel replacement, verified reset cleanup, alarms/programs, clock artwork, and WLED AudioReactive input from an external microphone. The current 0.9.1 C3 profiles build on that qualified IDF5/shared-RMT foundation and add the separately documented 0.9.x features and OTA profile.
+That 0.8.2 C3 qualification covered persistent mixed Carousel playback and boot restore, Carousel-to-Carousel replacement, verified reset cleanup, alarms/programs, clock artwork, and WLED AudioReactive input from an external microphone. The current 0.9.x C3 profiles build on that qualified IDF5/shared-RMT foundation and add the separately documented 0.9.x features and OTA profile.
 
 ### Hardware validation scope
 
@@ -111,6 +105,7 @@ That 0.8.2 C3 qualification covered persistent mixed Carousel playback and boot 
 | 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | hardware-validated |
 | 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` | `compact12/cache` | hardware-validated |
 | 64x64 logical / 64x64 physical, MatrixPortal ESP32-S3 + PSRAM | `animatedgif12/psram` | **hardware-validated on WLED 17.0.0-devV5 / `06ae26db67107cb3f6a3d107a92340035991a063` / native HUB75** |
+| 64x64 logical / 64x64 physical, Waveshare ESP32-S3-RGB-Matrix + 16 MB PSRAM | `animatedgif12/psram` | **0.9.4-dev.5 hardware bring-up PASS for native 64x64 and core runtime; scaling + soak still pending on WLED 17.0.0-devV5** |
 | 32x32 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 2x nearest-neighbour upscale** |
 | 16x16 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 4x nearest-neighbour upscale** |
 
@@ -488,6 +483,7 @@ Further documentation:
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
 - [`TODO.md`](TODO.md) — deferred/post-0.9.1 work;
+- [`RELEASE_NOTES_0.9.4-dev.5.md`](RELEASE_NOTES_0.9.4-dev.5.md) — current WLED 17 / Waveshare qualification-build notes;
 - [`RELEASE_NOTES_0.9.3.md`](RELEASE_NOTES_0.9.3.md) — current stable-release notes;
 - [`RELEASE_NOTES_0.9.2.md`](RELEASE_NOTES_0.9.2.md) — previous stable 0.9.2 release notes;
 - [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;

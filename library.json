@@ -1,7 +1,7 @@
 {
   "name": "wled-usermod-idotmatrix",
-  "version": "0.9.3",
-  "description": "iDotMatrix BLE server/emulator usermod for WLED with ESP32-S3/HUB75 64x64 support",
+  "version": "0.9.4-dev.5",
+  "description": "iDotMatrix BLE server/emulator usermod for WLED with ESP32-S3/HUB75 64x64 support, including Waveshare ESP32-S3-RGB-Matrix qualification profiles",
   "keywords": [
     "wled",
     "idotmatrix",
@@ -12,7 +12,9 @@
     "psram",
     "esp32-s3",
     "hub75",
-    "matrixportal"
+    "matrixportal",
+    "waveshare",
+    "esp32-s3-rgb-matrix"
   ],
   "license": "EUPL-1.2",
   "frameworks": "arduino",
