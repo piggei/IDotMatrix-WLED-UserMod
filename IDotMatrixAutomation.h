@@ -121,13 +121,14 @@ private:
   };
 
   void loadPersistence();
-  void saveAlarmMeta(uint8_t slot);
+  bool saveAlarmMeta(uint8_t slot);
+  void clearAlarmMeta(uint8_t slot);
   void saveScheduleGlobal();
   bool saveScheduleMeta(uint8_t index);
   void clearScheduleMeta(uint8_t index);
 
   bool ensureScheduleStaging();
-  void beginScheduleUpload(uint8_t flags);
+  bool beginScheduleUpload(uint8_t flags);
   void cancelScheduleUpload();
   void commitScheduleUpload();
 

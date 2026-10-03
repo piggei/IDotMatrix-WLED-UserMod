@@ -180,7 +180,14 @@ void IDotMatrixAutomation::loadPersistence() {
           if (file) file.close();
         }
       }
-      if (mediaValid) WLED_FS.remove(backupPath);
+      if (mediaValid) {
+        WLED_FS.remove(backupPath);
+      } else {
+        // NVS metadata must never survive without the media it describes.
+        // Schedule already converges this condition to empty; Alarm must do
+        // the same so a stale/corrupt slot cannot reappear after reboot.
+        clearAlarmMeta(slot);
+      }
     } else {
       WLED_FS.remove(backupPath);
     }
@@ -226,11 +233,26 @@ void IDotMatrixAutomation::loadPersistence() {
   }
 }
 
-void IDotMatrixAutomation::saveAlarmMeta(uint8_t slot) {
-  if (alarmPrefs_ == nullptr || slot >= IDotMatrixAlarmSettings::SLOT_COUNT) return;
+bool IDotMatrixAutomation::saveAlarmMeta(uint8_t slot) {
+  if (alarmPrefs_ == nullptr || slot >= IDotMatrixAlarmSettings::SLOT_COUNT) return false;
   char key[8];
   snprintf(key, sizeof(key), "a%u", unsigned(slot));
-  alarmPrefs_->putBytes(key, &alarms_[slot], sizeof(AlarmSlot));
+  return alarmPrefs_->putBytes(key, &alarms_[slot], sizeof(AlarmSlot)) == sizeof(AlarmSlot);
+}
+
+void IDotMatrixAutomation::clearAlarmMeta(uint8_t slot) {
+  if (slot >= IDotMatrixAlarmSettings::SLOT_COUNT) return;
+  if (alarmPrefs_ != nullptr) {
+    char key[8];
+    snprintf(key, sizeof(key), "a%u", unsigned(slot));
+    alarmPrefs_->remove(key);
+  }
+  alarms_[slot] = AlarmSlot{};
+  alarms_[slot].lastTriggerMinuteKey = 0xFFFFFFFFu;
+  char path[20];
+  alarmPath(slot, path, sizeof(path)); WLED_FS.remove(path);
+  alarmTempPath(slot, path, sizeof(path)); WLED_FS.remove(path);
+  alarmBackupPath(slot, path, sizeof(path)); WLED_FS.remove(path);
 }
 
 void IDotMatrixAutomation::saveScheduleGlobal() {
@@ -274,9 +296,12 @@ bool IDotMatrixAutomation::onAlarm(
   const uint8_t* media,
   size_t mediaLength
 ) {
-  if (settings.slot >= IDotMatrixAlarmSettings::SLOT_COUNT) return false;
+  if (settings.slot >= IDotMatrixAlarmSettings::SLOT_COUNT ||
+      settings.hour > 23 || settings.minute > 59) return false;
 
-  AlarmSlot next = alarms_[settings.slot];
+  const uint8_t slot = settings.slot;
+  const AlarmSlot previous = alarms_[slot];
+  AlarmSlot next = previous;
   next.configured = 1;
   next.flags = settings.flags;
   next.hour = settings.hour;
@@ -286,6 +311,15 @@ bool IDotMatrixAutomation::onAlarm(
   if (settings.packetLength > 10) next.contentType = settings.contentType;
   if (settings.packetLength > 11) next.buzzer = settings.buzzer;
 
+  char finalPath[20], tempPath[20], backupPath[20];
+  alarmPath(slot, finalPath, sizeof(finalPath));
+  alarmTempPath(slot, tempPath, sizeof(tempPath));
+  alarmBackupPath(slot, backupPath, sizeof(backupPath));
+
+  bool mediaReplaced = false;
+  bool previousFileStaged = false;
+  const bool previousFileExists = WLED_FS.exists(finalPath);
+
   if (settings.fullHeader) {
     next.reserved2 = settings.reserved2;
     next.mediaSize = settings.mediaSize;
@@ -294,48 +328,91 @@ bool IDotMatrixAutomation::onAlarm(
     next.mediaId = settings.mediaId;
 
     if (mediaLength != settings.mediaSize ||
+        (mediaLength > 0 && media == nullptr) ||
         crc32(media, mediaLength) != settings.mediaCRC) return false;
 
-    char finalPath[20], tempPath[20], backupPath[20];
-    alarmPath(settings.slot, finalPath, sizeof(finalPath));
-    alarmTempPath(settings.slot, tempPath, sizeof(tempPath));
-    alarmBackupPath(settings.slot, backupPath, sizeof(backupPath));
+    WLED_FS.remove(tempPath);
+    WLED_FS.remove(backupPath);
 
-    if (mediaLength == 0) {
-      WLED_FS.remove(tempPath);
-      WLED_FS.remove(backupPath);
-      WLED_FS.remove(finalPath);
-    } else {
-      // Transactional Alarm replacement: never truncate the currently valid
-      // media until the complete new asset has been written to a temp file.
-      WLED_FS.remove(tempPath);
+    if (mediaLength > 0) {
+      // Transactional Alarm replacement. The previous media remains recoverable
+      // until the matching NVS metadata write is confirmed.
       if (!writeFile(tempPath, media, mediaLength)) {
         WLED_FS.remove(tempPath);
         lastError_ = Error::FileWrite;
         return false;
       }
 
-      WLED_FS.remove(backupPath);
-      const bool finalExists = WLED_FS.exists(finalPath);
-      bool oldStaged = true;
-      if (finalExists) oldStaged = WLED_FS.rename(finalPath, backupPath);
-      bool promoted = oldStaged && WLED_FS.rename(tempPath, finalPath);
-      if (!promoted) {
+      if (previousFileExists) previousFileStaged = WLED_FS.rename(finalPath, backupPath);
+      if (previousFileExists && !previousFileStaged) {
         WLED_FS.remove(tempPath);
-        if (finalExists && oldStaged) {
-          WLED_FS.remove(finalPath);
-          WLED_FS.rename(backupPath, finalPath);
-        }
         lastError_ = Error::FileWrite;
         return false;
       }
-      WLED_FS.remove(backupPath);
+      if (!WLED_FS.rename(tempPath, finalPath)) {
+        WLED_FS.remove(tempPath);
+        bool restored = !previousFileExists;
+        if (previousFileStaged) restored = WLED_FS.rename(backupPath, finalPath);
+        if (!restored && previous.configured) clearAlarmMeta(slot);
+        WLED_FS.remove(backupPath);
+        lastError_ = Error::FileWrite;
+        return false;
+      }
+      mediaReplaced = true;
+    } else {
+      // A zero-length full-header Alarm explicitly owns no media. Preserve any
+      // previous file as rollback material until NVS confirms the new metadata.
+      if (previousFileExists) previousFileStaged = WLED_FS.rename(finalPath, backupPath);
+      if (previousFileExists && !previousFileStaged) {
+        lastError_ = Error::FileWrite;
+        return false;
+      }
+      mediaReplaced = true;
     }
   }
 
   next.lastTriggerMinuteKey = 0xFFFFFFFFu;
-  alarms_[settings.slot] = next;
-  saveAlarmMeta(settings.slot);
+  alarms_[slot] = next;
+  if (!saveAlarmMeta(slot)) {
+    lastError_ = Error::Preferences;
+
+    // Restore the previous file first. A failed Preferences write is not
+    // assumed to preserve the old NVS value, so both halves are reasserted.
+    bool previousMediaRestored = true;
+    if (settings.fullHeader && mediaReplaced) {
+      WLED_FS.remove(finalPath);
+      if (previousFileExists) {
+        previousMediaRestored = previousFileStaged && WLED_FS.rename(backupPath, finalPath);
+      }
+    }
+
+    alarms_[slot] = previous;
+    bool previousMetaRestored = false;
+    if (previous.configured) {
+      const bool previousNeededFile = previous.mediaSize > 0;
+      if ((!previousNeededFile || previousMediaRestored) && saveAlarmMeta(slot)) {
+        previousMetaRestored = true;
+      }
+    } else {
+      if (alarmPrefs_ != nullptr) {
+        char key[8];
+        snprintf(key, sizeof(key), "a%u", unsigned(slot));
+        alarmPrefs_->remove(key);
+      }
+      previousMetaRestored = true;
+    }
+
+    if (!previousMetaRestored ||
+        (previous.configured && previous.mediaSize > 0 && !previousMediaRestored)) {
+      clearAlarmMeta(slot);
+    }
+    WLED_FS.remove(tempPath);
+    WLED_FS.remove(backupPath);
+    return false;
+  }
+
+  WLED_FS.remove(tempPath);
+  WLED_FS.remove(backupPath);
   lastError_ = Error::None;
   return true;
 }
@@ -351,12 +428,14 @@ bool IDotMatrixAutomation::ensureScheduleStaging() {
   return true;
 }
 
-void IDotMatrixAutomation::beginScheduleUpload(uint8_t flags) {
+bool IDotMatrixAutomation::beginScheduleUpload(uint8_t flags) {
+  cancelScheduleUpload();
+  if (!ensureScheduleStaging()) return false;
+
+  // Only publish/persist the new Schedule state after the replacement staging
+  // generation exists. An OOM must leave the previously committed flags alone.
   scheduleGlobalFlags_ = flags;
   saveScheduleGlobal();
-  cancelScheduleUpload();
-  if (!ensureScheduleStaging()) return;
-
   scheduleUploadOpen_ = true;
   scheduleUploadDirty_ = false;
   scheduleFailedIndex_ = -1;
@@ -369,6 +448,7 @@ void IDotMatrixAutomation::beginScheduleUpload(uint8_t flags) {
     scheduleBackupPath(index, path, sizeof(path));
     WLED_FS.remove(path);
   }
+  return true;
 }
 
 void IDotMatrixAutomation::cancelScheduleUpload() {
@@ -407,13 +487,15 @@ bool IDotMatrixAutomation::onScheduleActivity(
   size_t mediaLength
 ) {
   if (settings.index >= IDotMatrixScheduleActivitySettings::MAX_ACTIVITIES ||
+      settings.startHour > 23 || settings.startMinute > 59 ||
+      settings.endHour > 23 || settings.endMinute > 59 ||
       media == nullptr || mediaLength == 0 || mediaLength != settings.mediaSize ||
       crc32(media, mediaLength) != settings.mediaCRC) return false;
 
   if (!scheduleUploadOpen_) {
+    if (!ensureScheduleStaging()) return false;
     scheduleGlobalFlags_ |= 0x01u;
     saveScheduleGlobal();
-    if (!ensureScheduleStaging()) return false;
     scheduleUploadOpen_ = true;
     scheduleUploadDirty_ = false;
     scheduleReceivedMask_ = 0;
@@ -644,7 +726,13 @@ void IDotMatrixAutomation::updateAlarms(uint32_t now, bool& alarmEnded) {
     alarm.lastTriggerMinuteKey = minuteKey;
     if (days == 0) {
       alarm.flags &= uint8_t(~0x01u);
-      saveAlarmMeta(slot);
+      if (!saveAlarmMeta(slot)) {
+        // A consumed one-shot must not be allowed to resurrect after reboot.
+        // If its disabled state cannot be persisted, converge the slot to empty.
+        clearAlarmMeta(slot);
+        lastError_ = Error::Preferences;
+        continue;
+      }
     }
     startAlarm(slot, now);
     break;
@@ -690,6 +778,7 @@ void IDotMatrixAutomation::stopAlarm(bool deferRestore) {
 
 void IDotMatrixAutomation::updateSchedule(uint32_t now) {
   if (scheduleUploadOpen_ && scheduleUploadDirty_ &&
+      (protocol_ == nullptr || !protocol_->programTransferActive()) &&
       uint32_t(now - scheduleLastRxMs_) >= SCHEDULE_COMMIT_DELAY_MS) {
     commitScheduleUpload();
   }

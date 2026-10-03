@@ -24,6 +24,36 @@ int testMinute = 0;
 int testSecond = 0;
 TestStrip strip;
 
+class NullProtocolEvents final : public IDotMatrixProtocolEvents {
+public:
+  void onDeviceReset() override {}
+  void onScreenPower(bool) override {}
+  void onBrightnessPercent(uint8_t) override {}
+  void onSolidColor(uint8_t, uint8_t, uint8_t) override {}
+  void onLightEffect(const IDotMatrixLightEffectSettings&) override {}
+  void onAudio(const IDotMatrixAudioSettings&) override {}
+  void onGraffitiMode(bool) override {}
+  void onGraffitiPixels(uint8_t, uint8_t, uint8_t, const uint8_t*, size_t) override {}
+  bool onGraffitiRasterBegin(size_t) override { return true; }
+  bool onGraffitiRasterData(size_t, const uint8_t*, size_t) override { return true; }
+  bool onGraffitiRasterComplete(bool valid) override { return valid; }
+  void onClock(const IDotMatrixClockSettings&) override {}
+  void onCountdown(const IDotMatrixCountdownSettings&) override {}
+  void onStopwatch(uint8_t) override {}
+  void onScoreboard(uint16_t, uint16_t) override {}
+  bool takeCountdownFinished() override { return false; }
+  bool onTextBegin(const IDotMatrixTextSettings&) override { return true; }
+  void onTextGlyph(uint8_t, const uint8_t*, size_t) override {}
+  void onTextComplete() override {}
+  bool onRawImageBegin(size_t) override { return true; }
+  bool onRawImageData(size_t, const uint8_t*, size_t) override { return true; }
+  bool onRawImageComplete(bool valid) override { return valid; }
+  bool onPngImage(const uint8_t*, size_t) override { return true; }
+  bool onGifBegin(size_t) override { return true; }
+  bool onGifData(size_t, const uint8_t*, size_t) override { return true; }
+  bool onGifComplete(bool valid) override { return valid; }
+};
+
 static uint32_t crc32(const uint8_t* data, size_t length) {
   uint32_t crc = 0xFFFFFFFFu;
   for (size_t i = 0; i < length; ++i) {
@@ -73,6 +103,24 @@ static IDotMatrixScheduleActivitySettings scheduleSettings(
   settings.mediaCRC = crc32(media.data(), media.size());
   settings.mediaId = mediaId;
   return settings;
+}
+
+static IDotMatrixAlarmSettings fullAlarmSettings(
+  uint8_t slot, const std::vector<uint8_t>& media, uint8_t hour, uint8_t minute, uint8_t mediaId
+) {
+  IDotMatrixAlarmSettings alarm{};
+  alarm.slot = slot;
+  alarm.flags = 0x01;
+  alarm.hour = hour;
+  alarm.minute = minute;
+  alarm.durationSeconds = 10;
+  alarm.contentType = 0x02;
+  alarm.mediaSize = static_cast<uint32_t>(media.size());
+  alarm.mediaCRC = crc32(media.data(), media.size());
+  alarm.mediaId = mediaId;
+  alarm.packetLength = IDotMatrixAlarmSettings::FULL_HEADER_SIZE;
+  alarm.fullHeader = true;
+  return alarm;
 }
 
 static void commitOne(Fixture& f, const std::vector<uint8_t>& media, uint8_t mediaId = 1) {
@@ -272,6 +320,166 @@ static void testAlarmPersistence() {
   assert(rebooted.automation.configuredAlarmCount() == 1);
   assert(rebooted.automation.alarms_[0].hour == 7);
   assert(rebooted.automation.alarms_[0].minute == 30);
+}
+
+static void testAlarmNvsFailureRollsBackFileAndMetadata() {
+  resetState();
+  const std::vector<uint8_t> oldMedia{1, 2, 3, 4};
+  const std::vector<uint8_t> newMedia{9, 8, 7, 6, 5};
+  Fixture f;
+  f.automation.begin();
+
+  auto oldAlarm = fullAlarmSettings(0, oldMedia, 7, 30, 10);
+  assert(f.automation.onAlarm(oldAlarm, oldMedia.data(), oldMedia.size()));
+  const auto oldMeta = TestPreferencesStore::bytes("idot-alarm", "a0");
+
+  auto newAlarm = fullAlarmSettings(0, newMedia, 8, 45, 11);
+  TestPreferencesStore::failNextPut("idot-alarm/a0");
+  assert(!f.automation.onAlarm(newAlarm, newMedia.data(), newMedia.size()));
+  assert(std::string(f.automation.lastErrorText()) == "preferences");
+  assert(f.automation.alarms_[0].hour == 7);
+  assert(f.automation.alarms_[0].mediaSize == oldMedia.size());
+  assert(WLED_FS.get("/idot_a0.bin") == oldMedia);
+  assert(TestPreferencesStore::bytes("idot-alarm", "a0") == oldMeta);
+  assert(!WLED_FS.exists("/idot_ab0.bin"));
+
+  Fixture rebooted;
+  rebooted.automation.begin();
+  assert(rebooted.automation.configuredAlarmCount() == 1);
+  assert(rebooted.automation.alarms_[0].hour == 7);
+  assert(rebooted.automation.alarms_[0].mediaSize == oldMedia.size());
+  assert(WLED_FS.get("/idot_a0.bin") == oldMedia);
+}
+
+static void testAlarmNvsRollbackFailureConvergesToEmpty() {
+  resetState();
+  const std::vector<uint8_t> oldMedia{3, 3, 3, 3};
+  const std::vector<uint8_t> newMedia{4, 4, 4, 4, 4};
+  Fixture f;
+  f.automation.begin();
+  auto oldAlarm = fullAlarmSettings(0, oldMedia, 6, 10, 20);
+  assert(f.automation.onAlarm(oldAlarm, oldMedia.data(), oldMedia.size()));
+
+  auto newAlarm = fullAlarmSettings(0, newMedia, 6, 20, 21);
+  TestPreferencesStore::failNextPut("idot-alarm/a0", 2);
+  assert(!f.automation.onAlarm(newAlarm, newMedia.data(), newMedia.size()));
+  assert(std::string(f.automation.lastErrorText()) == "preferences");
+  assert(f.automation.configuredAlarmCount() == 0);
+  assert(TestPreferencesStore::bytesLength("idot-alarm", "a0") == 0);
+  assert(!WLED_FS.exists("/idot_a0.bin"));
+  assert(!WLED_FS.exists("/idot_ab0.bin"));
+}
+
+static void testAlarmBootRecoveryClearsUnrecoverableMedia() {
+  resetState();
+  const std::vector<uint8_t> media{1, 2, 3, 4};
+  {
+    Fixture f;
+    f.automation.begin();
+    auto alarm = fullAlarmSettings(0, media, 5, 15, 30);
+    assert(f.automation.onAlarm(alarm, media.data(), media.size()));
+  }
+  WLED_FS.set("/idot_a0.bin", {9, 9, 9}); // wrong size, no backup
+  Fixture rebooted;
+  rebooted.automation.begin();
+  assert(rebooted.automation.configuredAlarmCount() == 0);
+  assert(TestPreferencesStore::bytesLength("idot-alarm", "a0") == 0);
+  assert(!WLED_FS.exists("/idot_a0.bin"));
+}
+
+static void testOneShotAlarmNvsFailureConvergesToEmpty() {
+  resetState();
+  Fixture f;
+  f.automation.begin();
+
+  testMillis = 1000;
+  testYear = 1970;
+  IDotMatrixTimeSyncSettings sync{};
+  sync.year = 2026; sync.month = 10; sync.day = 3;
+  sync.hour = 6; sync.minute = 30; sync.second = 0;
+  f.automation.onTimeSync(sync);
+
+  IDotMatrixAlarmSettings alarm{};
+  alarm.slot = 0;
+  alarm.flags = 0x01; // enabled one-shot: no weekday bits
+  alarm.hour = 6;
+  alarm.minute = 30;
+  alarm.durationSeconds = 10;
+  alarm.packetLength = 12;
+  assert(f.automation.onAlarm(alarm, nullptr, 0));
+  assert(f.automation.configuredAlarmCount() == 1);
+
+  // Consuming a one-shot writes the disabled metadata. If that NVS write
+  // fails, rc.2 must converge to an empty slot rather than firing an alarm
+  // that can resurrect after reboot with the old enabled metadata.
+  TestPreferencesStore::failNextPut("idot-alarm/a0");
+  f.automation.loop(1600);
+  assert(!f.automation.alarmActive_);
+  assert(f.automation.configuredAlarmCount() == 0);
+  assert(std::string(f.automation.lastErrorText()) == "preferences");
+  assert(TestPreferencesStore::bytesLength("idot-alarm", "a0") == 0);
+
+  Fixture rebooted;
+  rebooted.automation.begin();
+  assert(rebooted.automation.configuredAlarmCount() == 0);
+}
+
+static void testScheduleQuietCommitWaitsForMultipart() {
+  resetState();
+  const std::vector<uint8_t> first{1, 2, 3, 4};
+  const std::vector<uint8_t> second{5, 6, 7, 8, 9};
+  Fixture f;
+  f.automation.begin();
+  NullProtocolEvents events;
+  IDotMatrixProtocol protocol(events);
+  f.automation.attachProtocol(&protocol);
+
+  f.automation.onScheduleGlobal(0x01);
+  auto s0 = scheduleSettings(0, first, 40);
+  assert(f.automation.onScheduleActivity(s0, first.data(), first.size()));
+
+  // The next Program object is still in the protocol multipart assembler well
+  // beyond the 900 ms quiet commit delay. The first activity must not publish.
+  protocol.programTransfer_.active = true;
+  protocol.programTransfer_.lastRxMs = 100;
+  testMillis = f.automation.scheduleLastRxMs_ + IDotMatrixAutomation::SCHEDULE_COMMIT_DELAY_MS + 100;
+  f.automation.updateSchedule(testMillis);
+  assert(f.automation.scheduleUploadOpen_);
+  assert(f.automation.configuredScheduleCount() == 0);
+
+  // Complete the second object; onScheduleActivity restarts the quiet period.
+  protocol.programTransfer_.active = false;
+  auto s1 = scheduleSettings(1, second, 41);
+  assert(f.automation.onScheduleActivity(s1, second.data(), second.size()));
+  const uint32_t secondCompleteAt = f.automation.scheduleLastRxMs_;
+  f.automation.updateSchedule(secondCompleteAt + IDotMatrixAutomation::SCHEDULE_COMMIT_DELAY_MS - 1);
+  assert(f.automation.configuredScheduleCount() == 0);
+  f.automation.updateSchedule(secondCompleteAt + IDotMatrixAutomation::SCHEDULE_COMMIT_DELAY_MS);
+  assert(f.automation.configuredScheduleCount() == 2);
+  assert(WLED_FS.get("/idot_s0.bin") == first);
+  assert(WLED_FS.get("/idot_s1.bin") == second);
+}
+
+static void testAutomationRejectsInvalidClockFields() {
+  resetState();
+  Fixture f;
+  f.automation.begin();
+
+  IDotMatrixAlarmSettings alarm{};
+  alarm.slot = 0;
+  alarm.flags = 0x01;
+  alarm.hour = 24;
+  alarm.minute = 0;
+  alarm.packetLength = 9;
+  assert(!f.automation.onAlarm(alarm, nullptr, 0));
+  assert(f.automation.configuredAlarmCount() == 0);
+
+  const std::vector<uint8_t> media{1, 2, 3};
+  auto schedule = scheduleSettings(0, media, 55);
+  schedule.endMinute = 60;
+  f.automation.onScheduleGlobal(0x01);
+  assert(!f.automation.onScheduleActivity(schedule, media.data(), media.size()));
+  assert(f.automation.configuredScheduleCount() == 0);
 }
 
 static void testTimeBehaviour() {
@@ -545,6 +753,12 @@ int main() {
   testNvsRollbackMetadataFailureConvergesToEmptyState();
   testMissingMediaAndCorruptMetadataRecovery();
   testAlarmPersistence();
+  testAlarmNvsFailureRollsBackFileAndMetadata();
+  testAlarmNvsRollbackFailureConvergesToEmpty();
+  testOneShotAlarmNvsFailureConvergesToEmpty();
+  testAlarmBootRecoveryClearsUnrecoverableMedia();
+  testScheduleQuietCommitWaitsForMultipart();
+  testAutomationRejectsInvalidClockFields();
   testTimeBehaviour();
   testAppTimeSyncOverridesValidWledClockForAlarm();
   testSilentAlarmRemainsSilent();

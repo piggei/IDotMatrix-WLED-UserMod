@@ -1,6 +1,6 @@
 # Implemented iDotMatrix protocol subset
 
-This document describes the protocol subset implemented by release 0.9.4 / build 0.9.4-rc.1. The BLE wire protocol is unchanged from stable 0.9.3; dev.7 changes only the Waveshare GIF source I/O path and runtime diagnostics, not any BLE packet or application command semantics. The
+This document describes the protocol subset implemented by release 0.9.4 / build 0.9.4. The BLE wire protocol is unchanged from stable 0.9.3; dev.7 changes only the Waveshare GIF source I/O path and runtime diagnostics, not any BLE packet or application command semantics. The
 BLE wire protocol is carried forward from the stable 0.9.0 WLED iDotMatrix Usermod and extended only where new original-app traffic has been confirmed. It includes the validated media/profile baseline, seven
 standalone light effects, source-isolated app Solid rendering, countdown,
 stopwatch, scoreboard, persistent alarms and programs/schedules, optional external-buzzer

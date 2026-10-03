@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-candidate package and critical-section regression checks for 0.9.4-rc.1."""
+"""Stable-release package and critical-section regression checks for 0.9.4."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.4-rc.1"
+    assert library["version"] == "0.9.4"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     assert 'IDOTMATRIX_RELEASE = "0.9.4"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.4-rc.1"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.4"' in usermod
     assert "IDOTMATRIX_APP_RELEASE_MINOR = 0x09" in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
@@ -39,7 +39,9 @@ def check_release_surface() -> None:
         "overrides/waveshare-s3-hub75.ini",
         "partitions/WLED_ESP32_4MB_IDOT_NO_OTA.csv",
         "partitions/WLED_ESP32_4MB_IDOT_OTA.csv",
-        "RELEASE_NOTES_0.9.4-rc.1.md",
+        "RELEASE_NOTES_0.9.4.md",
+        "RELEASE_QUALIFICATION_0.9.4.md",
+        "RELEASE_NOTES_0.9.4-rc.2.md",
         "RELEASE_NOTES_0.9.4-dev.16.md",
         "RELEASE_NOTES_0.9.4-dev.15.md",
         "RELEASE_NOTES_0.9.4-dev.14.md",
@@ -81,7 +83,7 @@ def check_release_surface() -> None:
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.2-dev.*.md"))
-    assert list(ROOT.glob("RELEASE_NOTES_0.9.4-rc.1.md"))
+    assert list(ROOT.glob("RELEASE_NOTES_0.9.4-rc.2.md"))
     assert list(ROOT.glob("RELEASE_NOTES_0.9.3.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.10.0-dev.*.md"))
 
@@ -103,7 +105,7 @@ def check_documentation_contract() -> None:
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "release-candidate qualification" not in protocol.lower()
-    assert "current release candidate: 0.9.4-rc.1" in readme.lower()
+    assert "current stable release: 0.9.4" in readme.lower()
     profiles = (ROOT / "BUILD_PROFILES.md").read_text(encoding="utf-8")
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
@@ -135,15 +137,15 @@ def check_documentation_contract() -> None:
     assert "Preset / Default active, pending, cache and backup files" in protocol
     assert "17.0.0-devV5" in readme
     assert "0.17.0-devV5" not in readme
-    assert "0.9.4-rc.1" in testing
+    assert "0.9.4" in testing
     assert "30-second `HH:MM` / 5-second `DD/MM` alternation" in protocol
     assert protocol.count("30-second `HH:MM` / 5-second `DD/MM` alternation") == 1
     assert "styles **0** and **3** use the extra" in protocol
     assert "the date day field stays fixed while the `/` separator and both month digits are" in protocol
 
-    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.4 release candidate\n")
-    assert "Release: 0.9.4 / build: 0.9.4-rc.1" in readme
-    assert "current stable release: 0.9.3" in readme.lower()
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.4\n")
+    assert "Release: 0.9.4 / build: 0.9.4" in readme
+    assert "current stable release: 0.9.4" in readme.lower()
     assert "Graffiti full-raster multipart" in readme
     assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
     assert "partitions/" in readme
@@ -154,7 +156,7 @@ def check_documentation_contract() -> None:
     assert "0.9.2-dev.11" not in readme
     assert "promotion to final 0.9.2 remains blocked" not in readme.lower()
 
-    release_notes = (ROOT / "RELEASE_NOTES_0.9.4-rc.1.md").read_text(encoding="utf-8")
+    release_notes = (ROOT / "RELEASE_NOTES_0.9.4.md").read_text(encoding="utf-8")
     assert "MatrixPortal ESP32-S3" in release_notes
     assert "256 KiB" in release_notes and "1 MiB" in release_notes
     assert "persistent source cache" in release_notes.lower()
@@ -175,7 +177,7 @@ def check_documentation_contract() -> None:
     assert "hardware-validated" in testing
     assert "complex photographic images" in testing
     history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
-    assert history.startswith("## 0.9.4-rc.1 - 2026-10-03\n")
+    assert history.startswith("## 0.9.4 - 2026-10-03\n")
     assert "4096-byte RGB chunks" in history
     assert "## 0.9.0\n" in history
     assert "## 0.9.0-rc.5" in history and "live TEXT" in history
@@ -199,7 +201,7 @@ def check_documentation_contract() -> None:
 def check_final_documentation_hygiene() -> None:
     current = [
         "README.md", "PROTOCOL.md", "ARCHITECTURE.md", "BUILD_PROFILES.md",
-        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.4-rc.1.md", "RELEASE_NOTES_0.9.4-dev.16.md", "RELEASE_NOTES_0.9.4-dev.15.md", "RELEASE_NOTES_0.9.4-dev.14.md", "RELEASE_NOTES_0.9.4-dev.13.md", "RELEASE_NOTES_0.9.4-dev.12.md", "RELEASE_NOTES_0.9.4-dev.11.md", "RELEASE_NOTES_0.9.4-dev.10.md", "RELEASE_NOTES_0.9.4-dev.9.md", "RELEASE_NOTES_0.9.4-dev.8.md", "RELEASE_NOTES_0.9.4-dev.7.md", "RELEASE_NOTES_0.9.4-dev.6.md", "RELEASE_NOTES_0.9.4-dev.5.md", "RELEASE_NOTES_0.9.3.md",
+        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.4.md", "RELEASE_NOTES_0.9.4-rc.2.md", "RELEASE_NOTES_0.9.4-dev.16.md", "RELEASE_NOTES_0.9.4-dev.15.md", "RELEASE_NOTES_0.9.4-dev.14.md", "RELEASE_NOTES_0.9.4-dev.13.md", "RELEASE_NOTES_0.9.4-dev.12.md", "RELEASE_NOTES_0.9.4-dev.11.md", "RELEASE_NOTES_0.9.4-dev.10.md", "RELEASE_NOTES_0.9.4-dev.9.md", "RELEASE_NOTES_0.9.4-dev.8.md", "RELEASE_NOTES_0.9.4-dev.7.md", "RELEASE_NOTES_0.9.4-dev.6.md", "RELEASE_NOTES_0.9.4-dev.5.md", "RELEASE_NOTES_0.9.3.md",
         "RELEASE_NOTES_0.9.2.md", "RELEASE_NOTES_0.9.1.md",
     ]
     for name in current:
@@ -207,7 +209,7 @@ def check_final_documentation_hygiene() -> None:
         assert "0.9.1-rc." not in text, f"{name}: stale RC marker"
         assert "0.9.1-dev." not in text, f"{name}: stale previous-development marker"
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "current stable release: 0.9.3" in readme.lower()
+    assert "current stable release: 0.9.4" in readme.lower()
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     assert "`iDotMatrix\nDisplay`" not in protocol
     assert "device-level rotation, energy-saving, and reset commands" not in protocol

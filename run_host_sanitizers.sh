@@ -42,4 +42,18 @@ $CXX $FLAGS -DIDOT_PRESET_HOST_TEST -Itests/media_stub IDotMatrixProtocol.cpp ID
 $CXX $FLAGS -DIDOT_CAROUSEL_HOST_TEST -Itests/media_stub IDotMatrixProtocol.cpp IDotMatrixCarousel.cpp tests/test_carousel.cpp -o "$TMP/idotmatrix_carousel_san"
 "$TMP/idotmatrix_carousel_san"
 
+$CXX $FLAGS -Itests/wled_stub IDotMatrixRenderer.cpp IDotMatrixWLEDAdapter.cpp tests/test_wled_adapter.cpp -o "$TMP/idotmatrix_adapter_san"
+"$TMP/idotmatrix_adapter_san"
+
+$CXX $FLAGS IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp tests/test_compact_gif.cpp -o "$TMP/idotmatrix_compact_gif_san"
+"$TMP/idotmatrix_compact_gif_san"
+
+$CXX $FLAGS -DIDOT_GIF_BITS=11 -DIDOT_GIF_MAX_DIM=32 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixGifSourceStage.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media11_san"
+"$TMP/idotmatrix_media11_san"
+
+$CXX $FLAGS -I. tests/test_buzzer_bridge_absent.cpp -o "$TMP/idotmatrix_buzzer_bridge_absent_san"
+"$TMP/idotmatrix_buzzer_bridge_absent_san"
+$CXX $FLAGS -I. tests/test_buzzer_bridge_present.cpp -o "$TMP/idotmatrix_buzzer_bridge_present_san"
+"$TMP/idotmatrix_buzzer_bridge_present_san"
+
 echo "ASan/UBSan host tests passed."

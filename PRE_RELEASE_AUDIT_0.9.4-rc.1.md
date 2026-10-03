@@ -1,5 +1,7 @@
 # iDotMatrix WLED Usermod 0.9.4-rc.1 pre-release audit
 
+> **Superseded:** a subsequent independent audit reproduced two Automation/persistence runtime defects in rc.1. The statement below that no runtime code-path defect was found is historical and must not be used as the current release assessment. See `PRE_RELEASE_AUDIT_0.9.4-rc.2.md`.
+
 **Release:** 0.9.4  
 **Build:** 0.9.4-rc.1  
 **Audit date:** 2026-10-03

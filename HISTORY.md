@@ -1,3 +1,19 @@
+## 0.9.4 - 2026-10-03
+
+- Stable release promoted from hardware-qualified `0.9.4-rc.2` with no functional runtime changes.
+- Closes the rc.1 Schedule multipart/quiet-commit race and Alarm LittleFS/NVS atomicity defects through the rc.2 regression fixes.
+- Final Waveshare smoke confirmed cold-boot persistence for one Alarm and a two-activity Schedule; the persisted Alarm fired successfully after reboot.
+- Preserves the qualified Waveshare and MatrixPortal PSRAM staging/cache/prefetch policies and the automatic native-S3 logical-to-physical scaling behavior.
+- Documentation and Wiki packaging are aligned with the stable release and include the referenced hardware images.
+
+## 0.9.4-rc.2 - 2026-10-03
+
+- Fixes the Schedule 900 ms quiet-commit race by blocking publication while a Program multipart remains active.
+- Makes Alarm media + NVS replacement transactional and converges unrecoverable rollback/boot states to empty.
+- Validates Alarm/Schedule clock fields and allocates Schedule staging before publishing replacement flags.
+- Extends sanitizer coverage to WLED adapter, CompactGif, media11 and external-buzzer bridge harnesses.
+- Corrects rc.1 audit/documentation/package inconsistencies without changing qualified Waveshare/MatrixPortal PSRAM policies.
+
 ## 0.9.4-rc.1 - 2026-10-03
 
 - Promotes the hardware-qualified dev.16 runtime to the first 0.9.4 release candidate with no intentional runtime feature change.

@@ -250,6 +250,11 @@ public:
   void cancelPresetAsset();
   void suspendPreset();
 
+  // Automation uses this only as a commit guard: a quiet-period Schedule
+  // generation must never be published while the next Program media object is
+  // still arriving through the protocol multipart assembler.
+  bool programTransferActive() const { return programTransfer_.active; }
+
 private:
   static bool hasValidLength(const uint8_t* data, size_t length);
   static uint16_t readLE16(const uint8_t* data);

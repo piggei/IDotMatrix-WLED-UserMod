@@ -1,17 +1,14 @@
-# Testing
+# Stable release qualification
 
-## 0.9.4-rc.1 - release-candidate regression gate
+## 0.9.4 final gate — PASS
 
-0.9.4-rc.1 promotes the dev.16 runtime without a new functional change. Before final 0.9.4 promotion:
+Release `0.9.4`, build `0.9.4`, is promoted from `0.9.4-rc.2` with no functional runtime change after the rc.2 regression-fix gate passed. The rc.2 host suite covers the two rc.1 blockers: Schedule multipart/quiet-commit coordination and Alarm LittleFS/NVS rollback with failure injection.
 
-1. host regression suite and release-package checks must pass;
-2. PlatformIO profile normalization checks must pass for Waveshare, MatrixPortal, ESP32-C3 and classic ESP32 profiles;
-3. current documentation must identify `release=0.9.4`, `build=0.9.4-rc.1`;
-4. no current page may still describe dev.14/dev.15/dev.16 qualification as pending;
-5. native S3 Rescale UI cleanup remains intact;
-6. Waveshare and MatrixPortal PSRAM policies remain unchanged from their hardware-qualified dev.16 state.
+Final real-hardware evidence on Waveshare ESP32-S3-RGB-Matrix includes: cold boot and persistence reload PASS; one Alarm and a two-activity Schedule survived reboot; the Alarm subsequently fired successfully; Carousel/GIF staging, persistent source cache, one-item prefetch and cache invalidation remained healthy with zero staging fallback and zero prefetch failure; Matrix Auto Rotation, AudioReactive and the external Buzzer Usermod remained operational under combined load.
 
-The physical runtime evidence is already closed before rc.1; a final hardware smoke may be used as a confidence check but is not a new feature gate.
+MatrixPortal media qualification remains the dev.14-dev.16/rc.1 hardware-qualified baseline because rc.2 changed only target-independent Automation persistence/commit logic and documentation/package QA; its PSRAM/media policy and playback code were not changed.
+
+The package host tests and targeted ASan/UBSan regression runs pass. A complete upstream WLED/PlatformIO compile matrix is still an external reproducibility check when the corresponding WLED checkout/toolchain is available; it is not a runtime delta between rc.2 and final.
 
 ## 0.9.4-dev.16 - MatrixPortal one-item look-ahead gate — PASS
 
@@ -108,7 +105,7 @@ the qualified real-time service path.
 
 
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.4 / build 0.9.4-rc.1**. Stable 0.9.3 remains the qualified behavioral baseline for this release candidate.
+iDotMatrix WLED Usermod **release 0.9.4 / build 0.9.4**. This is the current stable release; 0.9.3 is the previous qualified behavioral baseline.
 
 ## Automated host regression
 
