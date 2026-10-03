@@ -34,11 +34,15 @@ public:
     ++storedQueueCount;
     return queueStoredOk;
   }
+  void invalidateStoredGifSource(const char*) override { ++sourceInvalidationCount; }
+  void clearStoredGifSourceCache() override { ++sourceCacheClearCount; }
   void stopPlayback() override { ++stopCount; }
   bool cacheMode = false;
   bool queueStoredOk = true;
   uint32_t storedQueueCount = 0;
   uint32_t stopCount = 0;
+  uint32_t sourceInvalidationCount = 0;
+  uint32_t sourceCacheClearCount = 0;
 };
 
 void toggleOnOff() {
@@ -861,16 +865,20 @@ int main() {
   // unrelated live Clock/Text renderer when no GIF owns the media backend.
   clockAdapter.onClock(clockSettings);
   const uint32_t stopBeforeClockMutation = clockMedia.stopCount;
+  const uint32_t clearBeforeClockMutation = clockMedia.sourceCacheClearCount;
   clockAdapter.releaseCarouselMediaForStorageMutation();
   assert(clockMedia.stopCount == stopBeforeClockMutation);
+  assert(clockMedia.sourceCacheClearCount == clearBeforeClockMutation + 1);
   assert(clockAdapter.isClockActive());
   assert(renderer.isVisible());
 
   assert(clockAdapter.playStoredGif("/reset-slot.gif", "/reset-slot.cache"));
   assert(clockAdapter.isGifPending());
   const uint32_t stopBeforeGifMutation = clockMedia.stopCount;
+  const uint32_t clearBeforeGifMutation = clockMedia.sourceCacheClearCount;
   clockAdapter.releaseCarouselMediaForStorageMutation();
   assert(clockMedia.stopCount == stopBeforeGifMutation + 1);
+  assert(clockMedia.sourceCacheClearCount == clearBeforeGifMutation + 1);
   assert(!clockAdapter.isGifPending());
   assert(!clockAdapter.isGifActive());
   assert(!renderer.isVisible());

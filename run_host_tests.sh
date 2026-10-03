@@ -4,14 +4,16 @@ CXX="${CXX:-g++}"
 FLAGS="-std=c++11 -Wall -Wextra -Werror -pedantic"
 TMP="${TMPDIR:-/tmp}"
 
-$CXX $FLAGS -DEXPECTED_SCREEN_MAX_DIM=16 -DEXPECTED_DECODER_MAX_DIM=16 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile16_test"
+$CXX $FLAGS -DEXPECTED_SCREEN_MAX_DIM=16 -DEXPECTED_DECODER_MAX_DIM=16 -DEXPECTED_RESCALE=0 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile16_test"
 "$TMP/idotmatrix_profile16_test"
-$CXX $FLAGS -DIDOT_GIF_MAX_DIM=64 -DIDOT_SCREEN_MAX_DIM=16 -DEXPECTED_SCREEN_MAX_DIM=16 -DEXPECTED_DECODER_MAX_DIM=64 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile16_lzw12_test"
+$CXX $FLAGS -DIDOT_GIF_MAX_DIM=64 -DIDOT_SCREEN_MAX_DIM=16 -DEXPECTED_SCREEN_MAX_DIM=16 -DEXPECTED_DECODER_MAX_DIM=64 -DEXPECTED_RESCALE=0 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile16_lzw12_test"
 "$TMP/idotmatrix_profile16_lzw12_test"
-$CXX $FLAGS -DIDOT_GIF_MAX_DIM=32 -DEXPECTED_SCREEN_MAX_DIM=32 -DEXPECTED_DECODER_MAX_DIM=32 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile32_test"
+$CXX $FLAGS -DIDOT_GIF_MAX_DIM=32 -DEXPECTED_SCREEN_MAX_DIM=32 -DEXPECTED_DECODER_MAX_DIM=32 -DEXPECTED_RESCALE=1 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile32_test"
 "$TMP/idotmatrix_profile32_test"
-$CXX $FLAGS -DIDOT_GIF_MAX_DIM=64 -DEXPECTED_SCREEN_MAX_DIM=64 -DEXPECTED_DECODER_MAX_DIM=64 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile64_test"
+$CXX $FLAGS -DIDOT_GIF_MAX_DIM=64 -DEXPECTED_SCREEN_MAX_DIM=64 -DEXPECTED_DECODER_MAX_DIM=64 -DEXPECTED_RESCALE=1 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile64_test"
 "$TMP/idotmatrix_profile64_test"
+$CXX $FLAGS -DIDOT_GIF_MAX_DIM=64 -DIDOT_SCREEN_MAX_DIM=64 -DIDOT_LOW_MEMORY_RESCALE=0 -DEXPECTED_SCREEN_MAX_DIM=64 -DEXPECTED_DECODER_MAX_DIM=64 -DEXPECTED_RESCALE=0 tests/test_build_profile.cpp -o "$TMP/idotmatrix_profile64_native_test"
+"$TMP/idotmatrix_profile64_native_test"
 
 $CXX $FLAGS IDotMatrixProtocol.cpp tests/test_protocol.cpp -o "$TMP/idotmatrix_protocol_test"
 "$TMP/idotmatrix_protocol_test"
@@ -60,13 +62,16 @@ $CXX $FLAGS -Itests/media_stub -fsyntax-only IDotMatrixPreset.cpp
 $CXX $FLAGS -DIDOT_PRESET_HOST_TEST -Itests/media_stub IDotMatrixProtocol.cpp IDotMatrixPreset.cpp tests/test_preset.cpp -o "$TMP/idotmatrix_preset_test"
 "$TMP/idotmatrix_preset_test"
 
-$CXX $FLAGS -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media_test"
+$CXX $FLAGS -DIDOT_GIF_SOURCE_CACHE_HOST_TEST -DIDOT_GIF_PSRAM_STAGE_MAX=1024 -DIDOT_GIF_PSRAM_SOURCE_CACHE_MAX_BYTES=32 -DIDOT_GIF_PSRAM_SOURCE_CACHE_ENTRY_MAX=32 -DIDOT_GIF_PSRAM_SOURCE_CACHE_MAX_ENTRIES=3 -Itests/media_stub IDotMatrixGifSourceStage.cpp tests/test_gif_source_cache.cpp -o "$TMP/idotmatrix_gif_source_cache_test"
+"$TMP/idotmatrix_gif_source_cache_test"
+
+$CXX $FLAGS -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixGifSourceStage.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media_test"
 "$TMP/idotmatrix_media_test"
 
-$CXX $FLAGS -DIDOT_GIF_BITS=11 -DIDOT_GIF_MAX_DIM=32 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media11_test"
+$CXX $FLAGS -DIDOT_GIF_BITS=11 -DIDOT_GIF_MAX_DIM=32 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixGifSourceStage.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media11_test"
 "$TMP/idotmatrix_media11_test"
 
-$CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media12_test"
+$CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixGifSourceStage.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media12_test"
 "$TMP/idotmatrix_media12_test"
 
 $CXX $FLAGS -I. tests/test_buzzer_bridge_absent.cpp -o "$TMP/idotmatrix_buzzer_bridge_absent_test"

@@ -1,55 +1,56 @@
 # Testing
 
-## 0.9.4-dev.5 — Waveshare ESP32-S3-RGB-Matrix qualification gate
+## 0.9.4-rc.1 - release-candidate regression gate
 
-0.9.4-dev.5 starts from stable 0.9.3 and targets the Waveshare board on WLED 17.0.0-devV5. It also carries a local build-only workaround for the malformed upstream SHTC3_v2 custom-usermod URL discovered during the first compile attempt. The first qualification goal is therefore to prove the existing iDotMatrix behavior on the new controller before introducing any PSRAM tuning or larger physical layouts.
+0.9.4-rc.1 promotes the dev.16 runtime without a new functional change. Before final 0.9.4 promotion:
 
-### Pre-iDotMatrix hardware baseline — PASS
+1. host regression suite and release-package checks must pass;
+2. PlatformIO profile normalization checks must pass for Waveshare, MatrixPortal, ESP32-C3 and classic ESP32 profiles;
+3. current documentation must identify `release=0.9.4`, `build=0.9.4-rc.1`;
+4. no current page may still describe dev.14/dev.15/dev.16 qualification as pending;
+5. native S3 Rescale UI cleanup remains intact;
+6. Waveshare and MatrixPortal PSRAM policies remain unchanged from their hardware-qualified dev.16 state.
 
-The physical board has already passed a WLED-only baseline using the official WLED 16.0.1 `ESP32-S3_Waveshare_HUB75` binary:
+The physical runtime evidence is already closed before rc.1; a final hardware smoke may be used as a confidence check but is not a new feature gate.
 
-```text
-controller  = Waveshare ESP32-S3-RGB-Matrix / ESP32-S3-N32R16
-flash       = 32 MB
-PSRAM       = 16 MB
-panel       = one 64x64 HUB75
-WLED output = HUB75 (Half Scan)
-layout      = 1 x 1
-LED count   = 4096
-```
+## 0.9.4-dev.16 - MatrixPortal one-item look-ahead gate — PASS
 
-The full panel renders correctly. The earlier symptom where only four rows were visible was traced to a WLED 2D Matrix configuration accidentally left at 16x16; it was not a HUB75 pinout, scan-mode or panel-driver fault.
+Dev.15 passed the MatrixPortal persistent-cache gate on physical hardware: seven cold stage/store operations populated all seven GIFs (`249267` bytes total), cache hits then rose to 25 while normal stage attempts stayed at seven, with `fallback=0`, `evict=0` and valid PSRAM invariants. Dev.16 keeps all MatrixPortal memory budgets unchanged and enables only the existing one-item / 250 ms Carousel look-ahead scheduler.
 
-### iDotMatrix dev.5 hardware gate — MOSTLY PASS
+Hardware gate:
 
-Build with:
+1. `/json/info` reports `release=0.9.4` and `build=0.9.4-dev.16`;
+2. `gifStage max:262144 reserve:1048576`;
+3. `gifSourceCache maxBytes:393216 entryMax:262144 maxEntries:8`;
+4. on a cold Carousel, `gifPrefetch attempts` becomes non-zero and `fail` remains zero;
+5. successful look-ahead is reflected by `ok` and/or `cached` counters;
+6. later GIFs can become active from prefetched cache entries without a normal stage attempt for every GIF;
+7. after warm-up, `hits` increase while normal `gifStage attempts/ok` stop for resident GIFs;
+8. `gifStage fallback:0`;
+9. PSRAM invariants remain true: `minFree <= free`, `minLargest <= largest`, `peakUsed = total - minFree`;
+10. Carousel timing, decoder ownership and visible playback remain smooth.
 
-```text
-overrides/waveshare-s3-hub75.ini
-env:waveshare
-```
+For the qualified seven-GIF corpus, `evict:0` is expected because all sources occupy only 249,267 bytes of the 384 KiB cache.
 
-Current hardware evidence:
+Physical result: PASS. The cold Carousel reported `gifStage attempts:1 ok:1 fallback:0`, seven cached sources / 249267 bytes, six successful prefetch copies, and `gifPrefetch fail:0`. A later Carousel/Preset soak reached `hits:69`, `stores:15`, `evict:5`, `invalid:2`, `prefetch attempts:8 ok:8 fail:0`, with valid PSRAM invariants and no fallback.
 
-1. WLED boot and complete 64x64 output — **PASS**;
-2. PSRAM visible in `/json/info` — **PASS**;
-3. iDotMatrix release/build and Waveshare target diagnostics — **PASS**;
-4. BLE advertising, original-app connection and reconnect — **PASS**;
-5. Clock — **PASS**;
-6. TEXT, including 64x64 text paths — **PASS**;
-7. static image — **PASS**;
-8. GIF — **PASS**;
-9. Carousel — **PASS**;
-10. 16x16 -> 64x64 output scaling — **PENDING**;
-11. 32x32 -> 64x64 output scaling — **PENDING**;
-12. native 64x64 — **PASS**;
-13. reboot and persistence — **PASS**;
-14. Alarm / Program and Matrix Auto Rotation coexistence — **PASS**;
-15. onboard-microphone AudioReactive — **PASS** after disabling UDP Sound Sync receive mode.
+## 0.9.4-dev.15 - MatrixPortal persistent source-cache gate
 
-The dev.4 one-shot I2C diagnostic physically confirmed `ES8311 @ 0x18` and `ES7210 @ 0x40` on the shared `SDA 47 / SCL 48` bus. Dev.5 removes that temporary probe now that the audio path is understood.
+Dev.14 passed the MatrixPortal transient staging gate on physical hardware: `gifStage attempts=19 ok=19 fallback=0`, largest active source `173821` bytes, and PSRAM low-water marks recovered without a persistent largest-block loss. Dev.15 keeps the 256 KiB stage limit and 1 MiB reserve, enables a 384 KiB persistent cache with a 256 KiB per-entry limit and 8 metadata entries, and keeps Carousel prefetch disabled.
 
-Before starting cache changes, complete a 30-60 minute GIF/Carousel + AudioReactive soak and capture a final `/json/info` memory snapshot. Larger 128x64/128x128 physical layouts remain deferred until matching panels are available.
+Hardware gate:
+
+1. `/json/info` reports `release=0.9.4` and `build=0.9.4-dev.15`;
+2. `gifStage max:262144 reserve:1048576`;
+3. `gifSourceCache maxBytes:393216 entryMax:262144 maxEntries:8`;
+4. after a cold Carousel pass, `stores` and `entries` become non-zero;
+5. on later loops, `hits` increase while normal `gifStage attempts/ok` grow more slowly or stop for resident GIFs;
+6. `gifPrefetch attempts:0` remains true for this cache-only gate;
+7. `gifStage fallback:0`;
+8. PSRAM invariants remain true: `minFree <= free`, `minLargest <= largest`, `peakUsed = total - minFree`;
+9. current `free` and `largest` recover after evictions/invalidations and no playback regression is visible.
+
+The physical test later showed the complete seven-GIF corpus is 249,267 bytes, so all entries fit and `evict:0` is expected. This gate passed; dev.16 subsequently qualified the separately gated one-item look-ahead scheduler.
 
 ## 0.9.3 final qualification
 
@@ -107,7 +108,7 @@ the qualified real-time service path.
 
 
 This document is the consolidated validation plan and current evidence for
-iDotMatrix WLED Usermod **release 0.9.4 / build 0.9.4-dev.5**. Stable 0.9.3 remains the qualified behavioral baseline for this development build.
+iDotMatrix WLED Usermod **release 0.9.4 / build 0.9.4-rc.1**. Stable 0.9.3 remains the qualified behavioral baseline for this release candidate.
 
 ## Automated host regression
 

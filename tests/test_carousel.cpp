@@ -63,6 +63,7 @@ int main() {
   WLED_FS.clear(); c.begin();
   const uint8_t order[] = {0,1}; c.configure(order,2); assert(c.lastManifestSaveOk());
   assert(uploadGif(c,0,10)); assert(c.storedCount()==1); assert(firstByte("/idot_a0.gif")==10);
+  assert(adapter.invalidateCount == 1);
 
   // Manifest write failure is surfaced and replacement rolls back to old asset.
   const uint8_t data[] = {20,21,22};
@@ -72,9 +73,30 @@ int main() {
   assert(!c.completeAsset(true));
   assert(!c.lastManifestSaveOk());
   assert(firstByte("/idot_a0.gif")==10);
+  assert(adapter.invalidateCount == 1);
 
   // A subsequent successful replacement clears the manifest failure state.
   WLED_FS.resetFailures(); assert(uploadGif(c,0,30)); assert(c.lastManifestSaveOk()); assert(firstByte("/idot_a0.gif")==30);
+  assert(adapter.invalidateCount == 2);
+
+  // Dev.11 warms only the immediately following GIF after the current item is
+  // visible. It must not prefetch during queue/staging or repeat within a dwell.
+  WLED_FS.resetFailures();
+  c.configure(order, 2);
+  assert(uploadGif(c, 0, 40));
+  assert(uploadGif(c, 1, 50));
+  const uint32_t prefetchBefore = adapter.prefetchGifCount;
+  c.enter();
+  c.loop(1000); // queue slot 0
+  assert(adapter.prefetchGifCount == prefetchBefore);
+  c.loop(1001); // GIF becomes active; arm delayed look-ahead
+  assert(adapter.prefetchGifCount == prefetchBefore);
+  c.loop(1250);
+  assert(adapter.prefetchGifCount == prefetchBefore);
+  c.loop(1251);
+  assert(adapter.prefetchGifCount == prefetchBefore + 1);
+  c.loop(3000);
+  assert(adapter.prefetchGifCount == prefetchBefore + 1);
 
   // Configure also reports manifest persistence failure instead of silently ignoring it.
   WLED_FS.failWrite("/idot_car.tmp"); c.configure(order,2); assert(!c.lastManifestSaveOk());

@@ -54,7 +54,7 @@
 #endif
 
 static constexpr const char* IDOTMATRIX_RELEASE = "0.9.4";
-static constexpr const char* IDOTMATRIX_BUILD = "0.9.4-dev.5";
+static constexpr const char* IDOTMATRIX_BUILD = "0.9.4-rc.1";
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MAJOR = 0x00;
 static constexpr uint8_t IDOTMATRIX_APP_RELEASE_MINOR = 0x09;
 
@@ -154,6 +154,8 @@ private:
   CrashSnapshot previousSnapshot_{};
   bool previousSnapshotValid_ = false;
   uint32_t nextSnapshotAt_ = 0;
+  size_t psramMinFree_ = 0;
+  size_t psramMinLargest_ = 0;
 #endif
 
   static uint8_t dimensionForScreenType(uint8_t screenType) {
@@ -466,6 +468,10 @@ public:
     }
     rtcSnapshot = CrashSnapshot{};
     rtcSnapshot.magic = SNAPSHOT_MAGIC;
+    if (psramFound()) {
+      psramMinFree_ = ESP.getFreePsram();
+      psramMinLargest_ = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    }
 #endif
     adapter_.setClockPreferencesCallback(&IDotMatrixUsermod::clockPreferencesThunk, this);
     loadClockPreferences();
@@ -503,7 +509,7 @@ public:
     uint8_t storageWidth = 0;
     uint8_t storageHeight = 0;
 #ifndef WLED_DISABLE_2D
-    if (rescale_ && strip.isMatrix) {
+    if (IDotMatrixBuildProfile::supportsRescale() && rescale_ && strip.isMatrix) {
       const uint8_t logical = dimensionForScreenType(screenType_);
       storageWidth = uint8_t(Segment::maxWidth < logical ? Segment::maxWidth : logical);
       storageHeight = uint8_t(Segment::maxHeight < logical ? Segment::maxHeight : logical);
@@ -652,6 +658,12 @@ public:
       rtcSnapshot.freeHeap = ESP.getFreeHeap();
       rtcSnapshot.minFreeHeap = ESP.getMinFreeHeap();
       rtcSnapshot.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      if (psramFound()) {
+        const size_t freePsram = ESP.getFreePsram();
+        const size_t largestPsram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+        if (psramMinFree_ == 0 || freePsram < psramMinFree_) psramMinFree_ = freePsram;
+        if (psramMinLargest_ == 0 || largestPsram < psramMinLargest_) psramMinLargest_ = largestPsram;
+      }
       rtcSnapshot.uptimeMs = now;
       rtcSnapshot.content = adapter_.isClockActive() ? 1 :
         adapter_.isTextActive() ? 2 : adapter_.isGifActive() ? 3 :
@@ -711,8 +723,26 @@ public:
     info.add(F("nimble=1.x API"));
 #endif
 #if defined(ARDUINO_ARCH_ESP32)
-    info.add(String(F("psram=")) + ESP.getPsramSize() +
-      F(" free=") + ESP.getFreePsram());
+    {
+      const size_t psramTotal = ESP.getPsramSize();
+      const size_t psramFree = ESP.getFreePsram();
+      const size_t psramLargest = psramFound()
+        ? heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) : 0;
+      // Refresh low-water marks with the exact samples being reported.
+      // The periodic sampler runs every 250 ms, so without this update a
+      // /json/info request could observe currentFree below the last sampled
+      // minFree value. Keep the reported snapshot self-consistent.
+      if (psramMinFree_ == 0 || psramFree < psramMinFree_) psramMinFree_ = psramFree;
+      if (psramMinLargest_ == 0 || psramLargest < psramMinLargest_) psramMinLargest_ = psramLargest;
+      const size_t psramPeakUsed = psramTotal > psramMinFree_
+        ? psramTotal - psramMinFree_ : 0;
+      info.add(String(F("psram=total:")) + psramTotal +
+        F(" free:") + psramFree +
+        F(" minFree:") + psramMinFree_ +
+        F(" peakUsed:") + psramPeakUsed +
+        F(" largest:") + psramLargest +
+        F(" minLargest:") + psramMinLargest_);
+    }
 #endif
 #endif
     info.add(String(F("profile=")) + String(renderer_.logicalWidth()) + 'x' + String(renderer_.logicalHeight()));
@@ -774,6 +804,41 @@ public:
       F(" playing:") + (buzzerServicePlaying() ? F("1") : F("0")));
     info.add(String(F("gifDecoder=")) + media_.gifDecoderModeText());
     info.add(String(F("gifDecoderBytes=")) + media_.gifDecoderBytes());
+    info.add(String(F("gifCache=state:")) + media_.gifCacheStateText() +
+      F(" bytes:") + media_.gifCacheBytes() +
+      F(" frameBytes:") + media_.gifCacheFrameBytes() +
+      F(" frames:") + media_.gifCachedFrames() +
+      F(" builds:") + media_.gifCacheBuildCount() +
+      F(" reuse:") + media_.gifCacheReuseCount() +
+      F(" waits:") + media_.gifCacheWaitCount() +
+      F(" lowHeapMin:") + media_.gifCacheLowHeapMin());
+    info.add(String(F("gifStage=state:")) +
+      (media_.gifPsramStageActive() ? F("psram") : F("fs")) +
+      F(" bytes:") + media_.gifPsramStageBytes() +
+      F(" peak:") + media_.gifPsramStagePeakBytes() +
+      F(" attempts:") + media_.gifPsramStageAttempts() +
+      F(" ok:") + media_.gifPsramStageSuccesses() +
+      F(" fallback:") + media_.gifPsramStageFallbacks() +
+      F(" max:") + media_.gifPsramStageMaxBytes() +
+      F(" reserve:") + media_.gifPsramStageReserveBytes());
+    info.add(String(F("gifSourceCache=state:")) +
+      (!media_.gifSourceCacheEnabled() ? F("off") :
+        (media_.gifSourceCacheActive() ? F("active") : F("idle"))) +
+      F(" entries:") + media_.gifSourceCacheEntries() +
+      F(" bytes:") + media_.gifSourceCacheBytes() +
+      F(" hits:") + media_.gifSourceCacheHits() +
+      F(" misses:") + media_.gifSourceCacheMisses() +
+      F(" stores:") + media_.gifSourceCacheStores() +
+      F(" evict:") + media_.gifSourceCacheEvictions() +
+      F(" invalid:") + media_.gifSourceCacheInvalidations() +
+      F(" maxEntries:") + media_.gifSourceCacheMaxEntries() +
+      F(" maxBytes:") + media_.gifSourceCacheMaxBytes() +
+      F(" entryMax:") + media_.gifSourceCacheEntryMaxBytes());
+    info.add(String(F("gifPrefetch=attempts:")) + media_.gifSourcePrefetchAttempts() +
+      F(" ok:") + media_.gifSourcePrefetchSuccesses() +
+      F(" cached:") + media_.gifSourcePrefetchAlreadyCached() +
+      F(" fail:") + media_.gifSourcePrefetchFailures() +
+      F(" bytes:") + media_.gifSourcePrefetchBytes());
     if (media_.gifProbeFree() > 0) {
       info.add(String(F("gifProbe=")) + media_.gifProbeFree() +
         F(" largest=") + media_.gifProbeLargest() +
@@ -948,8 +1013,9 @@ public:
     JsonObject config = root.createNestedObject(FPSTR(USERMOD_NAME));
     config[FPSTR(CFG_ENABLED)] = enabled_;
     config[FPSTR(CFG_SCREEN_TYPE)] = screenType_;
-#if IDOT_SCREEN_MAX_DIM > 16
-    // Keep Rescale directly below Screen Type in the WLED Usermod settings.
+#if IDOT_LOW_MEMORY_RESCALE
+    // Legacy low-memory profiles expose an explicit storage-downscale option.
+    // Native-matrix S3 targets omit it because output scaling is automatic.
     config[FPSTR(CFG_RESCALE)] = rescale_;
 #endif
     // The settings page renders the fixed IDM- prefix outside the input. Store
@@ -975,11 +1041,11 @@ public:
     complete &= getJsonValue(config[FPSTR(CFG_ENABLED)], enabled_, true);
     complete &= getJsonValue(config[FPSTR(CFG_SCREEN_TYPE)], screenType_, uint8_t(IDOT_DEFAULT_SCREEN_TYPE));
     complete &= getJsonValue(config[FPSTR(CFG_DEVICE_NAME)], deviceName_, defaultDeviceName());
-#if IDOT_SCREEN_MAX_DIM > 16
+#if IDOT_LOW_MEMORY_RESCALE
     complete &= getJsonValue(config[FPSTR(CFG_RESCALE)], rescale_, false);
 #else
-    // A 16x16-only build has no alternative logical profile. Ignore and
-    // remove any stale rescale setting inherited from a larger firmware.
+    // Native-matrix targets and 16x16-only builds do not use the historical
+    // low-memory storage mode. Ignore any stale setting from another profile.
     rescale_ = false;
 #endif
     complete &= getJsonValue(config[FPSTR(CFG_BUZZER_ENABLED)], buzzerEnabled_, true);
@@ -1023,14 +1089,16 @@ public:
     // internal JSON/config keys never leak into the visible settings UI.
     oappend(F("rl=(n,t)=>{let a=d.getElementsByName(n),e=a[0];if(!e)return;let x=e.previousSibling;if(x&&x.nodeType==3)x.nodeValue=' '+t+' '};"));
     oappend(F("rl('iDotMatrix:enabled','Enabled:');rl('iDotMatrix:screenType','Screen Type:');rl('iDotMatrix:deviceName','Device Name: IDM-');"));
-#if IDOT_SCREEN_MAX_DIM > 16
-    oappend(F("rl('iDotMatrix:rescale','Scale the logical profile to the selected WLED 2D segment:');"));
+#if IDOT_LOW_MEMORY_RESCALE
+    oappend(F("rl('iDotMatrix:rescale','Low-memory canvas downscale:');"));
 #endif
     oappend(F("rl('iDotMatrix:audioSource','Audio Source:');rl('iDotMatrix:buzzerEnabled','Enable');"));
     oappend(F("addInfo('iDotMatrix:enabled',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Changing Enabled requires reboot.</div>');"));
-#if IDOT_SCREEN_MAX_DIM > 16
+#if IDOT_LOW_MEMORY_RESCALE
     oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
-    oappend(F("addInfo('iDotMatrix:rescale',1,'<div style=\"height:12px\"></div>');"));
+    oappend(F("addInfo('iDotMatrix:rescale',1,'<div style=\"color:#fa0;font-style:italic;margin-top:4px\">Stores a larger logical profile at the physical matrix size to reduce RAM. Output scaling itself is automatic.</div><div style=\"height:12px\"></div>');"));
+#else
+    oappend(F("addInfo('iDotMatrix:screenType',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div><div style=\"height:12px\"></div>');"));
 #endif
     oappend(F("addInfo('iDotMatrix:deviceName',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">Change requires reboot and app reconnection.</div>');"));
     oappend(F("addInfo('iDotMatrix:audioSource',1,'<div style=\"color:#fa0;font-style:italic;margin-top:8px\">AudioReactive uses WLED Usermod data when available. Auto falls back to Phone / BLE.</div><style>.sec:has(#ib)>hr,#ib+br{display:none}</style><div id=\"ib\" style=\"margin-top:20px;font-size:1.15em;font-weight:bold\">Buzzer</div>');"));

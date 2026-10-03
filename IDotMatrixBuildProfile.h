@@ -6,12 +6,21 @@
 #define IDOT_GIF_MAX_DIM 16
 #endif
 
-// The decoder workspace and the screen choices exposed by the WLED settings
-// page are intentionally independent.  A 16x16 hardware/profile build can
-// therefore use the stable LZW12 decoder while still exposing only 16x16 and
-// hiding Rescale.
+// The decoder workspace, screen choices and legacy low-memory storage mode are
+// intentionally independent. A modern native-matrix target can expose 64x64
+// logical profiles while hiding the historical Rescale control, whereas classic
+// low-memory profiles may keep it available for direct logical-to-physical
+// storage reduction.
 #ifndef IDOT_SCREEN_MAX_DIM
 #define IDOT_SCREEN_MAX_DIM IDOT_GIF_MAX_DIM
+#endif
+
+#ifndef IDOT_LOW_MEMORY_RESCALE
+#if IDOT_SCREEN_MAX_DIM > 16
+#define IDOT_LOW_MEMORY_RESCALE 1
+#else
+#define IDOT_LOW_MEMORY_RESCALE 0
+#endif
 #endif
 
 static_assert(
@@ -26,12 +35,16 @@ static_assert(
   IDOT_SCREEN_MAX_DIM <= IDOT_GIF_MAX_DIM,
   "IDOT_SCREEN_MAX_DIM cannot exceed the compiled GIF decoder dimension"
 );
+static_assert(
+  IDOT_LOW_MEMORY_RESCALE == 0 || IDOT_LOW_MEMORY_RESCALE == 1,
+  "IDOT_LOW_MEMORY_RESCALE must be 0 or 1"
+);
 
 namespace IDotMatrixBuildProfile {
 
 constexpr uint8_t maxDimension() { return IDOT_SCREEN_MAX_DIM; }
 constexpr uint8_t decoderMaxDimension() { return IDOT_GIF_MAX_DIM; }
-constexpr bool supportsRescale() { return IDOT_SCREEN_MAX_DIM > 16; }
+constexpr bool supportsRescale() { return IDOT_LOW_MEMORY_RESCALE != 0; }
 
 constexpr bool supportsScreenType(uint8_t screenType) {
   return screenType == 0x01 ||

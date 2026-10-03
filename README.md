@@ -1,12 +1,12 @@
-# WLED iDotMatrix Usermod — 0.9.4 development
+# WLED iDotMatrix Usermod — 0.9.4 release candidate
 
-**Release: 0.9.4 / build: 0.9.4-dev.5.**  
-**Current development build: 0.9.4-dev.5.**  
+**Release: 0.9.4 / build: 0.9.4-rc.1.**  
+**Current release candidate: 0.9.4-rc.1.**  
 **Current stable release: 0.9.3.**
 
-0.9.4-dev.5 is the cleanup build after the successful Waveshare ESP32-S3-RGB-Matrix bring-up. Stable 0.9.3 remains the behavioral baseline; the WLED target is **17.0.0-devV5**. The board uses an ESP32-S3-N32R16 with **32 MB flash / 16 MB PSRAM** and WLED's native HUB75 backend. Dev.5 removes the temporary audio-diagnostic probe used in dev.4 and introduces no intentional protocol, rendering, media, automation, settings or buzzer behavior change.
+0.9.4-rc.1 is the first release candidate for the 0.9.4 line. It promotes the hardware-qualified dev.16 runtime without a new functional change, freezes the Waveshare and MatrixPortal PSRAM/media policies, and consolidates the final documentation/qualification evidence. Stable 0.9.3 remains the behavioral baseline and the WLED target remains **17.0.0-devV5**. MatrixPortal dev.16 completed the one-item / 250 ms look-ahead gate and a mixed Carousel/Preset soak with zero GIF fallback, zero prefetch failure, active cache invalidation/eviction, and valid PSRAM invariants.
 
-Before adding iDotMatrix, the physical Waveshare board was verified with the official **WLED 16.0.1** `ESP32-S3_Waveshare_HUB75` binary and one 64x64 HUB75 panel configured as **HUB75 (Half Scan), 64x64, one panel, 1x1**. The complete panel renders correctly; `/json/info` reports 4096 LEDs, 32 MB flash, 16 MB PSRAM and AudioReactive. The iDotMatrix development build has now also been exercised on real hardware: native 64x64 output, TEXT, static image, GIF, Carousel, BLE reconnect, reboot/persistence, Alarm/Program and Matrix Auto Rotation all passed. Local AudioReactive input also works after disabling UDP Sound Sync receive mode. The remaining qualification work is a sustained soak plus the 16x16/32x32 logical-to-64x64 scaling checks.
+Before adding iDotMatrix, the physical Waveshare board was verified with the official **WLED 16.0.1** `ESP32-S3_Waveshare_HUB75` binary and one 64x64 HUB75 panel configured as **HUB75 (Half Scan), 64x64, one panel, 1x1**. The complete panel renders correctly; `/json/info` reports 4096 LEDs, 32 MB flash, 16 MB PSRAM and AudioReactive. The 0.9.4 development line is also qualified on real hardware through dev.8: native 64x64 output, TEXT, static image, GIF, Carousel, BLE reconnect, reboot/persistence, Alarm/Program and Matrix Auto Rotation all passed. Local AudioReactive input works after disabling UDP Sound Sync receive mode. The dev.8 PSRAM/telemetry soak completed at about 22 minutes of continuous Carousel/GIF activity with **266/266 successful PSRAM stagings, zero fallback**, all telemetry invariants valid, and the current largest PSRAM block recovering to 14,942,208 bytes after a temporary 256 KiB low-water excursion. 16x16 -> 64x64 and 32x32 -> 64x64 logical scaling have now both been hardware-validated on the Waveshare panel with the legacy Rescale option disabled.
 
 For the Waveshare build use:
 
@@ -17,9 +17,9 @@ env:waveshare
 
 The short `waveshare` name is intentional so this section can be merged into the same global `platformio_override.ini` used for the other local board aliases. It extends WLED 17.0.0-devV5's upstream `env:waveshare_esp32s3_32MB_hub75` hardware environment. Board definition, HUB75 pinout/backend, PSRAM configuration, 32 MB partition/OTA policy, ES8311 pins and SD flags remain inherited from WLED.
 
-The upstream devV5 environment currently lists `SHTC3_v2` with a GitHub `/commit/` page URL. PlatformIO tries to clone that page as a repository and fails before compilation. Dev.3 therefore repeats the Waveshare `custom_usermods` list and changes only that entry to the cloneable pinned Git form `git+https://github.com/lost-hope/SHTC3_v2.git#1f6e3fc...`, while retaining `Internal_Temperature`, the pinned Waveshare AudioReactive Usermod, and iDotMatrix.
+The upstream devV5 environment currently lists `SHTC3_v2` with a GitHub `/commit/` page URL. PlatformIO tries to clone that page as a repository and fails before compilation. Dev.2 therefore repeats the Waveshare `custom_usermods` list and changes only that entry to the cloneable pinned Git form `git+https://github.com/lost-hope/SHTC3_v2.git#1f6e3fc...`, while retaining `Internal_Temperature`, the pinned Waveshare AudioReactive Usermod, and iDotMatrix.
 
-No protocol, media-semantic, rendering, automation or external-buzzer change is intentionally introduced in dev.5. Larger physical layouts remain deferred until hardware is available. After the 64x64 soak completes, the next development step is PSRAM/cache instrumentation and optimization on the qualified 64x64 platform.
+No protocol, rendering, automation or external-buzzer behavior changes in dev.16. Dev.7 added the Waveshare-only PSRAM staging path; dev.8 corrected the PSRAM snapshot semantics; dev.9 isolated source-stage ownership; dev.10 added bounded persistent reuse for durable Carousel GIF sources; dev.11 added one-item look-ahead and passed its hardware gate without visible delay. Dev.12 changed only `gifStage peak` accounting when a persistent/prefetched source becomes active and passed its hardware smoke. Dev.13 changed only the legacy low-memory Rescale capability/UI policy on native S3 HUB75 profiles. Dev.14 enabled MatrixPortal transient staging after real-device memory measurement; dev.15 qualified MatrixPortal persistent source reuse; dev.16 qualified the existing one-item / 250 ms MatrixPortal look-ahead with all stage/cache limits unchanged. The Waveshare 2 MiB per-GIF stage limit, 4 MiB pre-allocation reserve, 1 MiB persistent cache budget, 512 KiB per-entry limit, 12 metadata entries and LRU policy remain unchanged. Any staging/prefetch failure leaves the normal playback fallback path intact. Larger physical layouts remain deferred until hardware is available.
 
 WLED remains the owner of LED output, effects, 2D mapping, presets, playlists, brightness, HTTP/JSON APIs, Home Assistant and network realtime protocols. The Usermod adds the iDotMatrix-compatible BLE peripheral and renders app content through the `iDotMatrix` WLED effect.
 
@@ -31,11 +31,26 @@ WLED remains the owner of LED output, effects, 2D mapping, presets, playlists, b
 
 ## Development status
 
-`0.9.4-dev.5` is a **qualification build**, not a stable release. Stable `0.9.3` remains the reference for protocol and feature behavior.
+`0.9.4-rc.1` is the **first release candidate** for 0.9.4. Stable `0.9.3` remains the reference for protocol and feature behavior until 0.9.4 is promoted to final.
 
-The 0.9.3 line removed the internal buzzer backend and delegated sound to the optional standalone **WLED Buzzer Usermod** through the weak-link service bridge. That architecture is unchanged in 0.9.4-dev.5. The settings page also preserves the final 0.9.3 presentation: `Screen Type:`, Rescale grouped directly below it, `Device Name: IDM-`, `Audio Source:` and the optional Buzzer `Enable` control.
+The 0.9.3 line removed the internal buzzer backend and delegated sound to the optional standalone **WLED Buzzer Usermod** through the weak-link service bridge. That architecture is unchanged in 0.9.4-rc.1. On native S3 HUB75 profiles the settings page now omits the obsolete Rescale control entirely because 0.9 output scaling is automatic; classic low-memory profiles that still expose the storage optimization label it explicitly as `Low-memory canvas downscale:`.
 
-The remaining Waveshare qualification gate is intentionally conservative: complete the 16x16/32x32 logical-to-64x64 scaling checks and a sustained 30-60 minute media/audio soak. Native 64x64, BLE, TEXT, static image, GIF, Carousel, reboot/persistence, Alarm/Program, auto-rotation and local AudioReactive input are already hardware-verified.
+The dev.8 PSRAM telemetry/staging gate, dev.9 source-stage refactor smoke, dev.10 persistent source-reuse gate and dev.11 one-item look-ahead gate are complete. Dev.11 cold-cache testing showed one normal stage plus successful speculative prefetches with no visible delay; later mixed Carousel/Preset activity reached `gifStage attempts=9 ok=9 fallback=0`, `gifPrefetch attempts=12 ok=12 cached=19 fail=0`, and a full source-cache lifecycle of `stores=21 invalid=21 entries=0 bytes=0`. After invalidation, the current largest PSRAM block recovered to **14155776 bytes**, matching the pre-cache baseline and showing no persistent fragmentation in the reported run. Dev.12 fixed the `gifStage peak` diagnostic semantics exposed by cached playback and passed its real-device smoke (`bytes=49799 peak=49799`, no staging/prefetch failure). The independent 16x16 -> 64x64 and 32x32 -> 64x64 Waveshare scaling gates also passed with Rescale disabled. Native 64x64, BLE, TEXT, static image, GIF, Carousel, reboot/persistence, Alarm/Program and auto-rotation remain the qualified baseline. AudioReactive qualification is independent of the external Buzzer Usermod and must be evaluated with a non-conflicting audio backend.
+
+
+### PSRAM telemetry, GIF staging, source reuse and look-ahead
+
+Build 0.9.4-rc.1 retains the dev.6 `/json/info` PSRAM/GIF frame-cache telemetry, the `gifStage=...` telemetry introduced in dev.7, the dev.8 self-consistent PSRAM snapshots, the dev.9 isolated `IDotMatrixGifSourceStage` ownership and the dev.10 persistent source cache. On the Waveshare target, direct AnimatedGIF playback still stages eligible GIF source files up to 2 MiB in PSRAM. The guard requires enough free PSRAM for the source plus a 4 MiB reserve before allocation; subsequent decoder allocation may consume a small additional amount. Any size, reserve, allocation or copy failure still falls back automatically to the pre-dev.7 filesystem path.
+
+On MatrixPortal S3, dev.14 qualified the same transient source-stage implementation with target-specific limits: **256 KiB maximum** and **1 MiB reserve**. Dev.15 qualified a **384 KiB persistent source cache** for durable Carousel GIFs, with a **256 KiB per-entry limit** and up to **8 metadata entries**; the complete seven-GIF test set occupies 249267 bytes and remains resident. Dev.16 qualified the existing one-item / 250 ms Carousel look-ahead, so `gifPrefetch attempts` should become non-zero during a cold Carousel while `fail` remains zero. App-upload/transient GIFs remain one-play only, and any source that is too large or cannot satisfy the reserve guard continues through the original LittleFS callbacks.
+
+Dev.10 adds bounded persistent reuse for **durable Carousel GIF sources only**. The first play of an eligible stored GIF follows the existing stage path, then transfers ownership of that allocation into a source cache without a second copy. Later plays of the unchanged stored path reuse the same PSRAM image. App-upload/transient `/idot_play.gif` content remains one-play staging and is never admitted to the persistent cache. The default Waveshare cache policy is 1 MiB total, 512 KiB maximum per admitted source, up to 12 metadata entries, and least-recently-used eviction. Resident entries are expendable under PSRAM pressure and are retired before the normal one-play stage path is allowed to fail its reserve/allocation guard. A larger GIF may still use the normal 2 MiB transient stage even when it is not eligible for persistent admission.
+
+Carousel storage remains authoritative. Bank reset/reconfiguration clears resident source copies, and a committed slot replacement invalidates that slot explicitly, including same-size replacements. An entry invalidated while AnimatedGIF is still using it is retired only after the decoder closes, preserving callback lifetime safety.
+
+The existing `gifStage=...` counters make reuse measurable: cache hits do not increment `attempts` or `ok` because no filesystem source copy occurs. Dev.10 added `gifSourceCache=state:<off|idle|active> entries:<n> bytes:<n> hits:<n> misses:<n> stores:<n> evict:<n> invalid:<n> maxEntries:<n> maxBytes:<bytes> entryMax:<bytes>`. Dev.11 added `gifPrefetch=attempts:<n> ok:<n> cached:<n> fail:<n> bytes:<n>`. A prefetch request is issued only after the current item is visible and only for the immediately following playable GIF; a 250 ms delay keeps that copy away from the transition itself. Prefetch never changes the active AnimatedGIF source pointer, and failure is advisory only: normal dev.10 playback staging/reuse remains authoritative. Dev.12 also makes `gifStage peak` track the largest source image that has actually become active for AnimatedGIF, including cache/prefetch hits; therefore every emitted media snapshot again satisfies the intuitive relationship `gifStage peak >= gifStage bytes`. Cache hits still do not increment normal `gifStage attempts/ok`.
+
+`psram=total` is a property of the complete linked WLED firmware image, not only the physical PSRAM chip. When comparing optimization builds, use the same WLED/Usermod composition and focus on free/low-water/largest-block behavior in addition to the absolute total.
 
 ## Preset / Default
 
@@ -79,11 +94,7 @@ the WLED boot effect and a valid stored Carousel exists, that Carousel becomes
 the startup content. Selecting a native WLED effect suspends Carousel playback
 without deleting the bank; selecting `iDotMatrix` again resumes it.
 
-Carousel GIF playback lets an unchanged stored slot reuse its
-per-slot frame cache instead of copying the GIF and rebuilding `/idot_cache.bin`
-on every visit. Invalid slots are quarantined for the current bank generation
-and later valid slots continue to play. Feature-owned temp/backup files are
-reconciled at boot.
+Carousel GIF reuse is backend-specific. On no-PSRAM 12-bit profiles, an unchanged stored slot can reuse its per-slot filesystem frame cache instead of rebuilding `/idot_cache.bin`. On the Waveshare direct-decoder profile, dev.10 retains the compressed whole-file source in the bounded PSRAM source cache and dev.11 can warm the immediately following GIF before its transition. Invalid slots are quarantined for the current bank generation and later valid slots continue to play. Feature-owned temp/backup files are reconciled at boot, and Carousel storage mutations invalidate any resident PSRAM source generation.
 
 ### Historical qualified hardware baseline
 
@@ -105,7 +116,7 @@ That 0.8.2 C3 qualification covered persistent mixed Carousel playback and boot 
 | 32x32 logical -> 16x16 physical, `rescale=true`, classic ESP32 | `animatedgif11` | hardware-validated |
 | 64x64 logical -> 16x16 physical, `rescale=true`, classic ESP32 without PSRAM, `64x64-lite` | `compact12/cache` | hardware-validated |
 | 64x64 logical / 64x64 physical, MatrixPortal ESP32-S3 + PSRAM | `animatedgif12/psram` | **hardware-validated on WLED 17.0.0-devV5 / `06ae26db67107cb3f6a3d107a92340035991a063` / native HUB75** |
-| 64x64 logical / 64x64 physical, Waveshare ESP32-S3-RGB-Matrix + 16 MB PSRAM | `animatedgif12/psram` | **0.9.4-dev.5 hardware bring-up PASS for native 64x64 and core runtime; scaling + soak still pending on WLED 17.0.0-devV5** |
+| 64x64 logical / 64x64 physical, Waveshare ESP32-S3-RGB-Matrix + 16 MB PSRAM | `animatedgif12/psram` | **0.9.4 functional/media path through dev.12 hardware-qualified; 16x16/32x32 -> 64x64 automatic scaling PASS on WLED 17.0.0-devV5** |
 | 32x32 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 2x nearest-neighbour upscale** |
 | 16x16 logical -> 64x64 physical, MatrixPortal ESP32-S3 | `animatedgif12/psram` | **hardware-validated; automatic 4x nearest-neighbour upscale** |
 
@@ -120,11 +131,12 @@ firmware. The settings page never offers a profile larger than that capacity:
 | `overrides/esp32c3-16x16.ini` / LZW12 + `IDOT_SCREEN_MAX_DIM=16` | 16x16 | hidden and forced off |
 | `overrides/esp32c3-16x16-audio.ini` / same media profile + AudioReactive | 16x16 | hidden and forced off |
 | `overrides/esp32c3-16x16-audio-ota.ini` / AudioReactive + dual-slot OTA | 16x16 | hidden and forced off |
-| `overrides/32x32.ini` / LZW11 | 16x16, 32x32 | available for tests |
-| `.64x64` or `.64x64-lite` / LZW12 | 16x16, 32x32, 64x64 | available for tests |
-| `overrides/matrixportal-s3-hub75.ini` / LZW12 + PSRAM | 16x16, 32x32, 64x64 | automatic physical-output scaling; primary 0.9 target |
+| `overrides/32x32.ini` / LZW11 | 16x16, 32x32 | low-memory canvas downscale available |
+| `.64x64` or `.64x64-lite` / LZW12 | 16x16, 32x32, 64x64 | low-memory canvas downscale available |
+| `overrides/matrixportal-s3-hub75.ini` / LZW12 + PSRAM | 16x16, 32x32, 64x64 | legacy Rescale hidden/forced off; automatic physical-output scaling |
+| `overrides/waveshare-s3-hub75.ini` / LZW12 + PSRAM | 16x16, 32x32, 64x64 | legacy Rescale hidden/forced off; automatic physical-output scaling |
 
-On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile and may differ from the physical WLED matrix. Output scaling is automatic in both directions for 16x16, 32x32 and 64x64 logical/physical combinations. `Rescale` is retained for backward compatibility with the older low-memory 0.8.x storage path, not as a requirement for 0.9 output scaling.
+On the 0.9 native-matrix path, `ScreenType` is the logical iDotMatrix profile and may differ from the physical WLED matrix. Output scaling is automatic in both directions for 16x16, 32x32 and 64x64 logical/physical combinations. `Rescale` is retained only on profiles that intentionally support the older low-memory 0.8.x storage path. It is hidden and forced off on the native Waveshare and MatrixPortal S3 HUB75 profiles because it is not required for 0.9 output scaling.
 
 ## Supported functionality
 
@@ -263,6 +275,8 @@ Commit   : 06ae26db67107cb3f6a3d107a92340035991a063
 Profile  : adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
 
+**MatrixPortal PSRAM optimization policy:** dev.14 qualified transient staging and dev.15 qualified persistent source reuse on the 2 MiB MatrixPortal target. The seven-GIF hardware corpus occupies **249267 bytes** and reached `hits:25` with only seven normal cold stages, `fallback:0` and `evict:0`. Dev.16 retains the **256 KiB per-GIF stage maximum**, **1 MiB reserve**, **384 KiB persistent source-cache budget**, **256 KiB per entry**, and **8 metadata entries**, and enables the same one-item / 250 ms Carousel look-ahead already qualified on Waveshare. Waveshare keeps its separate 2 MiB / 4 MiB / 1 MiB policy unchanged.
+
 Keep the repositories beside one another because the supplied override uses a relative symlink:
 
 ```text
@@ -297,7 +311,7 @@ The MatrixPortal profile intentionally inherits the upstream WLED partition and 
 
 For first boot, configure the physical WLED matrix as 64x64 with the MatrixPortal/native HUB75 setup, configure Wi-Fi/timezone/NTP as desired, then leave the iDotMatrix logical profile at 64x64 for native operation. Logical 16x16 and 32x32 profiles are automatically upscaled to the physical 64x64 panel.
 
-Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.1`, `build=0.9.1`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
+Open the official iDotMatrix app and scan for the configured `IDM-...` peripheral. `/json/info` should report `release=0.9.4`, `build=0.9.4-rc.1`, `target=MatrixPortal-S3` and `wledBase=06ae26d`.
 
 ### Legacy qualified profiles
 
@@ -333,7 +347,7 @@ with Carousel, Preset and Schedule content already populated.
 - `deviceName`: editable BLE-name suffix shown after the fixed `IDM-` prefix;
   when no name is saved, a stable six-digit default (`IDM-xxxxxx`) is derived
   from the ESP32 eFuse MAC;
-- `rescale`: test-only nearest-neighbour mapping from a deliberately mismatched logical profile to the selected WLED 2D segment/storage canvas; hidden and forced off in the standard 16x16 build;
+- `rescale`: legacy low-memory canvas downscale for selected classic profiles; hidden and forced off on 16x16-only builds and on the native Waveshare/MatrixPortal S3 HUB75 profiles. It is not required for normal 0.9 output scaling;
 - `audioSource`: `Phone / BLE` (default), `WLED AudioReactive`, or `Auto`. The
   AudioReactive choices consume WLED's existing processed audio data when the
   AudioReactive Usermod is compiled and enabled.
@@ -348,8 +362,8 @@ BLE connected
 profile=64x64
 canvas=16x16
 name=IDM-123456
-release=0.9.1
-build=0.9.1
+release=0.9.4
+build=0.9.4-rc.1
 audioSource=phone active=phone
 audioReactive=absent
 gifDecoder=compact12/cache
@@ -372,8 +386,8 @@ RMT+BLE=ESP32-C3 shared-RMT
 framework=WLED IDF5/shared-RMT
 wledBase=d55037f
 nimble=2.x API
-release=0.9.1
-build=0.9.1
+release=0.9.4
+build=0.9.4-rc.1
 audioSource=phone active=phone
 audioReactive=absent
 ```
@@ -482,8 +496,19 @@ Further documentation:
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — component boundaries, current memory model, and RAM-engineering history;
 - [`TESTING.md`](TESTING.md) — host/build/hardware regression procedure;
 - [`HISTORY.md`](HISTORY.md) — release/development history;
-- [`TODO.md`](TODO.md) — deferred/post-0.9.1 work;
-- [`RELEASE_NOTES_0.9.4-dev.5.md`](RELEASE_NOTES_0.9.4-dev.5.md) — current WLED 17 / Waveshare qualification-build notes;
+- [`TODO.md`](TODO.md) — current 0.9.4 qualification/optimization plan plus deferred work;
+- [`RELEASE_NOTES_0.9.4-rc.1.md`](RELEASE_NOTES_0.9.4-rc.1.md) — current 0.9.4 release-candidate notes;
+- [`PRE_RELEASE_AUDIT_0.9.4-rc.1.md`](PRE_RELEASE_AUDIT_0.9.4-rc.1.md) — pre-release audit, qualification consolidation and validation limitations;
+- [`RELEASE_NOTES_0.9.4-dev.16.md`](RELEASE_NOTES_0.9.4-dev.16.md) — MatrixPortal one-item look-ahead qualification notes;
+- [`RELEASE_NOTES_0.9.4-dev.15.md`](RELEASE_NOTES_0.9.4-dev.15.md) — MatrixPortal persistent-cache qualification notes;
+- [`RELEASE_NOTES_0.9.4-dev.13.md`](RELEASE_NOTES_0.9.4-dev.13.md) — native-S3 Rescale cleanup notes;
+- [`RELEASE_NOTES_0.9.4-dev.12.md`](RELEASE_NOTES_0.9.4-dev.12.md) — telemetry-consolidation build notes;
+- [`RELEASE_NOTES_0.9.4-dev.11.md`](RELEASE_NOTES_0.9.4-dev.11.md) — qualified one-item Carousel GIF look-ahead build notes;
+- [`RELEASE_NOTES_0.9.4-dev.10.md`](RELEASE_NOTES_0.9.4-dev.10.md) — persistent GIF source-reuse build notes and qualified baseline;
+- [`RELEASE_NOTES_0.9.4-dev.9.md`](RELEASE_NOTES_0.9.4-dev.9.md) — qualified GIF source-stage refactor notes;
+- [`RELEASE_NOTES_0.9.4-dev.8.md`](RELEASE_NOTES_0.9.4-dev.8.md) — qualified PSRAM telemetry-correction build notes;
+- [`RELEASE_NOTES_0.9.4-dev.7.md`](RELEASE_NOTES_0.9.4-dev.7.md) — first Waveshare whole-file GIF PSRAM staging build;
+- [`RELEASE_NOTES_0.9.4-dev.6.md`](RELEASE_NOTES_0.9.4-dev.6.md) — measurement-only PSRAM/cache baseline;
 - [`RELEASE_NOTES_0.9.3.md`](RELEASE_NOTES_0.9.3.md) — current stable-release notes;
 - [`RELEASE_NOTES_0.9.2.md`](RELEASE_NOTES_0.9.2.md) — previous stable 0.9.2 release notes;
 - [`RELEASE_NOTES_0.9.0.md`](RELEASE_NOTES_0.9.0.md) — previous stable 0.9.0 release notes;

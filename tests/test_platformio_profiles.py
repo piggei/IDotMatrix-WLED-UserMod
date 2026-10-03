@@ -228,13 +228,13 @@ def check_nimble_api_bridge() -> None:
     assert "ESP32-C3 requires NimBLE-Arduino 2.x" in usermod
     assert "ESP32-C3 requires a WLED IDF5 build with WLED_USE_SHARED_RMT" in usermod
     assert 'IDOTMATRIX_RELEASE = "0.9.4"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.4-dev.5"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.4-rc.1"' in usermod
     assert "IDOTMATRIX_APP_RELEASE_MINOR = 0x09" in usermod
     assert "RMT+BLE=ESP32-C3 shared-RMT" in usermod
     assert "UsermodManager::getUMData(&data, USERMOD_ID_AUDIOREACTIVE)" in usermod
 
     library = (ROOT / "library.json").read_text(encoding="utf-8")
-    assert '"version": "0.9.4-dev.5"' in library
+    assert '"version": "0.9.4-rc.1"' in library
     assert '"h2zero/NimBLE-Arduino"' not in library
     # NimBLE is target-dependent and pinned by each official PlatformIO profile.
 
@@ -317,6 +317,13 @@ def check_matrixportal_s3_hub75_profile() -> None:
     assert "-D IDOT_SCREEN_MAX_DIM=64" in flags
     assert "-D IDOT_DEFAULT_SCREEN_TYPE=0x04" in flags
     assert "-D IDOT_S3_HUB75_WLED_IDF5" in flags
+    assert "-D IDOT_LOW_MEMORY_RESCALE=0" in flags
+    assert "-D IDOT_GIF_PSRAM_STAGE_MAX=262144" in flags
+    assert "-D IDOT_GIF_PSRAM_STAGE_RESERVE=1048576" in flags
+    assert "-D IDOT_GIF_PSRAM_SOURCE_CACHE_MAX_BYTES=393216" in flags
+    assert "-D IDOT_GIF_PSRAM_SOURCE_CACHE_ENTRY_MAX=262144" in flags
+    assert "-D IDOT_GIF_PSRAM_SOURCE_CACHE_MAX_ENTRIES=8" in flags
+    assert "-D IDOT_GIF_CAROUSEL_PREFETCH_ENABLED=1" in flags
     deps = value(parser, section, "lib_deps")
     assert "${env:adafruit_matrixportal_esp32s3.lib_deps}" in deps
     assert NIMBLE_V2 in deps
@@ -344,6 +351,7 @@ def check_waveshare_s3_hub75_profile() -> None:
     assert "-D IDOT_SCREEN_MAX_DIM=64" in flags
     assert "-D IDOT_DEFAULT_SCREEN_TYPE=0x04" in flags
     assert "-D IDOT_S3_HUB75_WLED_IDF5" in flags
+    assert "-D IDOT_LOW_MEMORY_RESCALE=0" in flags
     assert "-D IDOT_WAVESHARE_S3_RGB_MATRIX" in flags
     assert "WLED_DISABLE_OTA" not in flags
 

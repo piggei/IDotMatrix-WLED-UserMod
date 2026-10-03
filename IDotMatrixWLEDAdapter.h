@@ -132,6 +132,12 @@ public:
   // affects GIF ownership only, so configuring Carousel while Clock/Text is
   // displayed does not clear unrelated live content.
   void releaseCarouselMediaForStorageMutation();
+  void invalidateStoredGifSource(const char* path) {
+    if (media_ != nullptr) media_->invalidateStoredGifSource(path);
+  }
+  bool prefetchStoredGifSource(const char* path, size_t expectedBytes = 0) {
+    return media_ != nullptr && media_->prefetchStoredGifSource(path, expectedBytes);
+  }
   void restoreClockFallback();
   using ClockPreferencesCallback = void (*)(void* context, const IDotMatrixClockSettings& settings);
   void setClockPreferences(const IDotMatrixClockSettings& settings);

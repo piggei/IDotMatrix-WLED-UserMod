@@ -445,21 +445,25 @@ void IDotMatrixWLEDAdapter::renderTransferIndicator(uint32_t now) {
 
 void IDotMatrixWLEDAdapter::releaseCarouselMediaForStorageMutation() {
   const bool gifOwnedDisplay = gifActive_ || gifPending_ || gifStaging_ || gifPrecache_;
-  if (!gifOwnedDisplay) return;
+  if (gifOwnedDisplay) {
+    // The frame-cache backend keeps the currently playing cache file open.
+    // Deleting Carousel files before closing that handle made protocol Reset
+    // report a partial failure on hardware and left cache/source files behind.
+    // Release the media first, then retire only GIF-specific adapter state.
+    stopMediaPlayback();
+    gifActive_ = false;
+    gifPending_ = false;
+    gifStaging_ = false;
+    gifPrecache_ = false;
+    gifReplacingActiveGif_ = false;
+    gifPreviousRendererVisible_ = false;
+    clearGifContentSnapshot();
+  }
 
-  // The frame-cache backend keeps the currently playing cache file open.
-  // Deleting Carousel files before closing that handle made protocol Reset
-  // report a partial failure on hardware and left cache/source files behind.
-  // Release the media first, then retire only GIF-specific adapter state.
-  stopMediaPlayback();
-  gifActive_ = false;
-  gifPending_ = false;
-  gifStaging_ = false;
-  gifPrecache_ = false;
-  gifReplacingActiveGif_ = false;
-  gifPreviousRendererVisible_ = false;
-  clearGifContentSnapshot();
-  if (gifOwnedDisplay) renderer_.setVisible(false);
+  // Dev.10 keeps durable Carousel source images in PSRAM across plays. Any
+  // operation that is about to erase/reconfigure the Carousel bank must retire
+  // those copies even when no GIF currently owns the display.
+  if (media_ != nullptr) media_->clearStoredGifSourceCache();
 }
 
 namespace {

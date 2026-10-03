@@ -27,10 +27,13 @@ $CXX $FLAGS tests/test_ble_framing.cpp -o "$TMP/idotmatrix_ble_framing_san"
 $CXX $FLAGS -DIDOT_AUTOMATION_HOST_TEST -Itests/automation_stub IDotMatrixProtocol.cpp IDotMatrixAutomation.cpp tests/test_automation.cpp -o "$TMP/idotmatrix_automation_san"
 "$TMP/idotmatrix_automation_san"
 
-$CXX $FLAGS -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media_san"
+$CXX $FLAGS -DIDOT_GIF_SOURCE_CACHE_HOST_TEST -DIDOT_GIF_PSRAM_STAGE_MAX=1024 -DIDOT_GIF_PSRAM_SOURCE_CACHE_MAX_BYTES=32 -DIDOT_GIF_PSRAM_SOURCE_CACHE_ENTRY_MAX=32 -DIDOT_GIF_PSRAM_SOURCE_CACHE_MAX_ENTRIES=3 -Itests/media_stub IDotMatrixGifSourceStage.cpp tests/test_gif_source_cache.cpp -o "$TMP/idotmatrix_gif_source_cache_san"
+"$TMP/idotmatrix_gif_source_cache_san"
+
+$CXX $FLAGS -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixGifSourceStage.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media_san"
 "$TMP/idotmatrix_media_san"
 
-$CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media12_san"
+$CXX $FLAGS -DIDOT_GIF_BITS=12 -DIDOT_GIF_MAX_DIM=64 -Itests/media_stub IDotMatrixRenderer.cpp IDotMatrixCompactGif.cpp IDotMatrixGifSourceStage.cpp IDotMatrixMedia.cpp tests/test_media.cpp -lz -o "$TMP/idotmatrix_media12_san"
 "$TMP/idotmatrix_media12_san"
 
 $CXX $FLAGS -DIDOT_PRESET_HOST_TEST -Itests/media_stub IDotMatrixProtocol.cpp IDotMatrixPreset.cpp tests/test_preset.cpp -o "$TMP/idotmatrix_preset_san"

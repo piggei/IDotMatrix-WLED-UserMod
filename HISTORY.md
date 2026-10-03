@@ -1,3 +1,111 @@
+## 0.9.4-rc.1 - 2026-10-03
+
+- Promotes the hardware-qualified dev.16 runtime to the first 0.9.4 release candidate with no intentional runtime feature change.
+- Consolidates Waveshare and MatrixPortal PSRAM/media qualification evidence, including MatrixPortal prefetch and mixed Carousel/Preset lifecycle soak.
+- Corrects stale current-version examples and old pending qualification text in source documentation and Wiki.
+- Freezes 0.9.4 functionality; future progressive Carousel/Preset item pipelining is moved to TODO.
+
+## 0.9.4-dev.16
+
+- Hardware evidence promoted MatrixPortal dev.15 persistent source caching to PASS: seven GIFs / 249,267 bytes resident, 25 cache hits, only seven normal stage attempts, zero fallback and zero eviction.
+- Enables the existing one-item / 250 ms Carousel GIF look-ahead on MatrixPortal via `IDOT_GIF_CAROUSEL_PREFETCH_ENABLED=1`.
+- Keeps MatrixPortal stage/cache policy unchanged: 256 KiB stage max, 1 MiB reserve, 384 KiB total persistent cache, 256 KiB per entry and 8 metadata entries.
+- Keeps Waveshare media policy and all BLE/Carousel protocol semantics unchanged.
+- Corrects the earlier planning assumption that the seven-GIF MatrixPortal test corpus exceeded the 384 KiB cache: hardware measured only 249,267 bytes total.
+
+## 0.9.4-dev.15
+
+- Keeps the MatrixPortal dev.14 transient source-stage policy unchanged at 256 KiB maximum with a 1 MiB pre-allocation PSRAM reserve.
+- Enables persistent PSRAM reuse for durable MatrixPortal Carousel GIF sources with a 384 KiB total budget, 256 KiB per-entry limit and up to 8 metadata entries.
+- Adds an explicit compile-time Carousel look-ahead switch. Waveshare retains its qualified one-item prefetch; MatrixPortal dev.15 keeps prefetch off so the cache can be qualified independently.
+- Records the MatrixPortal dev.14 hardware pass: 19/19 staging successes, zero fallback, 173,821-byte maximum active source and no persistent largest-block loss in the reported run.
+- No protocol, BLE, rendering, automation, Waveshare media-policy or external-buzzer behavior changes.
+
+## 0.9.4-dev.14
+
+- Adds the first MatrixPortal-specific PSRAM optimization after a real-device 2 MiB baseline was collected under 64x64 Carousel/GIF load.
+- `overrides/matrixportal-s3-hub75.ini` now enables transient whole-file GIF source staging up to 256 KiB while preserving a 1 MiB free-PSRAM reserve before allocation.
+- Keeps MatrixPortal persistent source cache and Carousel look-ahead disabled; this build intentionally qualifies staging alone before spending resident PSRAM.
+- Reuses the already-qualified `IDotMatrixGifSourceStage` implementation and unchanged LittleFS fallback semantics.
+- Keeps the Waveshare 2 MiB stage / 4 MiB reserve / 1 MiB persistent cache / 512 KiB entry / 12-entry LRU / look-ahead policy unchanged.
+- Records the MatrixPortal dev.13 baseline: 2,097,152 total PSRAM, 1,940,364 free, 1,933,312 current largest block and 1,900,544 minimum largest block after a Carousel pass.
+- No BLE protocol, renderer, Carousel order/dwell, automation, low-memory Rescale, external-buzzer or Waveshare runtime behavior change.
+
+## 0.9.4-dev.13
+
+- Pre-release cleanup only; no protocol, BLE, renderer, GIF cache/prefetch or automation behavior changes.
+- Added the compile-time `IDOT_LOW_MEMORY_RESCALE` capability switch. Dedicated Waveshare and MatrixPortal S3 HUB75 profiles set it to `0`, omit the historical `rescale` configuration/UI control and force any stale stored value off.
+- Renamed the control on classic profiles that still expose it to `Low-memory canvas downscale:` and documented that final WLED 2D output scaling is automatic.
+- Recorded real-hardware PASS for dev.12 telemetry and for Waveshare 16x16 -> 64x64 plus 32x32 -> 64x64 automatic scaling with Rescale disabled.
+
+## 0.9.4-dev.12
+
+- Consolidates the real-device-qualified dev.11 one-item Carousel GIF look-ahead path without changing its cache, prefetch or playback behavior.
+- Dev.11 hardware evidence: cold cache reached one normal stage plus successful speculative prefetch; later mixed Carousel/Preset activity reached 12/12 prefetch copies, 19 already-cached look-aheads, 9/9 normal stages, zero fallback/fail, and a full 21-store/21-invalidation cache lifecycle with the current largest PSRAM block recovering to 14,155,776 bytes.
+- Fixes `gifStage peak` semantics when an active AnimatedGIF source comes from persistent/prefetched PSRAM cache: cache-hit activation now updates the active-source high-water mark.
+- Restores the diagnostic invariant `gifStage peak >= gifStage bytes` while leaving normal-stage `attempts/ok`, cache and prefetch counters unchanged.
+- Keeps Waveshare limits unchanged: 2 MiB stage maximum, 4 MiB reserve, 1 MiB persistent cache, 512 KiB per admitted source, 12 metadata entries and LRU.
+- Keeps all dev.7-dev.12 source-stage/cache/prefetch defaults disabled on non-Waveshare targets; MatrixPortal S3 remains a separate future measurement-driven candidate because its PSRAM budget is only 2 MiB.
+- No BLE protocol, AnimatedGIF callback/frame timing, Carousel order/dwell, renderer/scaling, automation or external-buzzer behavior change.
+
+## 0.9.4-dev.11
+
+- Starts from the real-device-qualified dev.10 persistent source-reuse baseline: seven resident GIF sources / 249267 bytes, 119 hits, 7 compulsory misses/stores, only 7 playback stages, zero fallback/eviction, and no PSRAM/largest-block drift across the final 593-second observation window.
+- Adds conservative one-item Carousel GIF look-ahead on the Waveshare direct-AnimatedGIF path.
+- Arms look-ahead only after the current item is visible, waits 250 ms, and considers only the immediately following playable Carousel slot.
+- Adds `IDotMatrixGifSourceStage::prefetch()` so a future durable source can be copied into the existing PSRAM cache without releasing or replacing the active AnimatedGIF source image.
+- Keeps the dev.10 cache policy unchanged: 1 MiB total, 512 KiB per admitted source, 12 metadata entries, LRU replacement, 4 MiB pre-allocation reserve and 2 MiB normal playback-stage maximum.
+- Adds `gifPrefetch=attempts:<n> ok:<n> cached:<n> fail:<n> bytes:<n>` telemetry; prefetch work does not inflate playback `gifStage attempts/ok`.
+- Prefetch failure is advisory only; the qualified dev.10 source-cache/stage/filesystem fallback path remains authoritative when the next item is actually played.
+- No BLE protocol, Carousel order/dwell, AnimatedGIF callback/frame timing, renderer/scaling, automation or external-buzzer semantics change.
+
+## 0.9.4-dev.10
+
+- Real-device source-reuse gate PASS: seven-GIF Carousel stabilized at 7 resident sources / 249267 bytes, `gifStage attempts=7`, `gifSourceCache hits=119`, `misses=7`, `stores=7`, `evict=0`, `fallback=0`; the final 593-second window added 117 hits with no PSRAM/largest-block drift.
+- Starts from the real-device-qualified dev.9 source-stage refactor (22/22 successful stages, zero fallback in the reported smoke).
+- Adds Waveshare-only persistent PSRAM reuse for durable Carousel GIF sources below the unchanged AnimatedGIF callback interface.
+- Uses a conservative 1 MiB resident-byte budget, 512 KiB per-entry admission ceiling, 12-entry metadata capacity and LRU eviction.
+- Preserves the dev.7 2 MiB transient stage maximum and 4 MiB pre-allocation reserve; GIFs too large for persistent admission can still use one-play staging.
+- Keeps app-upload/transient `/idot_play.gif` outside the persistent cache.
+- Invalidates resident sources on Carousel bank reset/reconfiguration and on committed slot replacement, with deferred retirement if the old entry is still active.
+- Treats resident cache state as expendable under PSRAM pressure: LRU entries are retired before the normal one-play stage path is allowed to fail its reserve/allocation guard.
+- Adds `gifSourceCache=...` hit/miss/store/eviction/invalidation telemetry; cache hits deliberately do not increment `gifStage attempts/ok`.
+- Does not change BLE protocol, decoder/frame timing, Carousel order/dwell semantics, renderer/scaling, automation, frame-cache backend or external-buzzer behavior.
+
+## 0.9.4-dev.9
+
+- Starts from the hardware-qualified dev.8 Waveshare PSRAM staging/telemetry baseline: reported ~22 minute Carousel/GIF soak, 266/266 successful PSRAM stages, zero fallback, telemetry invariants PASS and no persistent largest-block loss observed.
+- Refactors the existing whole-file GIF PSRAM staging implementation into `IDotMatrixGifSourceStage.h/.cpp`.
+- Keeps the dev.7 staging policy unchanged: 2 MiB maximum, 4 MiB pre-allocation reserve, 4096-byte copy chunks with `yield()`, and automatic LittleFS fallback.
+- Keeps the dev.8 `gifStage=...` and PSRAM telemetry contract unchanged.
+- Preserves the source lifetime contract: AnimatedGIF closes before the staged source is released.
+- Adds no persistent source reuse, prefetch, decoded-frame caching, protocol change or Carousel behavior change.
+- Requires a short Waveshare real-hardware Carousel/GIF regression smoke before the next persistent-cache experiment.
+
+## 0.9.4-dev.8
+
+- Fixes PSRAM low-water telemetry consistency in `/json/info`.
+- The exact `free` and `largest` samples emitted in the JSON snapshot are now folded into `minFree` and `minLargest` before `peakUsed` is derived.
+- This removes the short sampling-window anomaly where `free` could briefly be lower than `minFree` between the 250 ms runtime samples.
+- No GIF staging, decoder, protocol, BLE, renderer, Carousel, automation, settings or buzzer behavior changed from dev.7.
+
+## 0.9.4-dev.7
+
+- Adds Waveshare-only whole-file GIF source staging in PSRAM for direct AnimatedGIF playback.
+- Uses a conservative 2 MiB per-GIF staging limit and preserves a 4 MiB free-PSRAM reserve before allocation.
+- Copies the source in 4096-byte chunks with yields, then serves AnimatedGIF read/seek callbacks from PSRAM for the decoder lifetime.
+- Falls back automatically to the unchanged LittleFS callback path when any staging guard, allocation or copy step fails.
+- Adds `gifStage=...` telemetry for active/peak bytes and attempt/success/fallback counters while retaining the dev.6 PSRAM/cache baseline counters.
+- Does not add decoded-frame caching, Carousel preloading, protocol changes, renderer changes, BLE changes or new behavior on non-Waveshare profiles.
+
+## 0.9.4-dev.6
+
+- Adds measurement-only PSRAM telemetry to `/json/info`: total, current free, minimum free, peak used, current largest free block and minimum observed largest block since boot.
+- Adds GIF-cache telemetry: backend state, cache bytes, frame bytes, cached-frame count, build/reuse counters, low-heap wait count and minimum heap seen by the low-RAM cache guard.
+- Does not change allocator selection, GIF decode policy, cache policy, Carousel behavior, protocol, BLE framing, rendering, settings or external-buzzer semantics.
+- Keeps 64x64 as the only active Waveshare physical qualification target; larger layouts remain deferred until hardware is available.
+- Uses the telemetry during the remaining media/audio soak to establish a baseline before PSRAM staging, prefetch or Carousel preloading is introduced.
+
 ## 0.9.4-dev.5
 
 - Removes the temporary Waveshare I2C audio diagnostic and its `IDOT_WAVESHARE_AUDIO_DIAG` build flag after hardware diagnosis completed.

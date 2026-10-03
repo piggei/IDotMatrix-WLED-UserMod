@@ -6,10 +6,12 @@
 #include "IDotMatrixMediaSink.h"
 #include "IDotMatrixCompactGif.h"
 #include "IDotMatrixBuildProfile.h"
+#include "IDotMatrixGifSourceStage.h"
 
 #ifndef IDOT_GIF_BITS
 #define IDOT_GIF_BITS 10
 #endif
+
 class IDotMatrixRenderer;
 
 class IDotMatrixMedia final : public IDotMatrixMediaSink {
@@ -26,6 +28,11 @@ public:
   bool writeGif(size_t offset, const uint8_t* data, size_t length) override;
   bool completeGif(bool crcValid) override;
   bool queueStoredGif(const char* path, const char* cachePath = nullptr) override;
+  bool prefetchStoredGifSource(const char* path, size_t expectedBytes = 0) override {
+    return gifSourceStage_.prefetch(path, expectedBytes);
+  }
+  void invalidateStoredGifSource(const char* path) override { gifSourceStage_.invalidate(path); }
+  void clearStoredGifSourceCache() override { gifSourceStage_.clearCache(); }
   void cancelGifReceive();
   bool gifUsesFrameCache() const override { return useFrameCache(); }
   void stopPlayback() override;
@@ -41,11 +48,41 @@ public:
   static constexpr size_t gifCacheRuntimeReserve() { return 9216u; }
   static constexpr uint32_t gifCacheLowHeapTimeoutMs() { return 2000u; }
   bool gifCaching() const { return cacheBuilding_; }
+  const char* gifCacheStateText() const {
+    return cacheBuilding_ ? "building" : cachePlayback_ ? "playback" : useFrameCache() ? "idle" : "direct";
+  }
+  size_t gifCacheBytes() const { return cacheBytes_; }
+  size_t gifCacheFrameBytes() const { return cacheFrameBytes_; }
   uint32_t gifCachedFrames() const { return cachedFrames_; }
   uint32_t gifCacheBuildCount() const { return cacheBuildCount_; }
   uint32_t gifCacheReuseCount() const { return cacheReuseCount_; }
   uint32_t gifCacheWaitCount() const { return cacheLowHeapWaitCount_; }
   size_t gifCacheLowHeapMin() const { return cacheLowHeapMin_; }
+  bool gifPsramStageActive() const { return gifSourceStage_.active(); }
+  size_t gifPsramStageBytes() const { return gifSourceStage_.bytes(); }
+  size_t gifPsramStagePeakBytes() const { return gifSourceStage_.peakBytes(); }
+  uint32_t gifPsramStageAttempts() const { return gifSourceStage_.attempts(); }
+  uint32_t gifPsramStageSuccesses() const { return gifSourceStage_.successes(); }
+  uint32_t gifPsramStageFallbacks() const { return gifSourceStage_.fallbacks(); }
+  static constexpr size_t gifPsramStageMaxBytes() { return IDotMatrixGifSourceStage::maxBytes(); }
+  static constexpr size_t gifPsramStageReserveBytes() { return IDotMatrixGifSourceStage::reserveBytes(); }
+  bool gifSourceCacheEnabled() const { return gifSourceStage_.cacheEnabled(); }
+  bool gifSourceCacheActive() const { return gifSourceStage_.activeFromCache(); }
+  uint8_t gifSourceCacheEntries() const { return gifSourceStage_.cacheEntries(); }
+  size_t gifSourceCacheBytes() const { return gifSourceStage_.cacheBytes(); }
+  uint32_t gifSourceCacheHits() const { return gifSourceStage_.cacheHits(); }
+  uint32_t gifSourceCacheMisses() const { return gifSourceStage_.cacheMisses(); }
+  uint32_t gifSourceCacheStores() const { return gifSourceStage_.cacheStores(); }
+  uint32_t gifSourceCacheEvictions() const { return gifSourceStage_.cacheEvictions(); }
+  uint32_t gifSourceCacheInvalidations() const { return gifSourceStage_.cacheInvalidations(); }
+  uint32_t gifSourcePrefetchAttempts() const { return gifSourceStage_.prefetchAttempts(); }
+  uint32_t gifSourcePrefetchSuccesses() const { return gifSourceStage_.prefetchSuccesses(); }
+  uint32_t gifSourcePrefetchAlreadyCached() const { return gifSourceStage_.prefetchAlreadyCached(); }
+  uint32_t gifSourcePrefetchFailures() const { return gifSourceStage_.prefetchFailures(); }
+  size_t gifSourcePrefetchBytes() const { return gifSourceStage_.prefetchBytes(); }
+  static constexpr size_t gifSourceCacheMaxBytes() { return IDotMatrixGifSourceStage::cacheMaxBytes(); }
+  static constexpr size_t gifSourceCacheEntryMaxBytes() { return IDotMatrixGifSourceStage::cacheEntryMaxBytes(); }
+  static constexpr uint8_t gifSourceCacheMaxEntries() { return IDotMatrixGifSourceStage::cacheMaxEntries(); }
   static constexpr uint8_t gifMaxDimension() { return IDOT_GIF_MAX_DIM; }
 
   enum class Error : uint8_t {
@@ -123,6 +160,8 @@ private:
   bool cachePersistent_ = false;
   uint32_t cacheBuildCount_ = 0;
   uint32_t cacheReuseCount_ = 0;
+  IDotMatrixGifSourceStage gifSourceStage_{};
+  bool gifSourceCacheEligible_ = false;
   bool replacementStaging_ = false;
   bool replacementHadActive_ = false;
   bool previousCachePersistent_ = false;

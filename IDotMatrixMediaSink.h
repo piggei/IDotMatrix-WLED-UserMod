@@ -14,5 +14,10 @@ public:
   virtual bool queueStoredGif(const char* path, const char* cachePath = nullptr) {
     (void)path; (void)cachePath; return false;
   }
+  virtual bool prefetchStoredGifSource(const char* path, size_t expectedBytes = 0) {
+    (void)path; (void)expectedBytes; return false;
+  }
+  virtual void invalidateStoredGifSource(const char* path) { (void)path; }
+  virtual void clearStoredGifSourceCache() {}
   virtual void stopPlayback() = 0;
 };

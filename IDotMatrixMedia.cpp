@@ -262,9 +262,14 @@ bool IDotMatrixMedia::queueStoredGif(const char* path, const char* cachePath) {
   if (cachePath != nullptr && cachePath[0] != '\0') {
     snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", cachePath);
     cachePersistent_ = true;
+    // A caller-provided persistent cache path identifies durable stored media
+    // (currently Carousel slots). Only that class of source is eligible for
+    // dev.10 PSRAM reuse; app-upload /idot_play.gif remains one-play staging.
+    gifSourceCacheEligible_ = true;
   } else {
     snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", GIF_CACHE);
     cachePersistent_ = false;
+    gifSourceCacheEligible_ = false;
   }
   pendingGifBytes_ = 0;
   promotePending_ = false;
@@ -416,6 +421,7 @@ bool IDotMatrixMedia::promoteGif() {
   snprintf(gifPlayPath_, sizeof(gifPlayPath_), "%s", GIF_PLAY);
   snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", GIF_CACHE);
   cachePersistent_ = false;
+  gifSourceCacheEligible_ = false;
   destroyDecoder(false);
   WLED_FS.remove(gifPlayPath_);
   bool promoted = WLED_FS.exists(rx) && WLED_FS.rename(rx, gifPlayPath_);
@@ -922,11 +928,17 @@ void IDotMatrixMedia::resetGifCache(bool removeFile) {
   if (removeFile) WLED_FS.remove(gifCachePath_);
 }
 
+
 bool IDotMatrixMedia::openGif() {
   if (!WLED_FS.exists(gifPlayPath_) || !inspectGifFile(gifPlayPath_)) {
     lastError_ = Error::GifInvalid;
     return false;
   }
+  // Waveshare dev.7 policy, refactored in dev.9 and extended in dev.10:
+  // durable Carousel sources may reuse a bounded PSRAM image across plays.
+  // Transient/app-upload GIFs keep the original one-play stage lifetime. Any
+  // miss, admission failure or staging failure still preserves LittleFS fallback.
+  gifSourceStage_.stage(gifPlayPath_, gifSourceCacheEligible_);
   if (!ensureDecoderStorage()) {
 #if IDOT_GIF_BITS >= 12 && defined(ARDUINO_ARCH_ESP32)
     if (psramFound()) lastError_ = Error::GifDecoderOom;
@@ -934,6 +946,7 @@ bool IDotMatrixMedia::openGif() {
 #else
     lastError_ = Error::GifDecoderOom;
 #endif
+    gifSourceStage_.release();
     return false;
   }
 
@@ -967,6 +980,9 @@ void IDotMatrixMedia::destroyDecoder(bool releaseStorage) {
     decoder_->~AnimatedGIF();
     decoder_ = nullptr;
   }
+  // The staged source must outlive AnimatedGIF::close(), because closeFile()
+  // may still reference it. It can be released safely immediately afterward.
+  gifSourceStage_.release();
   if (releaseStorage && decoderStorage_ != nullptr) {
 #if IDOT_GIF_BITS >= 11
   #if defined(ARDUINO_ARCH_ESP32)
@@ -1008,6 +1024,7 @@ void IDotMatrixMedia::stopPlayback() {
   snprintf(gifPlayPath_, sizeof(gifPlayPath_), "%s", GIF_PLAY);
   snprintf(gifCachePath_, sizeof(gifCachePath_), "%s", GIF_CACHE);
   cachePersistent_ = false;
+  gifSourceCacheEligible_ = false;
 }
 
 
@@ -1027,6 +1044,13 @@ const char* IDotMatrixMedia::lastErrorText() const {
 }
 
 void* IDotMatrixMedia::openFile(const char* name, int32_t* size) {
+  if (size == nullptr) return nullptr;
+  if (activeMedia != nullptr && activeMedia->gifSourceStage_.active() &&
+      name != nullptr && strcmp(name, activeMedia->gifPlayPath_) == 0) {
+    *size = int32_t(activeMedia->gifSourceStage_.bytes());
+    return activeMedia;  // Sentinel: callbacks read from the staged PSRAM image.
+  }
+
   File* file = new (std::nothrow) File(WLED_FS.open(name, "r"));
   if (file == nullptr || !(*file)) {
     delete file;
@@ -1037,6 +1061,8 @@ void* IDotMatrixMedia::openFile(const char* name, int32_t* size) {
 }
 
 void IDotMatrixMedia::closeFile(void* handle) {
+  if (handle == activeMedia && activeMedia != nullptr &&
+      activeMedia->gifSourceStage_.active()) return;
   File* file = static_cast<File*>(handle);
   if (file != nullptr) {
     file->close();
@@ -1045,8 +1071,19 @@ void IDotMatrixMedia::closeFile(void* handle) {
 }
 
 int32_t IDotMatrixMedia::readFile(GIFFILE* file, uint8_t* buffer, int32_t length) {
+  if (file == nullptr || buffer == nullptr || length <= 0) return 0;
+  if (file->fHandle == activeMedia && activeMedia != nullptr &&
+      activeMedia->gifSourceStage_.active()) {
+    int32_t remaining = file->iSize - file->iPos;
+    if (remaining <= 0) return 0;
+    if (length > remaining) length = remaining;
+    memcpy(buffer, activeMedia->gifSourceStage_.data() + file->iPos, size_t(length));
+    file->iPos += length;
+    return length;
+  }
+
   File* source = static_cast<File*>(file->fHandle);
-  if (source == nullptr || !(*source) || length <= 0) return 0;
+  if (source == nullptr || !(*source)) return 0;
   int32_t remaining = file->iSize - file->iPos;
   if (remaining <= 0) return 0;
   if (length > remaining) length = remaining;
@@ -1056,10 +1093,17 @@ int32_t IDotMatrixMedia::readFile(GIFFILE* file, uint8_t* buffer, int32_t length
 }
 
 int32_t IDotMatrixMedia::seekFile(GIFFILE* file, int32_t position) {
-  File* source = static_cast<File*>(file->fHandle);
-  if (source == nullptr || !(*source)) return -1;
+  if (file == nullptr) return -1;
   if (position < 0) position = 0;
   if (position > file->iSize) position = file->iSize;
+  if (file->fHandle == activeMedia && activeMedia != nullptr &&
+      activeMedia->gifSourceStage_.active()) {
+    file->iPos = position;
+    return position;
+  }
+
+  File* source = static_cast<File*>(file->fHandle);
+  if (source == nullptr || !(*source)) return -1;
   if (!source->seek(uint32_t(position), SeekSet)) return -1;
   file->iPos = int32_t(source->position());
   return file->iPos;

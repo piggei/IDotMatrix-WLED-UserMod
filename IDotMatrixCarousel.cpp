@@ -81,6 +81,8 @@ void IDotMatrixCarousel::resetManifest() {
   for (uint8_t i = 0; i < SLOT_COUNT; ++i) manifest_.order[i] = i;
   configuredCount_ = SLOT_COUNT;
   resumeOnBoot_ = false;
+  nextGifPrefetchIssued_ = true;
+  nextGifPrefetchAt_ = 0;
 }
 
 bool IDotMatrixCarousel::loadManifest() {
@@ -250,6 +252,8 @@ void IDotMatrixCarousel::resetPersistent() {
   failedMask_ = 0;
   lastFailedSlot_ = -1;
   uploadCompletedMask_ = 0;
+  nextGifPrefetchIssued_ = true;
+  nextGifPrefetchAt_ = 0;
   // Keep an explicit empty manifest so a later reboot cannot resurrect stale
   // metadata even if the reset was the last command received before power loss.
   lastResetOk_ = saveManifest();
@@ -277,6 +281,8 @@ void IDotMatrixCarousel::configure(const uint8_t* slots, uint8_t count) {
   failedMask_ = 0;
   lastFailedSlot_ = -1;
   uploadCompletedMask_ = 0;
+  nextGifPrefetchIssued_ = true;
+  nextGifPrefetchAt_ = 0;
   clearFiles();
   for (uint8_t i = 0; i < SLOT_COUNT; ++i) manifest_.slots[i] = SlotMeta{};
   configuredCount_ = count > SLOT_COUNT ? SLOT_COUNT : count;
@@ -305,6 +311,8 @@ void IDotMatrixCarousel::enter() {
   currentOrderPos_ = -1;
   currentSlot_ = -1;
   nextSwitchAt_ = 0;
+  nextGifPrefetchIssued_ = true;
+  nextGifPrefetchAt_ = 0;
   lastManifestSaveOk_ = saveManifest();
 }
 
@@ -315,6 +323,8 @@ void IDotMatrixCarousel::suspend() {
   currentOrderPos_ = -1;
   currentSlot_ = -1;
   nextSwitchAt_ = 0;
+  nextGifPrefetchIssued_ = true;
+  nextGifPrefetchAt_ = 0;
 }
 
 void IDotMatrixCarousel::requestAutoStart(uint32_t now, uint32_t delayMs) {
@@ -451,6 +461,15 @@ bool IDotMatrixCarousel::completeAsset(bool crcValid) {
   }
   WLED_FS.remove(backup);
   if (backedUpOther) WLED_FS.remove(oldOtherBackup);
+
+  // A dev.10 PSRAM source-cache entry for this slot may contain the previous
+  // generation even when the replacement has the same byte length. Invalidate
+  // it explicitly after the filesystem/manifest transaction commits. If that
+  // entry is still being decoded, retirement is deferred until playback closes.
+  char gifSourcePath[24];
+  slotPath(rxSlot_, TYPE_GIF, gifSourcePath, sizeof(gifSourcePath));
+  adapter_.invalidateStoredGifSource(gifSourcePath);
+
   char cache[24];
   cachePath(rxSlot_, cache, sizeof(cache));
   WLED_FS.remove(cache);
@@ -522,13 +541,58 @@ bool IDotMatrixCarousel::playSlot(uint8_t slot, uint32_t now) {
   }
   if (shown) {
     currentSlot_ = int8_t(slot);
+    nextGifPrefetchIssued_ = false;
+    nextGifPrefetchAt_ = 0;
     const uint32_t dwell = manifest_.slots[slot].dwellSeconds == 0 ? 5u : manifest_.slots[slot].dwellSeconds;
     // A stored GIF may need an asynchronous cold-cache build on first use.
     // Start its dwell only once playback is actually visible; otherwise cache
     // preparation consumes part (or all) of the configured display time.
     nextSwitchAt_ = manifest_.slots[slot].type == TYPE_GIF ? 0 : now + dwell * 1000u;
+    if (manifest_.slots[slot].type != TYPE_GIF) armNextGifPrefetch(now);
   }
   return shown;
+}
+
+void IDotMatrixCarousel::armNextGifPrefetch(uint32_t now) {
+#if IDOT_GIF_CAROUSEL_PREFETCH_ENABLED
+  if (!playing_ || currentSlot_ < 0 || currentOrderPos_ < 0) return;
+  nextGifPrefetchIssued_ = false;
+  nextGifPrefetchAt_ = now + NEXT_GIF_PREFETCH_DELAY_MS;
+#else
+  (void)now;
+  nextGifPrefetchIssued_ = true;
+  nextGifPrefetchAt_ = 0;
+#endif
+}
+
+void IDotMatrixCarousel::maybePrefetchNextGif(uint32_t now) {
+#if IDOT_GIF_CAROUSEL_PREFETCH_ENABLED
+  if (!playing_ || nextGifPrefetchIssued_ || currentOrderPos_ < 0 ||
+      nextGifPrefetchAt_ == 0 || int32_t(now - nextGifPrefetchAt_) < 0) {
+    return;
+  }
+
+  // One look-ahead only: warm the immediately following playable item if it is
+  // a stored GIF. If the next Carousel item is TEXT, defer warming until that
+  // item is visible so prefetch remains tightly coupled to actual playback
+  // order and never scans the whole bank in the background.
+  nextGifPrefetchIssued_ = true;
+  nextGifPrefetchAt_ = 0;
+  for (uint8_t step = 1; step <= configuredCount_; ++step) {
+    const uint8_t pos = uint8_t((int(currentOrderPos_) + step + configuredCount_) % configuredCount_);
+    const uint8_t slot = manifest_.order[pos];
+    if (slot >= SLOT_COUNT || !manifest_.slots[slot].valid) continue;
+    if ((failedMask_ & (uint16_t(1u) << slot)) != 0) continue;
+    if (manifest_.slots[slot].type != TYPE_GIF) return;
+
+    char path[24];
+    slotPath(slot, TYPE_GIF, path, sizeof(path));
+    adapter_.prefetchStoredGifSource(path, manifest_.slots[slot].bytes);
+    return;
+  }
+#else
+  (void)now;
+#endif
 }
 
 bool IDotMatrixCarousel::playNext(uint32_t now, bool first) {
@@ -578,9 +642,11 @@ void IDotMatrixCarousel::loop(uint32_t now) {
     if (adapter_.isGifActive()) {
       const uint32_t dwell = currentDwellSeconds() == 0 ? 5u : currentDwellSeconds();
       nextSwitchAt_ = now + dwell * 1000u;
+      armNextGifPrefetch(now);
     }
     return;
   }
+  maybePrefetchNextGif(now);
   if (int32_t(now - nextSwitchAt_) >= 0) playNext(now, false);
 }
 

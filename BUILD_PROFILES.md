@@ -1,7 +1,7 @@
 # Build profiles
 
 This document describes the PlatformIO profiles shipped with iDotMatrix WLED
-Usermod **release 0.9.4 / build 0.9.4-dev.5**. Stable 0.9.3 remains the current qualified release.
+Usermod **release 0.9.4 / build 0.9.4-rc.1**. Stable 0.9.3 remains the current qualified release.
 
 PlatformIO override templates are stored under `overrides/`. Custom partition
 tables are stored under `partitions/`. Copy one override to WLED's
@@ -39,7 +39,7 @@ logical max = 64x64
 default     = 64x64
 ```
 
-This is the primary 0.9.4-dev.5 hardware-qualification profile. It **does not** override the upstream PlatformIO platform, board definition, partition table or OTA policy. Those remain owned by WLED's Waveshare environment.
+This is the primary 0.9.4 Waveshare qualification/PSRAM-optimization profile; dev.14 leaves its qualified policy unchanged. It **does not** override the upstream PlatformIO platform, board definition, partition table or OTA policy. Those remain owned by WLED's Waveshare environment. Dev.8 completed the PSRAM telemetry/staging hardware gate with 266/266 successful stages and zero fallback during the reported ~22 minute Carousel/GIF soak. Dev.9 then passed a 22/22 zero-fallback hardware smoke after the source-stage refactor. Dev.10 qualified bounded persistent source reuse on a seven-GIF Carousel, reaching 119 cache hits with only seven playback stages and zero fallback. Dev.11 kept the same board/profile, added one-item look-ahead prefetch into that existing source cache and passed its real-hardware cold-cache/lifecycle gate without visible playback delay. Dev.12 kept the media policy unchanged, corrected `gifStage peak` accounting for cached/prefetched active sources and passed its hardware smoke. Dev.13 hides/forces off the historical low-memory Rescale option on native S3 HUB75 profiles; automatic output scaling remains unchanged.
 
 The local environment is deliberately named `waveshare`, matching the short alias used in the project's global override. WLED 17.0.0-devV5 currently contains a malformed `SHTC3_v2` custom-usermod source (`.../commit/<sha>`), which PlatformIO cannot clone. For that reason the 0.9.4 Waveshare profile does **not** inherit the upstream `custom_usermods` string. It reproduces the same `Internal_Temperature` and pinned AudioReactive entries, rewrites only SHTC3_v2 as `git+https://github.com/lost-hope/SHTC3_v2.git#1f6e3fc...`, then adds iDotMatrix.
 
@@ -51,9 +51,10 @@ The iDotMatrix additions are limited to:
 - the existing ESP32-S3/HUB75/IDF5 compile guard;
 - a Waveshare-specific target guard/diagnostic marker (target identity only; the temporary dev.4 audio probe is removed);
 - NimBLE-Arduino 2.5.1 and AnimatedGIF 1.4.7;
-- the external iDotMatrix Usermod itself.
+- the external iDotMatrix Usermod itself;
+- Waveshare guarded GIF source staging policy (2 MiB maximum, 4 MiB reserve), dev.10 persistent Carousel-source reuse (1 MiB total, 512 KiB per admitted source, 12 metadata entries, LRU), and dev.11 one-item Carousel look-ahead into the same bounded cache, implemented in iDotMatrix code rather than by redefining the upstream board environment. Dev.12 changes only the associated `gifStage peak` diagnostic semantics.
 
-Before iDotMatrix integration, the board was physically verified with the official WLED 16.0.1 binary, one 64x64 HUB75 panel, Half Scan, 1x1. `/json/info` reported 4096 LEDs, 32 MB flash and 16 MB PSRAM. The current iDotMatrix build targets WLED 17.0.0-devV5 and has passed native 64x64 rendering, BLE/app connectivity, TEXT, static image, GIF, Carousel, reboot/persistence, Alarm/Program, Matrix Auto Rotation and onboard-microphone AudioReactive checks. The remaining gate is 16x16/32x32 logical scaling plus a sustained soak.
+Before iDotMatrix integration, the board was physically verified with the official WLED 16.0.1 binary, one 64x64 HUB75 panel, Half Scan, 1x1. `/json/info` reported 4096 LEDs, 32 MB flash and 16 MB PSRAM. The 0.9.4 runtime on WLED 17.0.0-devV5 has passed native 64x64 rendering, BLE/app connectivity, TEXT, static image, GIF, Carousel, reboot/persistence, Alarm/Program, Matrix Auto Rotation and onboard-microphone AudioReactive checks. Dev.8 closed the PSRAM telemetry/staging soak gate; dev.9 closed the source-stage refactor smoke. Dev.10 source-cache reuse and dev.11 one-item look-ahead are hardware-qualified. Waveshare 16x16 -> 64x64 and 32x32 -> 64x64 automatic scaling have also passed on physical hardware with low-memory Rescale disabled. Absolute `psram=total` should only be compared across identical full firmware/Usermod compositions.
 
 The older Waveshare entry has been removed from `overrides/hub75-legacy.ini`; the dedicated profile above is the only supported recipe for this board in the 0.9.4 development line.
 
@@ -75,6 +76,8 @@ geometry configured in WLED.
 The settings UI never advertises a logical profile larger than the compiled
 capacity. On the 0.9 native-matrix path logical and physical resolutions may
 differ; 16x16, 32x32 and 64x64 are scaled by the normal renderer/output path.
+
+`IDOT_LOW_MEMORY_RESCALE` controls only the historical storage-downscale mode. It defaults on for larger classic profiles, but the dedicated Waveshare and MatrixPortal S3 HUB75 overrides set it to `0`, so their settings pages do not expose an obsolete Rescale checkbox and any stale stored value is forced off.
 
 ## Standard hardware targets
 
@@ -174,6 +177,8 @@ env:adafruit_matrixportal_esp32s3_idotmatrix_64x64
 It extends WLED's official `env:adafruit_matrixportal_esp32s3` and therefore
 inherits the MatrixPortal pinout, native HUB75 backend, ESP-IDF 5.x stack, PSRAM
 setup, upstream partition table and OTA policy.
+
+Dev.14 qualified transient whole-file staging on MatrixPortal after a real 64x64 Carousel baseline measured `total=2097152`, `free=1940364`, `largest=1933312`, `minLargest=1900544`; the physical staging gate then reached 19/19 successes with zero fallback and a 173821-byte largest active source. Dev.15 retained `IDOT_GIF_PSRAM_STAGE_MAX=262144` and `IDOT_GIF_PSRAM_STAGE_RESERVE=1048576`, added `IDOT_GIF_PSRAM_SOURCE_CACHE_MAX_BYTES=393216`, `IDOT_GIF_PSRAM_SOURCE_CACHE_ENTRY_MAX=262144`, `IDOT_GIF_PSRAM_SOURCE_CACHE_MAX_ENTRIES=8`, and passed hardware qualification with all seven sources resident (`249267` bytes), 25 hits, seven normal stages, zero fallback and zero eviction. Dev.16 sets `IDOT_GIF_CAROUSEL_PREFETCH_ENABLED=1` and otherwise leaves the MatrixPortal policy unchanged. This remains intentionally separate from the Waveshare 2 MiB stage / 4 MiB reserve / 1 MiB persistent-cache policy.
 
 The exact WLED qualification commit is:
 
@@ -302,11 +307,11 @@ pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64 -t clean
 pio run -e adafruit_matrixportal_esp32s3_idotmatrix_64x64
 ```
 
-Expected `/json/info` markers for the 0.9.1 release include:
+Expected `/json/info` identity markers for the current 0.9.4 release candidate include:
 
 ```text
-release=0.9.1
-build=0.9.1
+release=0.9.4
+build=0.9.4-rc.1
 ```
 
 plus target-specific markers such as `RMT+BLE=ESP32-C3 shared-RMT`,

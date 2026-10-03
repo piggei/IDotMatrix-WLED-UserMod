@@ -4,6 +4,10 @@
 #include <cstdint>
 #include "IDotMatrixProtocol.h"
 
+#ifndef IDOT_GIF_CAROUSEL_PREFETCH_ENABLED
+#define IDOT_GIF_CAROUSEL_PREFETCH_ENABLED 1
+#endif
+
 class IDotMatrixWLEDAdapter;
 
 class IDotMatrixCarousel final : public IDotMatrixCarouselEvents {
@@ -76,6 +80,8 @@ private:
   void clearFiles();
   bool playNext(uint32_t now, bool first);
   bool playSlot(uint8_t slot, uint32_t now);
+  void armNextGifPrefetch(uint32_t now);
+  void maybePrefetchNextGif(uint32_t now);
   void startUpdateHold(uint32_t now);
   void touchUpdateHold(uint32_t now);
   void endUpdateHold();
@@ -96,6 +102,9 @@ private:
   uint32_t nextSwitchAt_ = 0;
   bool autoStartPending_ = false;
   uint32_t autoStartAt_ = 0;
+  bool nextGifPrefetchIssued_ = true;
+  uint32_t nextGifPrefetchAt_ = 0;
+  static constexpr uint32_t NEXT_GIF_PREFETCH_DELAY_MS = 250u;
   bool updateHoldActive_ = false;
   uint32_t updateHoldDeadline_ = 0;
   static constexpr uint32_t UPDATE_HOLD_TIMEOUT_MS = 8000u;

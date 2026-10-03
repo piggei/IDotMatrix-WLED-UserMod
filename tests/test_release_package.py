@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Development-package and critical-section regression checks for 0.9.4-dev.5."""
+"""Release-candidate package and critical-section regression checks for 0.9.4-rc.1."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_versioning() -> None:
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
-    assert library["version"] == "0.9.4-dev.5"
+    assert library["version"] == "0.9.4-rc.1"
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     assert 'IDOTMATRIX_RELEASE = "0.9.4"' in usermod
-    assert 'IDOTMATRIX_BUILD = "0.9.4-dev.5"' in usermod
+    assert 'IDOTMATRIX_BUILD = "0.9.4-rc.1"' in usermod
     assert "IDOTMATRIX_APP_RELEASE_MINOR = 0x09" in usermod
     assert "IDotMatrixAudioSource" in usermod
     adapter = (ROOT / "IDotMatrixWLEDAdapter.cpp").read_text(encoding="utf-8")
@@ -39,7 +39,18 @@ def check_release_surface() -> None:
         "overrides/waveshare-s3-hub75.ini",
         "partitions/WLED_ESP32_4MB_IDOT_NO_OTA.csv",
         "partitions/WLED_ESP32_4MB_IDOT_OTA.csv",
-        "RELEASE_NOTES_0.9.4-dev.5.md",
+        "RELEASE_NOTES_0.9.4-rc.1.md",
+        "RELEASE_NOTES_0.9.4-dev.16.md",
+        "RELEASE_NOTES_0.9.4-dev.15.md",
+        "RELEASE_NOTES_0.9.4-dev.14.md",
+        "RELEASE_NOTES_0.9.4-dev.13.md",
+        "RELEASE_NOTES_0.9.4-dev.12.md",
+        "RELEASE_NOTES_0.9.4-dev.11.md",
+        "RELEASE_NOTES_0.9.4-dev.10.md",
+        "RELEASE_NOTES_0.9.4-dev.9.md",
+        "RELEASE_NOTES_0.9.4-dev.8.md",
+        "RELEASE_NOTES_0.9.4-dev.7.md",
+        "RELEASE_NOTES_0.9.4-dev.6.md",
         "RELEASE_NOTES_0.9.3.md",
         "RELEASE_NOTES_0.9.2.md",
         "RELEASE_NOTES_0.9.1.md",
@@ -47,12 +58,15 @@ def check_release_surface() -> None:
         "RELEASE_NOTES_0.8.2.md",
         "IDotMatrixAudioSource.h",
         "IDotMatrixAudioSource.cpp",
+        "IDotMatrixGifSourceStage.h",
+        "IDotMatrixGifSourceStage.cpp",
         "IDotMatrixCarousel.h",
         "IDotMatrixCarousel.cpp",
         "IDotMatrixPreset.h",
         "IDotMatrixPreset.cpp",
         "tests/test_audio_source.cpp",
         "tests/test_ble_framing.cpp",
+        "tests/test_gif_source_cache.cpp",
         "IDotMatrixBLEFraming.h",
         "run_host_tests.sh",
         "run_host_sanitizers.sh",
@@ -67,7 +81,7 @@ def check_release_surface() -> None:
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.0-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.1-rc.*.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.9.2-dev.*.md"))
-    assert list(ROOT.glob("RELEASE_NOTES_0.9.4-dev.5.md"))
+    assert list(ROOT.glob("RELEASE_NOTES_0.9.4-rc.1.md"))
     assert list(ROOT.glob("RELEASE_NOTES_0.9.3.md"))
     assert not list(ROOT.glob("RELEASE_NOTES_0.10.0-dev.*.md"))
 
@@ -89,7 +103,7 @@ def check_documentation_contract() -> None:
     protocol = (ROOT / "PROTOCOL.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "release-candidate qualification" not in protocol.lower()
-    assert "current release candidate" not in readme.lower()
+    assert "current release candidate: 0.9.4-rc.1" in readme.lower()
     profiles = (ROOT / "BUILD_PROFILES.md").read_text(encoding="utf-8")
     library = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
@@ -121,29 +135,31 @@ def check_documentation_contract() -> None:
     assert "Preset / Default active, pending, cache and backup files" in protocol
     assert "17.0.0-devV5" in readme
     assert "0.17.0-devV5" not in readme
-    assert "0.9.4-dev.5" in testing
+    assert "0.9.4-rc.1" in testing
     assert "30-second `HH:MM` / 5-second `DD/MM` alternation" in protocol
     assert protocol.count("30-second `HH:MM` / 5-second `DD/MM` alternation") == 1
     assert "styles **0** and **3** use the extra" in protocol
     assert "the date day field stays fixed while the `/` separator and both month digits are" in protocol
 
-    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.4 development\n")
-    assert "Release: 0.9.4 / build: 0.9.4-dev.5" in readme
+    assert readme.startswith("# WLED iDotMatrix Usermod — 0.9.4 release candidate\n")
+    assert "Release: 0.9.4 / build: 0.9.4-rc.1" in readme
     assert "current stable release: 0.9.3" in readme.lower()
     assert "Graffiti full-raster multipart" in readme
     assert "overrides/esp32c3-16x16-audio-ota.ini" in readme
     assert "partitions/" in readme
     assert "BLE compatibility/security" in readme
     assert "unauthenticated" in readme
-    assert "per-slot frame cache" in readme
+    assert "per-slot filesystem frame cache" in readme
     assert "`idotmatrix` wled effect" in readme.lower()
     assert "0.9.2-dev.11" not in readme
     assert "promotion to final 0.9.2 remains blocked" not in readme.lower()
 
-    release_notes = (ROOT / "RELEASE_NOTES_0.9.4-dev.5.md").read_text(encoding="utf-8")
-    assert "Waveshare ESP32-S3-RGB-Matrix" in release_notes
-    assert "waveshare-s3-hub75.ini" in release_notes
-    assert "0.9.3" in release_notes and "Stable baseline" in release_notes
+    release_notes = (ROOT / "RELEASE_NOTES_0.9.4-rc.1.md").read_text(encoding="utf-8")
+    assert "MatrixPortal ESP32-S3" in release_notes
+    assert "256 KiB" in release_notes and "1 MiB" in release_notes
+    assert "persistent source cache" in release_notes.lower()
+    assert "gifSourceCache" in release_notes and "gifPrefetch" in release_notes
+    assert "0.9.3" in release_notes and "Stable behavioral baseline" in release_notes
     stable_093_notes = (ROOT / "RELEASE_NOTES_0.9.3.md").read_text(encoding="utf-8")
     assert "WLED Buzzer Usermod" in stable_093_notes
     assert "IDotMatrixBuzzerBridge.h" in stable_093_notes
@@ -159,7 +175,7 @@ def check_documentation_contract() -> None:
     assert "hardware-validated" in testing
     assert "complex photographic images" in testing
     history = (ROOT / "HISTORY.md").read_text(encoding="utf-8")
-    assert history.startswith("## 0.9.4-dev.5\n")
+    assert history.startswith("## 0.9.4-rc.1 - 2026-10-03\n")
     assert "4096-byte RGB chunks" in history
     assert "## 0.9.0\n" in history
     assert "## 0.9.0-rc.5" in history and "live TEXT" in history
@@ -183,7 +199,7 @@ def check_documentation_contract() -> None:
 def check_final_documentation_hygiene() -> None:
     current = [
         "README.md", "PROTOCOL.md", "ARCHITECTURE.md", "BUILD_PROFILES.md",
-        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.4-dev.5.md", "RELEASE_NOTES_0.9.3.md",
+        "TESTING.md", "TODO.md", "RELEASE_NOTES_0.9.4-rc.1.md", "RELEASE_NOTES_0.9.4-dev.16.md", "RELEASE_NOTES_0.9.4-dev.15.md", "RELEASE_NOTES_0.9.4-dev.14.md", "RELEASE_NOTES_0.9.4-dev.13.md", "RELEASE_NOTES_0.9.4-dev.12.md", "RELEASE_NOTES_0.9.4-dev.11.md", "RELEASE_NOTES_0.9.4-dev.10.md", "RELEASE_NOTES_0.9.4-dev.9.md", "RELEASE_NOTES_0.9.4-dev.8.md", "RELEASE_NOTES_0.9.4-dev.7.md", "RELEASE_NOTES_0.9.4-dev.6.md", "RELEASE_NOTES_0.9.4-dev.5.md", "RELEASE_NOTES_0.9.3.md",
         "RELEASE_NOTES_0.9.2.md", "RELEASE_NOTES_0.9.1.md",
     ]
     for name in current:
@@ -197,7 +213,7 @@ def check_final_documentation_hygiene() -> None:
     assert "device-level rotation, energy-saving, and reset commands" not in protocol
 
 
-def check_waveshare_dev5_contract() -> None:
+def check_waveshare_dev7_contract() -> None:
     usermod = (ROOT / "usermod_idotmatrix.cpp").read_text(encoding="utf-8")
     override = (ROOT / "overrides/waveshare-s3-hub75.ini").read_text(encoding="utf-8")
     legacy = (ROOT / "overrides/hub75-legacy.ini").read_text(encoding="utf-8")
@@ -229,6 +245,50 @@ def check_waveshare_dev5_contract() -> None:
     assert "environment = waveshare" in profiles
     assert "WLED 17.0.0-devV5" in readme
     assert "16 MB PSRAM" in readme
+    assert "psram=total:" in usermod
+    assert "minFree:" in usermod and "peakUsed:" in usermod and "minLargest:" in usermod
+    assert "gifCache=state:" in usermod
+    media_h = (ROOT / "IDotMatrixMedia.h").read_text(encoding="utf-8")
+    assert "gifCacheStateText" in media_h
+    assert "gifCacheBytes" in media_h
+    assert "gifCacheFrameBytes" in media_h
+    assert "IDotMatrixGifSourceStage" in media_h
+    assert "gifPsramStageActive" in media_h
+    assert "gifPsramStageAttempts" in media_h
+    media = (ROOT / "IDotMatrixMedia.cpp").read_text(encoding="utf-8")
+    stage_h = (ROOT / "IDotMatrixGifSourceStage.h").read_text(encoding="utf-8")
+    stage_cpp = (ROOT / "IDotMatrixGifSourceStage.cpp").read_text(encoding="utf-8")
+    assert "IDOT_GIF_PSRAM_STAGE_MAX" in stage_h
+    assert "IDOT_GIF_PSRAM_STAGE_RESERVE" in stage_h
+    assert "IDOT_GIF_PSRAM_SOURCE_CACHE_MAX_BYTES" in stage_h
+    assert "IDOT_GIF_PSRAM_SOURCE_CACHE_ENTRY_MAX" in stage_h
+    assert "IDOT_GIF_PSRAM_SOURCE_CACHE_MAX_ENTRIES" in stage_h
+    assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in stage_cpp
+    assert "remaining < 4096u ? remaining : 4096u" in stage_cpp
+    assert "yield();" in stage_cpp
+    assert "findLruEntry" in stage_cpp and "cacheEvictions_" in stage_cpp
+    assert "bool IDotMatrixGifSourceStage::prefetch" in stage_cpp
+    assert "prefetchAttempts_" in stage_h and "prefetchSuccesses_" in stage_h
+    assert "gifSourceStage_.stage(gifPlayPath_, gifSourceCacheEligible_)" in media
+    assert "gifSourceStage_.release();" in media
+    assert "gifSourceStage_.data() + file->iPos" in media
+    assert "invalidateStoredGifSource" in media_h
+    assert "clearStoredGifSourceCache" in media_h
+    assert "stageGifToPsram" not in media
+    assert "gifStageBuffer_" not in media_h
+    assert "gifStage=state:" in usermod
+    assert "gifSourceCache=state:" in usermod
+    assert "gifPrefetch=attempts:" in usermod
+    matrixportal_override = (ROOT / "overrides/matrixportal-s3-hub75.ini").read_text(encoding="utf-8")
+    assert "IDOT_GIF_PSRAM_STAGE_MAX=262144" in matrixportal_override
+    assert "IDOT_GIF_PSRAM_STAGE_RESERVE=1048576" in matrixportal_override
+    assert "IDOT_GIF_PSRAM_SOURCE_CACHE_MAX_BYTES=393216" in matrixportal_override
+    assert "IDOT_GIF_PSRAM_SOURCE_CACHE_ENTRY_MAX=262144" in matrixportal_override
+    assert "IDOT_GIF_PSRAM_SOURCE_CACHE_MAX_ENTRIES=8" in matrixportal_override
+    assert "IDOT_GIF_CAROUSEL_PREFETCH_ENABLED=1" in matrixportal_override
+    carousel = (ROOT / "IDotMatrixCarousel.cpp").read_text(encoding="utf-8")
+    assert "NEXT_GIF_PREFETCH_DELAY_MS = 250u" in (ROOT / "IDotMatrixCarousel.h").read_text(encoding="utf-8")
+    assert "adapter_.prefetchStoredGifSource" in carousel
 
 
 def check_idot_display_fallback() -> None:
@@ -491,9 +551,16 @@ def check_external_buzzer_integration() -> None:
     assert "IDM-DeviceName:" not in usermod
     assert "DeviceName: IDM-" not in usermod
     assert "Device Name: IDM-" in usermod
-    assert "addInfo('iDotMatrix:rescale',1,'<div style=\\\"height:12px\\\"></div>')" in usermod
+    assert "rl('iDotMatrix:rescale','Low-memory canvas downscale:')" in usermod
+    assert "Stores a larger logical profile at the physical matrix size to reduce RAM. Output scaling itself is automatic." in usermod
     assert "rl('iDotMatrix:audioSource','Audio Source:')" in usermod
     assert "rl('iDotMatrix:buzzerEnabled','Enable')" in usermod
+    build_profile = (ROOT / "IDotMatrixBuildProfile.h").read_text(encoding="utf-8")
+    assert "IDOT_LOW_MEMORY_RESCALE" in build_profile
+    assert "supportsRescale() { return IDOT_LOW_MEMORY_RESCALE != 0; }" in build_profile
+    for profile_name in ("waveshare-s3-hub75.ini", "matrixportal-s3-hub75.ini"):
+        profile = (ROOT / "overrides" / profile_name).read_text(encoding="utf-8")
+        assert "-D IDOT_LOW_MEMORY_RESCALE=0" in profile
     assert "idotmatrix-prefix" not in usermod
     assert not re.search(r"addInfo\('iDotMatrix:[^']+',1,'[^']*','[^']+'\)", usermod)
 
@@ -512,7 +579,7 @@ def main() -> None:
     check_release_surface()
     check_markdown_links()
     check_documentation_contract()
-    check_waveshare_dev5_contract()
+    check_waveshare_dev7_contract()
     check_idot_display_fallback()
     check_device_reset_contract()
     check_no_heap_free_inside_queue_spinlock()

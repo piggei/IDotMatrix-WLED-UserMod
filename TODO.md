@@ -1,48 +1,30 @@
 # TODO
 
-## 0.9.4 Waveshare qualification
+## 0.9.4 release-candidate freeze
 
-Stable 0.9.3 is closed and remains the behavioral baseline. Current work is release `0.9.4`, build `0.9.4-dev.5`, on WLED 17.0.0-devV5.
+Release `0.9.4`, build `0.9.4-rc.1`, targets WLED 17.0.0-devV5. Stable 0.9.3 remains the behavioral baseline until final promotion. The rc.1 runtime is promoted from hardware-qualified dev.16 with no new functional feature.
 
-Hardware already verified on the Waveshare ESP32-S3-RGB-Matrix with one 64x64 HUB75 panel:
+Qualification status required for 0.9.4 is closed:
 
-- full native 64x64 output and PSRAM visibility;
-- BLE/original-app connection and reconnect;
-- Clock, TEXT, static image, GIF and Carousel;
-- reboot/persistence;
-- Alarm and Program paths;
-- Matrix Auto Rotation coexistence;
-- onboard microphone through AudioReactive. The working configuration uses the Waveshare I2S pins (`SD 39`, `WS 38`, `SCK 43`, `MCLK 12`) with UDP Sound Sync receive mode disabled.
+- Waveshare ESP32-S3-RGB-Matrix / native 64x64: PASS;
+- Waveshare 16x16 -> 64x64 and 32x32 -> 64x64 automatic output scaling: PASS with legacy Rescale disabled;
+- Waveshare transient staging, persistent source cache, one-item prefetch, invalidation/recovery and dev.12 peak telemetry: PASS;
+- Adafruit MatrixPortal S3 / native 64x64: PASS;
+- MatrixPortal 256 KiB transient staging / 1 MiB reserve: PASS;
+- MatrixPortal 384 KiB persistent cache / 256 KiB entry / 8 metadata entries: PASS;
+- MatrixPortal one-item / 250 ms prefetch: PASS;
+- MatrixPortal mixed Carousel/Preset soak: PASS with `fallback:0`, `gifPrefetch fail:0`, LRU eviction and invalidation exercised, and PSRAM invariants valid;
+- ESP32-C3 and classic ESP32 qualification baselines remain unchanged.
 
-Remaining qualification items:
-
-- verify 16x16 -> 64x64 logical scaling;
-- verify 32x32 -> 64x64 logical scaling;
-- run a 30-60 minute GIF/Carousel + AudioReactive soak and compare heap/PSRAM telemetry before and after.
-
-After the soak passes, keep 64x64 as the physically qualified target and start memory work in this order:
-
-- add PSRAM/cache telemetry without changing behavior;
-- evaluate whole-file media staging in PSRAM;
-- evaluate GIF prefetch/frame-cache improvements;
-- evaluate Carousel preloading;
-- preserve automatic fallback on low-memory targets such as ESP32-C3.
-
-Do not begin 128x64/128x128 physical qualification until matching hardware is available.
-
-Preserve the 0.9.3 external-buzzer boundary: iDotMatrix requests logical sounds while WLED Buzzer Usermod owns GPIO, hardware type, tone generation and timing.
+During the release-candidate cycle, accept only regression fixes, documentation corrections, packaging fixes, or build-profile corrections. Do not add new runtime features or increase PSRAM budgets.
 
 # Deferred / future work
 
-The items below are intentionally deferred to future releases.
+The items below are intentionally deferred to releases after 0.9.4.
 
-- Validate a physical 32x32 panel when hardware is available. The 32x32 logical
-  path is already exercised through the 64x64 scaler.
-- Revisit iOS compatibility only if needed; iOS work remains isolated on its
-  dedicated branch.
-- Consider filesystem-backed streaming for very large Alarm/Program media only
-  if future hardware exposes sustained heap/PSRAM fragmentation under extreme
-  use.
-- Keep future controller-specific sensors, such as MatrixPortal LIS3DH automatic
-  orientation, in separate Usermods rather than coupling them to the iDotMatrix
-  protocol layer.
+- **Progressive Carousel/Preset item pipeline:** allow playback to begin after the first complete and validated item is received while later items continue transferring in the background. Preserve transactional safety with separate incoming and committed state: early display is allowed only for complete items, persistent promotion remains atomic after the full transfer validates, and an interrupted transfer must leave the previous committed content recoverable. Start with Carousel/C3 measurements before generalizing to Preset or other targets.
+- Validate a physical 32x32 panel when hardware is available. The logical 32x32 path is already exercised through the 64x64 scaler.
+- Revisit iOS compatibility only if needed; iOS work remains isolated on its dedicated branch.
+- Consider filesystem-backed streaming for very large Alarm/Program media only if future hardware exposes sustained heap/PSRAM fragmentation under extreme use.
+- Keep future controller-specific sensors in separate Usermods rather than coupling them to the iDotMatrix protocol layer.
+- Do not add further Waveshare or MatrixPortal media optimizations unless new measurements show a real bottleneck.
